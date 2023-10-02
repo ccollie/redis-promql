@@ -1,0 +1,1 @@
+pub type Timestamp = metricsql_engine::prelude::Timestamp;
