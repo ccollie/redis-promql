@@ -32,6 +32,9 @@ pub fn remove_start_end_anchors(expr: &str) -> &str {
 /// It returns [""] for "" regexp.
 /// It returns an empty list if it is impossible to extract "or" values from the regexp.
 pub fn get_or_values(expr: &str) -> Vec<String> {
+    if expr.is_empty() {
+        return vec!["".to_string()]
+    }
     let expr = remove_start_end_anchors(expr);
     let simplified = simplify(expr);
     if simplified.is_err() {
@@ -111,8 +114,7 @@ fn get_or_values_ext(sre: &Hir) -> Option<Vec<String>> {
             if concat.len() == 1 {
                 return Some(prefixes)
             }
-            let mut subs = concat.clone();
-            let _ = subs.remove(0);
+            let subs = Vec::from(&concat[1..]);
             let concat = Hir::concat(subs);
             let suffixes = get_or_values_ext(&concat).unwrap_or_default();
             if suffixes.is_empty() {
@@ -210,32 +212,30 @@ pub fn simplify(expr: &str) -> Result<(String, String), RegexError> {
     }
 
     if is_literal(&sre) {
-        return Ok((sre.to_string(), "".to_string()))
+        return Ok((literal_to_string(&sre), "".to_string()))
     }
 
     let mut prefix: String = "".to_string();
     let mut sre_new: Option<Hir> = None;
 
-    match sre.kind() {
-        HirKind::Concat(ref concat) => {
-            let len = concat.len();
-            if len == 1 {
-                return Ok((concat[0].to_string(), "".to_string()))
-            }
-            let first_literal = is_literal(&concat[0]);
-            if first_literal {
-                let lit = concat[0].to_string();
-                prefix = lit.to_string();
-                if concat.is_empty() {
-                    return Ok((prefix, "".to_string()))
+    if let HirKind::Concat(concat) = sre.kind() {
+        let head = &concat[0];
+        let first_literal = is_literal(head);
+        if first_literal {
+            let lit = literal_to_string(head);
+            prefix = lit.clone();
+            match concat.len() {
+                1 => return Ok((prefix, "".to_string())),
+                2 => sre_new = Some( simplify_regexp(concat[1].clone(), true)? ),
+                _ => {
+                    let sub = Vec::from(&concat[1..]);
+                    let temp = Hir::concat(sub);
+                    sre_new = Some(temp);
                 }
-                let mut temp = Hir::concat(concat.clone());
-                temp = simplify_regexp(temp, true)?;
-                sre_new = Some(temp);
             }
         }
-        _ => {}
     }
+
     if sre_new.is_some() {
         sre = sre_new.unwrap();
     }
@@ -244,7 +244,7 @@ pub fn simplify(expr: &str) -> Result<(String, String), RegexError> {
         return Ok((prefix, "".to_string()))
     }
 
-    let mut s = sre.to_string();
+    let mut s = hir_to_string(&sre);
 
     if let Err(_) = Regex::new(&s) {
         // Cannot compile the regexp. Return it all as prefix.
@@ -264,7 +264,8 @@ fn simplify_regexp(sre: Hir, has_prefix: bool) -> Result<Hir, RegexError> {
     let mut sre = sre;
     let mut s = sre.to_string();
     loop {
-        let hir_new = simplify_regexp_ext(sre.clone(), has_prefix, false);
+        let sub = sre.clone();
+        let hir_new = simplify_regexp_ext(sub, has_prefix, false);
         if hir_new == sre {
             return Ok(hir_new)
         }
@@ -280,10 +281,14 @@ fn simplify_regexp_ext(sre: Hir, has_prefix: bool, has_suffix: bool) -> Hir {
 
     return match sre.kind() {
         Alternation(alternate) => {
+            // avoid clone if its all literal
+            if alternate.iter().all(|hir| is_literal(hir)) {
+                return sre
+            }
             let mut sub = Vec::with_capacity(alternate.len());
             for hir in alternate.iter() {
                 let simple = simplify_regexp_ext(hir.clone(), has_prefix, has_suffix);
-                if is_empty_regexp(&simple) {
+                if !is_empty_regexp(&simple) {
                     sub.push(simple)
                 }
             }
@@ -428,7 +433,7 @@ fn get_optimized_re_match_func_ext(
             if !is_literal(sre) {
                 return None;
             }
-            let s = sre.to_string();
+            let s = literal_to_string(&sre);
             // Literal match
             return Some((StringMatchHandler::literal(s.clone()), s, LITERAL_MATCH_COST));
         }
@@ -437,7 +442,7 @@ fn get_optimized_re_match_func_ext(
                 let first = &subs[0];
                 let second = &subs[1];
                 if is_literal(first) {
-                    let prefix = first.to_string();
+                    let prefix = hir_to_string(first);
                     if is_dot_star(second) {
                         // 'prefix.*'
                         return Some((
@@ -456,7 +461,7 @@ fn get_optimized_re_match_func_ext(
                     }
                 }
                 if is_literal(second) {
-                    let suffix = second.to_string();
+                    let suffix = literal_to_string(second);
                     if is_dot_star(first) {
                         // '.*suffix'
                         return Some((
@@ -478,7 +483,7 @@ fn get_optimized_re_match_func_ext(
             if subs.len() == 3 && is_literal(&subs[1]) {
                 let first = &subs[0];
                 let third = &subs[2];
-                let middle = subs[1].to_string();
+                let middle = hir_to_string(&subs[1]);
                 if is_dot_star(first) {
                     if is_dot_star(third) {
                         // '.*middle.*'
@@ -524,41 +529,85 @@ fn get_optimized_re_match_func_ext(
     None
 }
 
-pub(super) fn get_prefix_matcher(prefix: &str) -> StringMatchHandler {
-    if prefix.is_empty() {
-        return StringMatchHandler::always_true();
+fn hir_to_string(sre: &Hir) -> String {
+    match sre.kind() {
+        HirKind::Literal(lit) => {
+            String::from_utf8(lit.0.to_vec()).unwrap_or_default()
+        }
+        HirKind::Concat(concat) => {
+            let mut s = String::new();
+            for hir in concat.iter() {
+                s.push_str(&hir_to_string(hir));
+            }
+            s
+        }
+        HirKind::Alternation(alternate) => {
+            // avoid extra allocation if its all literal
+            if alternate.iter().all(|hir| is_literal(hir)) {
+                return alternate
+                    .iter()
+                    .map(|hir| hir_to_string(hir))
+                    .collect::<Vec<_>>()
+                    .join("|")
+            }
+            let mut s = Vec::with_capacity(alternate.len());
+            for hir in alternate.iter() {
+                s.push(hir_to_string(hir));
+            }
+            s.join("|")
+        }
+        HirKind::Repetition(repetition) => {
+            if is_dot_star(sre) {
+                return ".*".to_string();
+            } else if is_dot_plus(sre) {
+                return ".+".to_string();
+            }
+            sre.to_string()
+        }
+        _ => {
+            sre.to_string()
+        }
     }
+}
+
+fn literal_to_string(sre: &Hir) -> String {
+    if let HirKind::Literal(lit) = sre.kind() {
+        return String::from_utf8(lit.0.to_vec()).unwrap_or_default();
+    }
+    "".to_string()
+}
+
+pub(super) fn get_prefix_matcher(prefix: &str) -> StringMatchHandler {
     if prefix == ".*" {
         return StringMatchHandler::DotStar;
     }
     if prefix == ".+" {
         return StringMatchHandler::DotPlus;
     }
-    StringMatchHandler::Literal(prefix.to_string())
+    StringMatchHandler::starts_with(prefix.to_string())
 }
 
 pub(super) fn get_suffix_matcher(suffix: &str) -> Result<StringMatchHandler, RegexError> {
-    if suffix.is_empty() {
-        return Ok(StringMatchHandler::always_true());
+    if !suffix.is_empty() {
+        if suffix == ".*" {
+            return Ok(StringMatchHandler::DotStar);
+        }
+        if suffix == ".+" {
+            return Ok(StringMatchHandler::DotPlus);
+        }
+        if escape_regex(suffix) == suffix {
+            // Fast path - pr contains only literal prefix such as 'foo'
+            return Ok(StringMatchHandler::Literal(suffix.to_string()));
+        }
+        let or_values = get_or_values(suffix);
+        if !or_values.is_empty() {
+            // Fast path - pr contains only alternate strings such as 'foo|bar|baz'
+            return Ok(StringMatchHandler::Alternates(or_values));
+        }
     }
-    if suffix == ".*" {
-        return Ok(StringMatchHandler::DotStar);
-    }
-    if suffix == ".+" {
-        return Ok(StringMatchHandler::DotPlus);
-    }
-    if escape_regex(suffix) == suffix {
-        // Fast path - pr contains only literal prefix such as 'foo'
-        return Ok(StringMatchHandler::Literal(suffix.to_string()));
-    }
-    let or_values = get_or_values(suffix);
-    if !or_values.is_empty() {
-        // Fast path - pr contains only alternate strings such as 'foo|bar|baz'
-        return Ok(StringMatchHandler::Alternates(or_values));
-    }
-    // It is expected that optimize returns valid regexp in suffix, so use MustCompile here.
+    // It is expected that optimize returns valid regexp in suffix, so raise error if not.
     // Anchor suffix to the beginning and the end of the matching string.
-    let suffix_expr = format!("^(?:{})$", suffix);
+    let suffix_expr = format!("^(?:{suffix})$");
     let re_suffix = Regex::new(&suffix_expr)?;
     Ok(StringMatchHandler::FastRegex(FastRegexMatcher::new(re_suffix)))
 }
@@ -574,13 +623,10 @@ fn is_dot_star(sre: &Hir) -> bool {
             alternate.iter().any(|re_sub| is_dot_star(re_sub))
         }
         HirKind::Repetition(repetition) => {
-            repetition.min == 0 && repetition.max.is_none() && match repetition.sub.as_ref().kind() {
-                HirKind::Literal(literal) => {
-                    // WRONG!! .+ is meta, not literal
-                    !literal.0.len() >= 2 && literal.0[0] == b'.' && literal.0[1] == b'*'
-                }
-                _ => false,
-            }
+            repetition.min == 0 &&
+                repetition.max.is_none() &&
+                repetition.greedy == true &&
+                sre.properties().is_literal() == false
         }
         _ => false,
     }
@@ -593,13 +639,10 @@ fn is_dot_plus(sre: &Hir) -> bool {
             alternate.iter().any(|re_sub| is_dot_plus(re_sub))
         }
         HirKind::Repetition(repetition) => {
-            repetition.min == 0 && repetition.max.is_none() && match repetition.sub.as_ref().kind() {
-                HirKind::Literal(literal) => {
-                    // WRONG!! .+ is meta, not literal
-                    !literal.0.len() >= 2 && literal.0[0] == b'.' && literal.0[1] == b'+'
-                }
-                _ => false,
-            }
+            repetition.min == 1 &&
+                repetition.max.is_none() &&
+                repetition.greedy == true &&
+                sre.properties().is_literal() == false
         }
         _ => false,
     }

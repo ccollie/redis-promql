@@ -302,8 +302,8 @@ mod tests {
         let value = "http(foo|bar)";
         let is_negative = false;
         let is_regexp = true;
-        let expected_prefix = tv_no_trailing_tag_separator("http");
-        let tf = init_tf(value, is_negative, is_regexp, &expected_prefix);
+        let expected_prefix = "http";
+        let tf = init_tf(value, is_negative, is_regexp, expected_prefix);
         assert_eq!(tf.or_suffixes, &["bar", "foo"], "unexpected or_suffixes; got {:?}; want &[\"bar\", \"foo\"]", tf.or_suffixes);
 
         // Must match foo or bar suffix

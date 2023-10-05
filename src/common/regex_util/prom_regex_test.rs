@@ -20,7 +20,7 @@ mod test {
             let result = pr.match_string(s);
             assert_eq!(
                 result, result_expected,
-                "unexpected result when matching {expr} against {s}; got {result}; want {result_expected}"
+                "unexpected result when matching \"{expr}\" against \"{s}\"; got {result}; want {result_expected}"
             );
 
             // Make sure the result is the same for regular regexp
@@ -33,6 +33,9 @@ mod test {
             );
         }
 
+        f("^foo|b(ar)$", "foo", true);
+
+        f("", "foo", false);
         f("", "", true);
         f("", "foo", false);
         f("foo", "", false);

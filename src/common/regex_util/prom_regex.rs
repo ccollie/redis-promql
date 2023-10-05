@@ -18,18 +18,15 @@ pub struct PromRegex {
     prefix: String,
     prefix_matcher: StringMatchHandler,
     suffix_matcher: StringMatchHandler,
-    is_prefix_only: bool,
 }
 
 impl PromRegex {
     pub fn new(expr: &str) -> Result<PromRegex, RegexError> {
         let (prefix, suffix) = simplify(expr)?;
-        let is_prefix_only = suffix.is_empty();
         let pr = PromRegex {
             prefix: prefix.to_string(),
             prefix_matcher: get_prefix_matcher(&prefix),
             suffix_matcher: get_suffix_matcher(&suffix)?,
-            is_prefix_only
         };
         Ok(pr)
     }
@@ -40,8 +37,8 @@ impl PromRegex {
     /// of the matching string with '^' and '$'.
     pub fn match_string(&self, s: &str) -> bool {
         let good = self.prefix_matcher.matches(s);
-        if !good || self.is_prefix_only {
-            return good
+        if !good {
+            return false
         }
         let suffix = s.strip_prefix(&self.prefix);
         if suffix.is_none() {

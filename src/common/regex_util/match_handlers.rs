@@ -38,6 +38,11 @@ impl StringMatchHandler {
     pub fn match_fn(pattern: String, match_fn: MatchFn) -> Self {
         Self::MatchFn(MatchFnHandler::new(pattern, match_fn))
     }
+
+    pub fn starts_with(prefix: String) -> Self {
+        Self::MatchFn(MatchFnHandler::new(prefix, starts_with))
+    }
+
     pub fn prefix(prefix: String, is_dot_star: bool) -> Self {
         Self::MatchFn(MatchFnHandler::new(prefix, if is_dot_star { prefix_dot_star } else { prefix_dot_plus }))
     }
@@ -106,6 +111,10 @@ impl MatchFnHandler {
     pub(super) fn matches(&self, s: &str) -> bool {
         (self.match_fn)(&self.pattern, s)
     }
+}
+
+fn starts_with(prefix: &str, candidate: &str) -> bool {
+    candidate.starts_with(prefix)
 }
 
 fn matches_alternates(or_values: &[String], s: &str) -> bool {
