@@ -262,7 +262,6 @@ fn simplify_regexp(sre: Hir, has_prefix: bool) -> Result<Hir, RegexError> {
         return Ok(sre)
     }
     let mut sre = sre;
-    let mut s = sre.to_string();
     loop {
         let sub = sre.clone();
         let hir_new = simplify_regexp_ext(sub, has_prefix, false);
@@ -556,7 +555,7 @@ fn hir_to_string(sre: &Hir) -> String {
             }
             s.join("|")
         }
-        HirKind::Repetition(repetition) => {
+        HirKind::Repetition(_repetition) => {
             if is_dot_star(sre) {
                 return ".*".to_string();
             } else if is_dot_plus(sre) {
