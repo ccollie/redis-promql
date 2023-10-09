@@ -4,7 +4,6 @@ use metricsql_engine::{
     Deadline, QueryResult, QueryResults, RuntimeResult, SearchQuery,
 };
 use redis_module::Context;
-use crate::get_redis_context;
 use crate::globals::get_timeseries_index;
 use crate::index::{get_series_keys_by_matchers_vec, TimeseriesIndex};
 
@@ -24,16 +23,19 @@ impl TsdbDataProvider {
             let (timestamps, values) = ts_range(ctx, &key, search_query.start, search_query.end).unwrap();
             QueryResult::new(labels.clone(), timestamps, values)
         }).collect::<Vec<_>>();
+
+        series
     }
 }
 
 impl MetricDataProvider for TsdbDataProvider {
     fn search(&self, sq: &SearchQuery, _deadline: &Deadline) -> RuntimeResult<QueryResults> {
-        let ctx = get_redis_context();
-        let index = get_timeseries_index();
-
-        let data = self.get_series_data(ctx, index, sq);
-        let result = QueryResults::new(data);
-        Ok(result)
+        todo!()
+        // let ctx = get_redis_context();
+        // let index = get_timeseries_index();
+        //
+        // let data = self.get_series_data(ctx, index, sq);
+        // let result = QueryResults::new(data);
+        // Ok(result)
     }
 }

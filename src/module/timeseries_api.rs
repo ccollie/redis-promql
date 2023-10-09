@@ -1,16 +1,19 @@
 // Utility functions for the redis timeseries API
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::str::FromStr;
 use std::time::Duration;
+use ahash::AHashMap;
 use metricsql_engine::{MetricName, QueryResult, Tag, Timestamp};
-use redis_module::{CallOptionResp, CallOptions, CallOptionsBuilder, CallReply, CallResult, Context, RedisError, RedisResult, RedisString};
+use redis_module::{Context, RedisError, RedisResult, RedisString, RedisValue};
 use serde::{Deserialize, Serialize};
 use crate::common::METRIC_NAME_LABEL;
+use crate::module::{call_redis_command, redis_value_as_str, redis_value_as_string, redis_value_key_as_str, redis_value_to_f64, redis_value_to_i64};
 
 pub const DEFAULT_CHUNK_SIZE_BYTES: usize = 4 * 1024;
-pub type Labels = HashMap<String, String>;  // todo use ahash
+pub type Labels = AHashMap<String, String>;  // todo use ahash
 
 #[non_exhaustive]
 #[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
@@ -167,7 +170,7 @@ pub struct TimeSeriesInfo {
     pub chunk_size: usize,
     pub chunk_type: Encoding,
     pub duplicate_policy: DuplicatePolicy,
-    pub labels: HashMap<String, String>,
+    pub labels: AHashMap<String, String>,
     pub source_key: String,
     pub retention: u64,
 }
@@ -177,182 +180,191 @@ pub fn series_exists(ctx: &RedisContext, key: &str) -> bool {
     ctx.call("TS.GET", &[key, "LATEST"]).is_ok()
 }
 
-pub fn get_series_labels(ctx: &RedisContext, key: &str) -> HashMap<String, String> {
-    if let Ok(Some(reply)) = get_series_labels_ex(ctx, key) {
+pub fn get_series_labels(ctx: &RedisContext, key: &str) -> AHashMap<String, String> {
+    if let Ok(Some(reply)) = get_series_labels_ex(ctx, key.to_string()) {
         return parse_labels(reply).unwrap_or_default();
     }
-    HashMap::default()
+    AHashMap::default()
 }
 
 pub(crate) fn get_series_labels_as_metric_name(ctx: &RedisContext, key: &str) -> RedisResult<MetricName> {
-    if let Some(reply) = get_series_labels_ex(ctx, key)? {
-        return parse_labels_as_metric_name(reply)
+    if let Some(reply) = get_series_labels_ex(ctx, key.to_string())? {
+        return parse_labels_as_metric_name(&reply)
     }
     Ok(MetricName::default())
 }
 
-fn get_series_labels_ex(ctx: &RedisContext, key: &str) -> RedisResult<Option<CallReply>> {
-    // prefer RESP3, but note that we may still get RESP2. IOW, we need to handle both
-    // Map and Array replies.
-    // See version support here:
-    // https://docs.redis.com/latest/stack/release-notes/redistimeseries/
-    let call_options: CallOptions = CallOptionsBuilder::default()
-        .resp(CallOptionResp::Resp3)
-        .build();
+fn get_series_labels_ex(ctx: &RedisContext, key: String) -> RedisResult<Option<RedisValue>> {
+    let mut res = call_redis_command(ctx, "TS.INFO", &[key])?;
 
-    let res: CallReply = ctx
-        .call_ext::<_, CallResult>("TS.INFO", &call_options, &[key])
-        .map_err(|e| -> RedisError { e.into() }).ok()?;
-
-    if let CallReply::Map(map) = res {
-        for (k, v) in map.iter() {
-            if let CallReply::String(s) = k.unwrap_or_default() {
-                if s.as_bytes() == b"labels" {
-                    return Ok(Some(v?));
-                }
+    if let RedisValue::Array(arr) = res {
+        let mut found = false;
+        for (i, v) in arr.into_iter().enumerate() {
+            if i % 2 == 0 {
+                let k = redis_value_as_str(&v)?;
+                found = k == "labels";
+            } else if found {
+                let res = std::mem::take(&mut v);
+                return Ok(Some(res));
             }
         }
     }
     Ok(None)
 }
 
-pub fn get_series_info<'root>(ctx: &RedisContext, key: &str) -> Option<TimeSeriesInfo> {
-    let call_options: CallOptions = CallOptionsBuilder::default()
-        .resp(CallOptionResp::Resp3)
-        .build();
+pub fn get_series_info<'root>(ctx: &RedisContext, key: &str) -> RedisResult<Option<TimeSeriesInfo>> {
+    let res = call_redis_command(ctx, "TS.INFO", &[key.to_string()])?;
 
-    let res: CallReply = ctx
-        .call_ext::<_, CallResult>("TS.INFO", &call_options, &[key])
-        .map_err(|e| -> RedisError { e.into() }).ok()?;
-
-    if let CallReply::Map(map) = res {
+    if let RedisValue::Array(arr) = res {
         // transform into TimeSeriesInfo
+        let mut key: Cow<str>;
 
         let mut info = TimeSeriesInfo::default();
-        for (k, v) in map.iter() {
-            let key = k.unwrap().to_string();
-            let val = v.ok()?; // todo: map_err
-            match key.as_str() {
-                "chunk_type" => {
-                    let chunk_type_string = call_reply_to_string(&val);
-                    match Encoding::from_str(chunk_type_string.as_str()) {
-                        Ok(encoding) => {
-                            info.chunk_type = encoding;
-                        }
-                        Err(_) => {
-                            // todo
+        for (i, val) in arr.into_iter().enumerate() {
+            if i % 2 == 0 {
+                key = redis_value_as_str(&val)?;
+            } else {
+                match key.as_ref() {
+                    "chunk_type" => {
+                        let chunk_type_string = redis_value_as_str(&val)?;
+                        match Encoding::from_str(&chunk_type_string) {
+                            Ok(encoding) => {
+                                info.chunk_type = encoding;
+                            }
+                            Err(_) => {
+                                // todo
+                            }
                         }
                     }
-                }
-                "duplicate_policy" => {
-                    let policy_string = call_reply_to_string(&val);
-                    info.duplicate_policy = DuplicatePolicy::from(policy_string.as_str());
-                }
-                "chunk_size" => {
-                    info.chunk_size = call_reply_to_i64(&val) as usize;
-                }
-                "total_samples" => {
-                    info.total_samples = call_reply_to_i64(&val) as usize;
-                }
-                "memory_usage" => {
-                    info.memory_usage = call_reply_to_i64(&val) as usize;
-                }
-                "first_timestamp" => {
-                    info.first_timestamp = call_reply_to_i64(&val) as u64;
-                }
-                "last_timestamp" => {
-                    info.last_timestamp = call_reply_to_timestamp(&val) as u64;
-                }
-                "chunk_count" => {
-                    info.chunk_count = call_reply_to_i64(&val) as usize;
-                }
-                "source_key" => {
-                    info.source_key = call_reply_to_string(&val);
-                }
-                "retention" => {
-                    info.retention = call_reply_to_i64(&val) as u64;
-                }
-                "labels" => {
-                    if let Ok(labels) = parse_labels(val) {
-                        info.labels = labels;
+                    "duplicate_policy" => {
+                        let policy_string = redis_value_as_str(&val)?;
+                        info.duplicate_policy = DuplicatePolicy::from(policy_string.as_ref());
                     }
-                }
-                _ => {
-                    // todo
+                    "chunk_size" => {
+                        info.chunk_size = redis_value_to_i64(&val)? as usize;
+                    }
+                    "total_samples" => {
+                        info.total_samples = redis_value_to_i64(&val)? as usize;
+                    }
+                    "memory_usage" => {
+                        info.memory_usage = redis_value_to_i64(&val)? as usize;
+                    }
+                    "first_timestamp" => {
+                        info.first_timestamp = redis_value_to_i64(&val)? as u64;
+                    }
+                    "last_timestamp" => {
+                        info.last_timestamp = redis_value_to_i64(&val)? as u64;
+                    }
+                    "chunk_count" => {
+                        info.chunk_count = redis_value_to_i64(&val)? as usize;
+                    }
+                    "source_key" => {
+                        info.source_key = redis_value_as_string(&val)?.to_string();
+                    }
+                    "retention" => {
+                        info.retention = redis_value_to_i64(&val)? as u64;
+                    }
+                    "labels" => {
+                        if let Ok(labels) = parse_labels(val) {
+                            info.labels = labels;
+                        }
+                    }
+                    _ => {
+                        // todo
+                    }
                 }
             }
-
-            return Some(info);
         }
+
+        return Ok(Some(info))
     }
-    None
+    Ok(None)
 }
 
-pub(crate) fn parse_labels(reply: CallReply) -> RedisResult<HashMap<String, String>> {
-    let mut result = HashMap::new(); // todo: use ahash
-    match reply {
-        CallReply::Map(map) => {
-            // todo: return refs
-            for (k, v) in map.iter() {
-                // todo: map_err for k and v
-                let key = k.unwrap();
-                let val = v.unwrap();
-                result.insert(
-                    call_reply_to_string(&key),
-                    call_reply_to_string(&val),
-                );
+pub(crate) fn parse_labels(reply: RedisValue) -> RedisResult<AHashMap<String, String>> {
+
+    fn add_entry(result: &mut AHashMap<String, String>, key: &str, value: &RedisValue) {
+        match value {
+            RedisValue::StringBuffer(s) => {
+                let value = String::from_utf8_lossy(s);
+                result.insert(key.to_string(), value.to_string());
             }
+            RedisValue::BulkString(s) => {
+                result.insert(key.to_string(), s.to_string());
+            }
+            RedisValue::BulkRedisString(s) => {
+                if let Ok(s) = s.try_as_str() {
+                    result.insert(key.to_string(), s.to_string());
+                } else {
+                    result.insert(key.to_string(), s.to_string());
+                }
+            }
+            _=> {}
         }
-        CallReply::Array(arr) => {
-            let mut i = 0;
-            while i < arr.len() {
-                let key = arr.get(i).unwrap()?;
-                let val = arr.get(i + 1).unwrap()?;
-                result.insert(
-                    call_reply_to_string(&key),
-                    call_reply_to_string(&val),
-                );
-                i += 2;
+    }
+
+    match reply {
+        RedisValue::Map(map) => {
+            let mut result = AHashMap::with_capacity(map.len());
+            for (k, v) in map.iter() {
+                let key = redis_value_key_as_str(k)?;
+                add_entry(&mut result, &key, v);
             }
+            return Ok(result)
+        }
+        RedisValue::Array(arr) => {
+            let mut result = AHashMap::with_capacity(arr.len() / 2);
+            let mut key: Cow<str>;
+            for (i, v) in arr.iter().enumerate() {
+                if i % 2 == 0 {
+                    key = redis_value_as_str(v)?;
+                } else {
+                    add_entry(&mut result, &key, v);
+                }
+            }
+            return Ok(result)
         }
         _=> {}
     }
-    Ok(result)
+    Ok(AHashMap::new())
 }
 
 
-pub(crate) fn parse_labels_as_metric_name(reply: CallReply) -> RedisResult<MetricName> {
+pub(crate) fn parse_labels_as_metric_name(reply: &RedisValue) -> RedisResult<MetricName> {
     let mut result = MetricName::default(); // todo: use ahash
 
-    fn add_tag(metric_name: &mut MetricName, key: String, value: String) {
+    fn add_tag(metric_name: &mut MetricName, key: &str, value: &RedisValue) -> RedisResult<()> {
+        let value = redis_value_as_str(value)?;
         if key == METRIC_NAME_LABEL {
-            metric_name.set_metric_name(value);
+            metric_name.set_metric_group(&value);
         } else {
             // break the abstraction to avoid allocations
             let tag = Tag {
-                key,
-                value,
+                key: key.to_string(),
+                value: value.to_string(),
             };
             metric_name.tags.push(tag);
         }
+        Ok(())
     }
 
     match reply {
-        CallReply::Map(map) => {
+        RedisValue::Map(map) => {
             for (k, v) in map.iter() {
-                let key = call_reply_to_string(&k?);
-                let val = call_reply_to_string(&v?);
-                add_tag(&mut result, key, val);
+                let key = redis_value_key_as_str(k)?;
+                add_tag(&mut result, &key, v)?;
             }
         }
-        CallReply::Array(arr) => {
+        RedisValue::Array(arr) => {
             let mut i = 0;
             while i < arr.len() {
-                let k = arr.get(i).unwrap()?;
-                let v = arr.get(i + 1).unwrap()?;
-                let key = call_reply_to_string(&k);
-                let val = call_reply_to_string(&v);
-                add_tag(&mut result, key, val);
+                match (arr.get(i), arr.get(i + 1)) {
+                    (Some(k), Some(v)) => {
+                        let key = redis_value_as_str(k)?;
+                        add_tag(&mut result, &key, v)?;
+                    }
+                    _ => break,
+                }
                 i += 2;
             }
         }
@@ -369,26 +381,19 @@ pub(crate) fn ts_range(ctx: &Context, key: &RedisString, start: Timestamp, end: 
     let end_str = ctx.create_string(end.to_string());
 
     // https://redis.io/commands/ts.range/
-    let args: [&RedisString; 3] = [key, start_str, end_str];
-    let reply = ctx.call("TS.RANGE", args)?;
+    let args: [&RedisString; 3] = [key, &start_str, &end_str];
+    let reply = ctx.call("TS.RANGE", &args)?;
 
-    if let CallReply::Array(arr) = reply {
+    if let RedisValue::Array(arr) = reply {
         let len = arr.len() / 2;
         let mut timestamps = Vec::with_capacity(len);
         let mut values = Vec::with_capacity(len);
 
         for (i, val) in arr.iter().enumerate() {
-            match val {
-                Ok(value) => {
-                    if i % 2 == 0 {
-                        timestamps.push(value.to_i64());
-                    } else {
-                        values.push(value.to_double());
-                    }
-                },
-                Err(e) => {
-                    return Err(e.into());
-                }
+            if i % 2 == 0 {
+                timestamps.push(redis_value_to_i64(val)?);
+            } else {
+                values.push(redis_value_to_f64(val)?);
             }
         }
 
@@ -425,16 +430,16 @@ pub(crate) fn ts_multi_add_ex(ctx: &RedisContext, key: &str, timestamps: &[Times
     // todo: use a buffer pool. Theres way too many allocations here
     let mut buf = Vec::with_capacity(3 * MULTI_ADD_CHUNK_SIZE.min(timestamps.len()));
     for (i, (ts, val)) in timestamps.iter().zip(values.iter()).enumerate() {
-        buf.push(&ctx.create_string(key));
-        buf.push(&ctx.create_string(ts.to_string())); // todo: use buffers
-        buf.push(&ctx.create_string(val.to_string()));
+        buf.push(key.to_string());
+        buf.push(ts.to_string()); // todo: use buffers
+        buf.push(val.to_string());
         if i % MULTI_ADD_CHUNK_SIZE == 0 {
-            ctx.call("TS.MADD", buf.as_slice())?;
+            call_redis_command(ctx, "TS.MADD", buf.as_slice())?;
             buf.clear();
         }
     }
     if !buf.is_empty() {
-        ctx.call("TS.MADD", buf.as_slice())?;
+        call_redis_command(ctx, "TS.MADD", buf.as_slice())?;
     }
     Ok(())
 }
@@ -460,71 +465,36 @@ pub fn create_series(ctx: &RedisContext, key: &str, options: &TimeSeriesOptions)
         }
     }
 
-    let mut buf: [String; 3] = ["".to_string(), "".to_string(), "".to_string()];
-    let mut offset = 0;
+    let mut params: Vec<String> = Vec::with_capacity(capacity);
+    params.push(key.to_string());
 
-    let mut params: Vec<&str> = Vec::with_capacity(capacity);
-    params.push(key);
     if let Some(chunk_size) = options.chunk_size {
-        params.push( "CHUNK_SIZE");
-        buf[offset] = chunk_size.to_string();
-        params.push(&buf[offset]);
-        offset += 1;
+        params.push( "CHUNK_SIZE".to_string());
+        params.push(chunk_size.to_string());
     }
     if let Some(encoding) = &options.encoding {
-        params.push("ENCODING");
-        params.push(encoding.as_str());
+        params.push("ENCODING".to_string());
+        params.push(encoding.to_string());
     }
     if let Some(retention) = options.retention {
-        params.push("RETENTION");
-        buf[offset] = retention.as_millis().to_string();
-        params.push(&buf[offset]);
-        offset += 1;
+        params.push("RETENTION".to_string());
+        params.push(retention.as_millis().to_string());
     }
     if let Some(duplicate_policy) = options.duplicate_policy {
-        params.push("ON_DUPLICATE");
-        params.push(duplicate_policy.as_str());
+        params.push("ON_DUPLICATE".to_string());
+        params.push(duplicate_policy.to_string());
     }
     if !options.labels.is_empty() {
-        params.push("LABELS");
+        params.push("LABELS".to_string());
         for (k, v) in options.labels.iter() {
-            params.push( k.as_str());
-            params.push( v.as_str());
+            params.push( k.clone());
+            params.push( v.clone());
         }
         if !options.metric_name.is_empty() {
-            params.push(METRIC_NAME_LABEL);
-            params.push(&options.metric_name);
+            params.push(METRIC_NAME_LABEL.to_string());
+            params.push(options.metric_name.clone());
         }
     }
 
-    ctx.call("TS.CREATE", params.as_slice())
-}
-
-// todo: utils
-pub fn call_reply_to_i64(reply: &CallReply) -> i64 {
-    match reply {
-        CallReply::I64(i) => i.to_i64(),
-        _ => panic!("unexpected reply type"),
-    }
-}
-
-pub fn call_reply_to_f64(reply: &CallReply) -> f64 {
-    match reply {
-        CallReply::Double(d) => d.to_double(),
-        CallReply::I64(i) => i.to_i64() as f64,
-        _ => panic!("unexpected reply type"),
-    }
-}
-
-pub fn call_reply_to_string(reply: &CallReply) -> String {
-    match reply {
-        CallReply::String(s) => s.to_string().unwrap_or_default(),
-        CallReply::VerbatimString(s) => s.to_string(),
-        _ => panic!("unexpected reply type"),
-    }
-}
-
-pub fn call_reply_to_timestamp(reply: &CallReply) -> Timestamp {
-    let val = call_reply_to_i64(reply);
-    val
+    call_redis_command(ctx, "TS.CREATE", params.as_slice())
 }

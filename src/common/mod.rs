@@ -5,7 +5,6 @@ pub mod regex_util;
 mod humanize;
 mod utils;
 mod parse;
-mod labels;
 
 use std::sync::OnceLock;
 use regex::Regex;

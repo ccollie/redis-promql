@@ -4,5 +4,4 @@ mod string_transform_cacher;
 mod fast_regex_matcher;
 
 pub(crate) use fast_string_matcher::*;
-pub(crate) use fast_string_transformer::*;
 pub(crate) use fast_regex_matcher::*;

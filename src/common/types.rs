@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::fmt::Display;
 use metricsql_engine::TimestampTrait;
-use redis_module::{RedisResult, RedisString};
+use redis_module::{RedisError, RedisResult, RedisString};
 use serde::{Deserialize, Serialize};
 use crate::common::parse_timestamp;
 use crate::index::RedisContext;
@@ -143,7 +143,7 @@ impl PartialOrd for TimestampRangeValue {
             },
             (Value(v), Now) => {
                 let now = Timestamp::now();
-                *v.partial_cmp(&now)
+                v.partial_cmp(&now)
             },
             (Earliest, _) => Some(Ordering::Less),
             (_, Earliest) => Some(Ordering::Greater),
@@ -161,7 +161,7 @@ pub struct TimestampRange {
 impl TimestampRange {
     pub fn new(start: TimestampRangeValue, end: TimestampRangeValue) -> RedisResult<Self> {
         if start > end {
-            return Err("invalid range".into());
+            return Err( RedisError::Str("invalid range"));
         }
         Ok(TimestampRange { start, end })
     }

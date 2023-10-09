@@ -1,6 +1,6 @@
 use metricsql_engine::{MetricName, QueryResult, Tag, METRIC_NAME_LABEL};
 use redis_module::redisvalue::RedisValueKey;
-use redis_module::{RedisError, RedisValue};
+use redis_module::RedisValue;
 use std::collections::HashMap;
 use std::fmt::Display;
 use crate::common::types::Timestamp;

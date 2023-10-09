@@ -1,6 +1,6 @@
 // https://prometheus.io/docs/prometheus/latest/querying/api/#querying-metadata
 use metricsql_parser::common::Matchers;
-use redis_module::{Context, NextArg, RedisError, RedisResult, RedisString, RedisValue};
+use redis_module::{NextArg, RedisError, RedisString};
 use crate::common::{parse_series_selector, parse_timestamp};
 use crate::common::types::Timestamp;
 
