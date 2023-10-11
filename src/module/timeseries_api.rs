@@ -1,5 +1,4 @@
 // Utility functions for the redis timeseries API
-
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -195,16 +194,19 @@ pub(crate) fn get_series_labels_as_metric_name(ctx: &RedisContext, key: &str) ->
 }
 
 fn get_series_labels_ex(ctx: &RedisContext, key: String) -> RedisResult<Option<RedisValue>> {
-    let mut res = call_redis_command(ctx, "TS.INFO", &[key])?;
+    let res = call_redis_command(ctx, "TS.INFO", &[key])?;
 
-    if let RedisValue::Array(arr) = res {
+    if let RedisValue::Array(mut arr) = res {
         let mut found = false;
-        for (i, v) in arr.into_iter().enumerate() {
+        for (i, v) in arr.iter_mut().enumerate() {
             if i % 2 == 0 {
                 let k = redis_value_as_str(&v)?;
                 found = k == "labels";
             } else if found {
-                let res = std::mem::take(&mut v);
+                // todo: send PR for RedisValue::default().
+                // let res = std::mem::take(&mut v);
+                let mut res = RedisValue::Bool(true);
+                std::mem::swap(&mut res, v);
                 return Ok(Some(res));
             }
         }
@@ -213,67 +215,68 @@ fn get_series_labels_ex(ctx: &RedisContext, key: String) -> RedisResult<Option<R
 }
 
 pub fn get_series_info<'root>(ctx: &RedisContext, key: &str) -> RedisResult<Option<TimeSeriesInfo>> {
-    let res = call_redis_command(ctx, "TS.INFO", &[key.to_string()])?;
+    let mut res = call_redis_command(ctx, "TS.INFO", &[key.to_string()])?;
 
-    if let RedisValue::Array(arr) = res {
+    if let RedisValue::Array(ref mut arr) = res {
         // transform into TimeSeriesInfo
-        let mut key: Cow<str>;
 
         let mut info = TimeSeriesInfo::default();
-        for (i, val) in arr.into_iter().enumerate() {
-            if i % 2 == 0 {
-                key = redis_value_as_str(&val)?;
-            } else {
-                match key.as_ref() {
-                    "chunk_type" => {
-                        let chunk_type_string = redis_value_as_str(&val)?;
-                        match Encoding::from_str(&chunk_type_string) {
-                            Ok(encoding) => {
-                                info.chunk_type = encoding;
-                            }
-                            Err(_) => {
-                                // todo
-                            }
+        let items = arr.as_mut_slice();
+        let mut i = 0;
+        while i < items.len() {
+            let key = redis_value_as_str(&items[i])?;
+            let val = &items[i + 1];
+            match key.as_ref() {
+                "chunk_type" => {
+                    let chunk_type_string = redis_value_as_str(&val)?;
+                    match Encoding::from_str(&chunk_type_string) {
+                        Ok(encoding) => {
+                            info.chunk_type = encoding;
                         }
-                    }
-                    "duplicate_policy" => {
-                        let policy_string = redis_value_as_str(&val)?;
-                        info.duplicate_policy = DuplicatePolicy::from(policy_string.as_ref());
-                    }
-                    "chunk_size" => {
-                        info.chunk_size = redis_value_to_i64(&val)? as usize;
-                    }
-                    "total_samples" => {
-                        info.total_samples = redis_value_to_i64(&val)? as usize;
-                    }
-                    "memory_usage" => {
-                        info.memory_usage = redis_value_to_i64(&val)? as usize;
-                    }
-                    "first_timestamp" => {
-                        info.first_timestamp = redis_value_to_i64(&val)? as u64;
-                    }
-                    "last_timestamp" => {
-                        info.last_timestamp = redis_value_to_i64(&val)? as u64;
-                    }
-                    "chunk_count" => {
-                        info.chunk_count = redis_value_to_i64(&val)? as usize;
-                    }
-                    "source_key" => {
-                        info.source_key = redis_value_as_string(&val)?.to_string();
-                    }
-                    "retention" => {
-                        info.retention = redis_value_to_i64(&val)? as u64;
-                    }
-                    "labels" => {
-                        if let Ok(labels) = parse_labels(val) {
-                            info.labels = labels;
+                        Err(_) => {
+                            // todo
                         }
-                    }
-                    _ => {
-                        // todo
                     }
                 }
+                "duplicate_policy" => {
+                    let policy_string = redis_value_as_str(&val)?;
+                    info.duplicate_policy = DuplicatePolicy::from(policy_string.as_ref());
+                }
+                "chunk_size" => {
+                    info.chunk_size = redis_value_to_i64(&val)? as usize;
+                }
+                "total_samples" => {
+                    info.total_samples = redis_value_to_i64(&val)? as usize;
+                }
+                "memory_usage" => {
+                    info.memory_usage = redis_value_to_i64(&val)? as usize;
+                }
+                "first_timestamp" => {
+                    info.first_timestamp = redis_value_to_i64(&val)? as u64;
+                }
+                "last_timestamp" => {
+                    info.last_timestamp = redis_value_to_i64(&val)? as u64;
+                }
+                "chunk_count" => {
+                    info.chunk_count = redis_value_to_i64(&val)? as usize;
+                }
+                "source_key" => {
+                    info.source_key = redis_value_as_string(&val)?.to_string();
+                }
+                "retention" => {
+                    info.retention = redis_value_to_i64(&val)? as u64;
+                }
+                "labels" => {
+                    // todo: get rid of clone !!!
+                    if let Ok(labels) = parse_labels(val.clone()) {
+                        info.labels = labels;
+                    }
+                }
+                _ => {
+                    // todo
+                }
             }
+            i += 2;
         }
 
         return Ok(Some(info))
@@ -282,7 +285,6 @@ pub fn get_series_info<'root>(ctx: &RedisContext, key: &str) -> RedisResult<Opti
 }
 
 pub(crate) fn parse_labels(reply: RedisValue) -> RedisResult<AHashMap<String, String>> {
-
     fn add_entry(result: &mut AHashMap<String, String>, key: &str, value: &RedisValue) {
         match value {
             RedisValue::StringBuffer(s) => {
@@ -314,7 +316,7 @@ pub(crate) fn parse_labels(reply: RedisValue) -> RedisResult<AHashMap<String, St
         }
         RedisValue::Array(arr) => {
             let mut result = AHashMap::with_capacity(arr.len() / 2);
-            let mut key: Cow<str>;
+            let mut key: Cow<str> = "".into();
             for (i, v) in arr.iter().enumerate() {
                 if i % 2 == 0 {
                     key = redis_value_as_str(v)?;
@@ -376,12 +378,12 @@ pub(crate) fn parse_labels_as_metric_name(reply: &RedisValue) -> RedisResult<Met
     Ok(result)
 }
 
-pub(crate) fn ts_range(ctx: &Context, key: &RedisString, start: Timestamp, end: Timestamp) -> RedisResult<(Vec<Timestamp>, Vec<f64>)> {
-    let start_str = ctx.create_string(start.to_string());
-    let end_str = ctx.create_string(end.to_string());
+pub(crate) fn ts_range(ctx: &Context, key: &str, start: Timestamp, end: Timestamp) -> RedisResult<(Vec<Timestamp>, Vec<f64>)> {
+    let start_str = start.to_string();
+    let end_str = end.to_string();
 
     // https://redis.io/commands/ts.range/
-    let args: [&RedisString; 3] = [key, &start_str, &end_str];
+    let args: [&str; 3] = [key, &start_str, &end_str];
     let reply = ctx.call("TS.RANGE", &args)?;
 
     if let RedisValue::Array(arr) = reply {
@@ -429,6 +431,7 @@ pub(crate) fn ts_multi_add(ctx: &RedisContext, key: &str, timestamps: &[Timestam
 pub(crate) fn ts_multi_add_ex(ctx: &RedisContext, key: &str, timestamps: &[Timestamp], values: &[f64]) -> Result<(), RedisError> {
     // todo: use a buffer pool. Theres way too many allocations here
     let mut buf = Vec::with_capacity(3 * MULTI_ADD_CHUNK_SIZE.min(timestamps.len()));
+    //  let slice = buf.as_mut_slice();
     for (i, (ts, val)) in timestamps.iter().zip(values.iter()).enumerate() {
         buf.push(key.to_string());
         buf.push(ts.to_string()); // todo: use buffers

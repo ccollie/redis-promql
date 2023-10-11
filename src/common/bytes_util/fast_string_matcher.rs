@@ -1,8 +1,5 @@
 use crate::common::bytes_util::string_transform_cacher::StringTransformCache;
 
-const CACHE_EXPIRE_DURATION: std::time::Duration = std::time::Duration::from_secs(60);
-const DEFAULT_CACHE_CAPACITY: usize = 25;
-
 /// FastStringMatcher implements fast matcher for strings.
 ///
 /// It caches string match results and returns them back on the next calls

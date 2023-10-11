@@ -1,11 +1,11 @@
-use crate::module::{ts_range};
+use crate::module::{get_series_keys_by_matchers_vec, ts_range};
 use metricsql_engine::provider::MetricDataProvider;
 use metricsql_engine::{
     Deadline, QueryResult, QueryResults, RuntimeResult, SearchQuery,
 };
 use redis_module::Context;
 use crate::globals::get_timeseries_index;
-use crate::index::{get_series_keys_by_matchers_vec, TimeseriesIndex};
+use crate::index::TimeseriesIndex;
 
 pub struct TsdbDataProvider {}
 
@@ -21,7 +21,7 @@ impl TsdbDataProvider {
         let series = labels_map.into_iter().map(|(key, labels)| {
             // todo: return Result
             let (timestamps, values) = ts_range(ctx, &key, search_query.start, search_query.end).unwrap();
-            QueryResult::new(labels.clone(), timestamps, values)
+            QueryResult::new(labels.as_ref().clone(), timestamps, values)
         }).collect::<Vec<_>>();
 
         series
@@ -30,12 +30,12 @@ impl TsdbDataProvider {
 
 impl MetricDataProvider for TsdbDataProvider {
     fn search(&self, sq: &SearchQuery, _deadline: &Deadline) -> RuntimeResult<QueryResults> {
-        todo!()
-        // let ctx = get_redis_context();
-        // let index = get_timeseries_index();
-        //
-        // let data = self.get_series_data(ctx, index, sq);
-        // let result = QueryResults::new(data);
-        // Ok(result)
+        // see: https://github.com/RedisLabsModules/redismodule-rs/blob/master/examples/call.rs#L144
+        let ctx_guard = redis_module::MODULE_CONTEXT.lock();
+        let index = get_timeseries_index();
+
+        let data = self.get_series_data(&ctx_guard, index, sq);
+        let result = QueryResults::new(data);
+        Ok(result)
     }
 }

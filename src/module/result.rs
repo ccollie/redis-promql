@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use crate::common::types::Timestamp;
 
-static META_KEY_LABEL: &str = "__meta:key__";
+pub static META_KEY_LABEL: &str = "__meta:key__";
 
 pub enum ResultType {
     Matrix,

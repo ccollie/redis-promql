@@ -74,7 +74,9 @@ impl PartialOrd for Sample {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub const MAX_TIMESTAMP: i64 = 253402300799;
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Copy)]
 pub enum TimestampRangeValue {
     Earliest,
     Latest,
@@ -93,10 +95,19 @@ impl TimestampRangeValue {
             },
         }
     }
+
+    pub fn to_timestamp(&self) -> Timestamp {
+        match self {
+            TimestampRangeValue::Earliest => 0,
+            TimestampRangeValue::Latest => MAX_TIMESTAMP,
+            TimestampRangeValue::Now => Timestamp::now(),
+            TimestampRangeValue::Value(ts) => *ts,
+        }
+    }
 }
 
 impl TryFrom<&str> for TimestampRangeValue {
-    type Error = &'static str; // todo: RedisError
+    type Error = RedisError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
@@ -104,7 +115,7 @@ impl TryFrom<&str> for TimestampRangeValue {
             "+" => Ok(TimestampRangeValue::Latest),
             "*" => Ok(TimestampRangeValue::Now),
             _ => {
-                let ts = parse_timestamp(value).map_err(|_| "invalid timestamp")?;
+                let ts = parse_timestamp(value).map_err(|_| RedisError::Str("invalid timestamp"))?;
                 Ok(TimestampRangeValue::Value(ts))
             }
         }
@@ -153,6 +164,7 @@ impl PartialOrd for TimestampRangeValue {
     }
 }
 
+
 pub struct TimestampRange {
     start: TimestampRangeValue,
     end: TimestampRangeValue,
@@ -172,5 +184,21 @@ impl TimestampRange {
 
     pub fn end(&self) -> &TimestampRangeValue {
         &self.end
+    }
+}
+
+pub(crate) fn normalize_range_timestamps(
+    start: Option<Timestamp>,
+    end: Option<Timestamp>,
+) -> (TimestampRangeValue, TimestampRangeValue) {
+    match (start, end) {
+        (Some(start), Some(end)) if start > end => (end.into(), start.into()),
+        (Some(start), Some(end)) => (start.into(), end.into()),
+        (Some(start), None) => (
+            TimestampRangeValue::Value(start),
+            TimestampRangeValue::Latest,
+        ),
+        (None, Some(end)) => (TimestampRangeValue::Earliest, end.into()),
+        (None, None) => (TimestampRangeValue::Earliest, TimestampRangeValue::Latest),
     }
 }

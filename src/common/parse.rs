@@ -3,9 +3,11 @@ use chrono::DateTime;
 use metricsql_engine::parse_metric_selector;
 use metricsql_parser::common::Matchers;
 use metricsql_parser::parser::{parse_duration_value, parse_number};
+use redis_module::{RedisError, RedisResult};
 use crate::common::current_time_millis;
-use crate::common::types::Timestamp;
+use crate::common::types::{Timestamp, TimestampRangeValue};
 use crate::error::{TsdbError, TsdbResult};
+use crate::index::RedisContext;
 
 pub fn parse_timestamp(arg: &str) -> TsdbResult<Timestamp> {
     // todo: handle +,
@@ -24,13 +26,20 @@ pub fn parse_timestamp(arg: &str) -> TsdbResult<Timestamp> {
     }
 }
 
-pub fn parse_duration(arg: &str) -> TsdbResult<Duration> {
+pub fn parse_timestamp_range_value(_ctx: &RedisContext, arg: &str) -> RedisResult<TimestampRangeValue> {
+    TimestampRangeValue::try_from(arg)
+}
+
+pub fn parse_duration(arg: &str) -> RedisResult<Duration> {
     match parse_duration_value(arg, 1) {
         Ok(d) => Ok(Duration::from_millis(d as u64)),
         Err(_e) => {
             match arg.parse::<i64>() {
                 Ok(v) => Ok(Duration::from_millis(v as u64)),
-                Err(_e) => Err(TsdbError::InvalidNumber(arg.to_string())),
+                Err(_e) => {
+                    let str = format!("ERR: failed to parse duration: {}", arg);
+                    Err(RedisError::String(str))
+                },
             }
         },
     }
@@ -48,11 +57,4 @@ pub fn parse_series_selector(arg: &str) -> TsdbResult<Matchers> {
     }).and_then(|m| {
         Ok(Matchers::new(m))
     })
-}
-
-pub fn parse_chunk_size(arg: &str) -> TsdbResult<usize> {
-    parse_number_with_unit(arg).map(|v| {
-        v as usize
-    })
-    // todo: proper validation
 }
