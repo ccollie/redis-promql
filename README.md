@@ -99,17 +99,21 @@ Then you can query the data for a time range on some aggregation rule.
 ### With `redis-cli`
 ```sh
 $ redis-cli
-127.0.0.1:6379> TS.CREATE temperature:3:11 RETENTION 60 LABELS sensor_id 2 area_id 32 __name__ temperature
+127.0.0.1:6379> TS.CREATE temperature:3:east RETENTION 60 LABELS sensor_id 1 area_id 32 __name__ temperature
 OK
-127.0.0.1:6379> TS.ADD temperature:3:11 1548149181 30
+127.0.0.1:6379> TS.CREATE temperature:3:west RETENTION 60 LABELS sensor_id 2 area_id 32 __name__ temperature
 OK
-127.0.0.1:6379> TS.ADD temperature:3:11 1548149191 42
+127.0.0.1:6379> TS.ADD temperature:3:east 1548149181 30
+OK
+127.0.0.1:6379> TS.ADD temperature:3:west 1548149191 42
 OK
 127.0.0.1:6379>  TS.RANGE temperature:3:11 1548149180 1548149210 AGGREGATION avg 5
 1) 1) (integer) 1548149180
    2) "30"
 2) 1) (integer) 1548149190
    2) "42"
+   
+127.0.0.1:6379>  PROM.RANGE "avg(temperature) by(area_id)" START 1548149180 END 1548149210   
 ```
 
 **Note**
