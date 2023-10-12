@@ -1,28 +1,85 @@
 use crate::common::types::{Timestamp, TimestampRangeValue};
 use metricsql_parser::common::Matchers;
 use redis_module::redisvalue::RedisValueKey;
-use redis_module::{Context as RedisContext, NextArg, RedisError, RedisResult, RedisString, RedisValue};
+use redis_module::{Context as RedisContext, Context, NextArg, RedisError, RedisResult, RedisString, RedisValue};
 use std::collections::HashMap;
-use std::hash::{Hasher};
-use ahash::{AHashMap, AHashSet};
-use xxhash_rust::xxh3;
-use crate::common::parse_series_selector;
-use crate::module::{call_redis_command, convert_label_filter, normalize_range_args, parse_timestamp_arg};
-use crate::module::result::META_KEY_LABEL;
+use crate::common::{METRIC_NAME_LABEL, parse_series_selector};
+use crate::globals::get_timeseries_index;
+use crate::module::{normalize_range_args, parse_timestamp_arg};
+use crate::module::result::{get_ts_metric_selector, META_KEY_LABEL};
+
+// todo: series count
 
 /// https://prometheus.io/docs/prometheus/latest/querying/api/#finding-series-by-label-matchers
-pub fn prom_series(ctx: &RedisContext, args: Vec<RedisString>) -> RedisResult {
-    handle_series_metadata(ctx, args, false, collect_series_metadata)
+pub(crate) fn series(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let label_args = parse_metadata_command_args(ctx, args, true)?;
+    let ts_index = get_timeseries_index();
+
+    let series = ts_index.series_by_matchers(ctx, &label_args.matchers, label_args.start, label_args.end);
+
+    let values: RedisValue = series
+        .into_iter()
+        .map(get_ts_metric_selector)
+        .collect::<Vec<_>>()
+        .into();
+
+    let map: HashMap<RedisValueKey, RedisValue> = [
+        (RedisValueKey::String("status".into()), RedisValue::SimpleStringStatic("success")),
+        (RedisValueKey::String("data".into()), values)
+    ].into_iter().collect();
+
+    Ok(RedisValue::Map(map))
 }
 
 /// https://prometheus.io/docs/prometheus/latest/querying/api/#getting-label-names
-pub(crate) fn prom_label_names(ctx: &RedisContext, args: Vec<RedisString>) -> RedisResult {
-    handle_series_metadata(ctx, args, false, collect_label_names_metadata)
+pub(crate) fn label_names(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let label_args = parse_metadata_command_args(ctx, args, false)?;
+    let ts_index = get_timeseries_index();
+
+    let labels = ts_index.labels_by_matchers(ctx, &label_args.matchers, label_args.start, label_args.end);
+    let mut labels_result = Vec::with_capacity(labels.len());
+    if !labels.is_empty() {
+        labels_result.push(RedisValue::from(METRIC_NAME_LABEL.to_string()));
+        for label in labels {
+            labels_result.push(RedisValue::from(label));
+        }
+    }
+
+    let map: HashMap<RedisValueKey, RedisValue> = [
+        (RedisValueKey::String("status".into()), RedisValue::SimpleStringStatic("success")),
+        (RedisValueKey::String("data".into()), RedisValue::Array(labels_result))
+    ].into_iter().collect();
+
+    Ok(RedisValue::Map(map))
 }
 
 /// https://prometheus.io/docs/prometheus/latest/querying/api/#querying-label-values
-pub(crate) fn prom_label_values(ctx: &RedisContext, args: Vec<RedisString>) -> RedisResult {
-    handle_series_metadata(ctx, args, true, collect_label_values_metadata)
+// MS.LABEL_VALUES <label_name> [MATCH <match>] [START <timestamp_ms>] [END <timestamp_ms>]
+// https://prometheus.io/docs/prometheus/latest/querying/api/#querying-label-values
+pub(crate) fn label_values(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args;
+    if args.len() < 2 {
+        return Err(RedisError::WrongArity);
+    }
+    let label_name = args.remove(1).try_as_str()?;
+    let label_args = parse_metadata_command_args(ctx, args, true)?;
+    let ts_index = get_timeseries_index();
+
+    let mut series = ts_index.series_by_matchers(ctx, &label_args.matchers, label_args.start, label_args.end);
+
+    let arr_values = series
+        .drain(..)
+        .filter_map(|series| series.labels.get(label_name))
+        .map(|v| RedisValue::from(v))
+        .collect::<Vec<_>>();
+
+    let map: HashMap<RedisValueKey, RedisValue> = [
+        (RedisValueKey::String("status".into()), RedisValue::SimpleStringStatic("success")),
+        (RedisValueKey::String("data".into()), RedisValue::Array(arr_values))
+    ].into_iter().collect();
+
+
+    Ok(RedisValue::Map(map))
 }
 
 struct MetadataFunctionArgs {
@@ -33,114 +90,17 @@ struct MetadataFunctionArgs {
 }
 
 
-struct HandlerContext<'a> {
-    key: &'a str,
-    result: Vec<RedisValue>,
-    uniques: AHashSet<u64>,
-    hasher: xxh3::Xxh3,
-}
-
-impl<'a> HandlerContext<'a> {
-    pub fn new() -> Self {
-        Self {
-            key: "",
-            result: Vec::new(),
-            uniques: AHashSet::new(),
-            hasher: xxh3::Xxh3::with_seed(0),
-        }
-    }
-
-    fn insert_unique(&mut self, key: &str) -> bool {
-        self.hasher.reset();
-        self.hasher.write(key.as_bytes());
-        let hash = self.hasher.digest();
-        self.uniques.insert(hash)
-    }
-} 
-
-type MetaResultHandler =
-    fn(&mut HandlerContext, &str, &str, &str);
-
-fn collect_series_metadata(
-    context: &mut HandlerContext,
-    series: &str,
-    label: &str,
-    value: &str,
-) {
-    todo!()
-}
-
-fn collect_label_names_metadata(
-    context: &mut HandlerContext,
-    _series: &str,
-    label: &str,
-    _value: &str,
-) {
-    if context.insert_unique(label) {
-        context.result.push(label.into());
-    }
-}
-
-fn collect_label_values_metadata(
-    context: &mut HandlerContext,
-    _series: &str,
-    _label: &str,
-    value: &str,
-) {
-    if context.insert_unique(value) {
-        context.result.push(value.into());
-    }
-}
-
-fn handle_series_metadata(
-    ctx: &RedisContext,
-    args: Vec<RedisString>,
-    needs_label: bool,
-    collector: MetaResultHandler,
-) -> RedisResult {
-    let label_args = parse_metadata_command_args(ctx, args, true, needs_label)?;
-    let mut handler_context = HandlerContext::new();
-
-    for matchers in label_args.matchers.iter() {
-        get_labels_from_matchers(
-            ctx,
-            matchers,
-            label_args.start,
-            label_args.end,
-            &mut handler_context,
-            collector,
-        )?;
-    }
-
-    let map: HashMap<RedisValueKey, RedisValue> = [
-        (
-            RedisValueKey::String("status".into()),
-            RedisValue::SimpleStringStatic("success"),
-        ),
-       // (RedisValueKey::String("data".into()), data.into()),
-    ]
-    .into_iter()
-    .collect();
-
-    Ok(RedisValue::Map(map))
-}
-
-
 static CMD_ARG_START: &str = "START";
 static CMD_ARG_END: &str = "END";
 static CMD_ARG_MATCH: &str = "MATCH";
 static CMD_ARG_LABEL: &str = "LABEL";
 
-fn parse_metadata_command_args(ctx: &RedisContext, args: Vec<RedisString>, require_matchers: bool, need_label: bool) -> RedisResult<MetadataFunctionArgs> {
+fn parse_metadata_command_args(ctx: &RedisContext, args: Vec<RedisString>, require_matchers: bool) -> RedisResult<MetadataFunctionArgs> {
     let mut args = args.into_iter().skip(1);
     let mut label_name = None;
     let mut matchers = Vec::with_capacity(4);
     let mut start_value: Option<TimestampRangeValue> = None;
     let mut end_value: Option<TimestampRangeValue> = None;
-
-    if need_label {
-        label_name = Some(args.next_str()?.to_string());
-    }
 
     while let Ok(arg) = args.next_str() {
         match arg {
@@ -174,10 +134,6 @@ fn parse_metadata_command_args(ctx: &RedisContext, args: Vec<RedisString>, requi
         return Err(RedisError::Str("ERR at least 1 MATCH series selector required"));
     }
 
-    if need_label && label_name.is_none() {
-        return Err(RedisError::Str("ERR missing label name"));
-    }
-
     Ok(MetadataFunctionArgs {
         label_name,
         start,
@@ -186,64 +142,3 @@ fn parse_metadata_command_args(ctx: &RedisContext, args: Vec<RedisString>, requi
     })
 }
 
-fn get_labels_from_matchers(
-    ctx: &RedisContext,
-    matchers: &Matchers,
-    start: Timestamp,
-    end: Timestamp,
-    handler_context: &mut HandlerContext,
-    handler: MetaResultHandler,
-) -> RedisResult<Vec<RedisValue>> {
-    let capacity = 5 + matchers.len();  //  start end WITHLABELS LATEST FILTER ....
-    // todo: use pool
-    let mut args: Vec<String> = Vec::with_capacity(capacity);
-
-    args.push(start.to_string());
-    args.push(end.to_string());
-
-    args.push("WITHLABELS".to_string());
-    args.push("LATEST".to_string());
-    args.push("FILTER".to_string());
-
-    for matcher in matchers.iter() {
-        let filter = convert_label_filter(matcher)?;
-        args.push(filter);
-    }
-
-    // https://redis.io/commands/ts.mrange/
-    // search for the section "Filter query by value"
-    let reply = call_redis_command(ctx, "TS.MRANGE", args.as_slice())?;
-    if let RedisValue::Array(arr) = reply {
-        let mut labels_hash: AHashMap<&str, &str> = AHashMap::new();
-        for val in arr.iter() {
-            if let RedisValue::Array(arr) = val {
-                if arr.len() < 2 {
-                    // ???
-                    ctx.log_warning("TSDB: invalid TS.MRANGE reply");
-                    continue;
-                }
-                match (&arr[0], &arr[1]) {
-                    (RedisValue::BulkString(key), RedisValue::Array(labels)) => {
-                        let key = key.as_str();
-                        labels_hash.insert(META_KEY_LABEL, key);
-                        for i in (0..labels.len()).step_by(2) {
-                            // should be 2 bulk string items
-                            match (&labels[i], &labels[i + 1]) {
-                                (RedisValue::BulkString(key), RedisValue::BulkString(value)) => {
-                                    let label = key.as_str();
-                                    let value = value.as_str();
-                                    handler(handler_context, key, label, value);
-                                }
-                                _ => break,
-                            }
-                        }
-                    }
-                    _ => {
-                        ctx.log_warning("TSDB: invalid TS.MRANGE reply");
-                    }
-                }
-            }
-        }
-    }
-    Err(RedisError::Str("TSDB: invalid TS.MRANGE reply"))
-}

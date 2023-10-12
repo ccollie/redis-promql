@@ -1,8 +1,11 @@
-use crate::module::{get_series_keys_by_matchers_vec, ts_range};
+use crate::ts::time_series::TimeSeries;
+use crate::ts::Timestamp;
 use metricsql_engine::provider::MetricDataProvider;
 use metricsql_engine::{
-    Deadline, QueryResult, QueryResults, RuntimeResult, SearchQuery,
+    Deadline, MetricName, QueryResult, QueryResults, RuntimeResult, SearchQuery,
 };
+use rayon::iter::IntoParallelRefIterator;
+use rayon::iter::ParallelIterator;
 use redis_module::Context;
 use crate::globals::get_timeseries_index;
 use crate::index::TimeseriesIndex;
@@ -16,15 +19,28 @@ impl TsdbDataProvider {
         index: &TimeseriesIndex,
         search_query: &SearchQuery,
     ) -> Vec<QueryResult> {
-        let series_keys = get_series_keys_by_matchers_vec(ctx, &search_query.matchers).unwrap();
-        let labels_map = index.get_multi_labels_by_key(ctx, series_keys);
-        let series = labels_map.into_iter().map(|(key, labels)| {
-            // todo: return Result
-            let (timestamps, values) = ts_range(ctx, &key, search_query.start, search_query.end).unwrap();
-            QueryResult::new(labels.as_ref().clone(), timestamps, values)
-        }).collect::<Vec<_>>();
-
-        series
+        index
+            .series_by_matchers(
+                ctx,
+                &search_query.matchers,
+                search_query.start,
+                search_query.end,
+            )
+            .par_iter()
+            .map(|ts| {
+                let mut timestamps: Vec<Timestamp> = Vec::new();
+                let mut values: Vec<f64> = Vec::new();
+                let res = ts.get_range_raw(
+                    search_query.start,
+                    search_query.end,
+                    &mut timestamps,
+                    &mut values,
+                );
+                // what do wee do in case of error ?
+                let metric = to_metric_name(ts);
+                QueryResult::new(metric, timestamps, values)
+            })
+            .collect()
     }
 }
 
@@ -38,4 +54,12 @@ impl MetricDataProvider for TsdbDataProvider {
         let result = QueryResults::new(data);
         Ok(result)
     }
+}
+
+fn to_metric_name(ts: &TimeSeries) -> MetricName {
+    let mut mn = MetricName::new(&ts.metric_name);
+    for (k, v) in ts.labels.iter() {
+        mn.add_tag(k, v);
+    }
+    mn
 }

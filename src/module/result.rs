@@ -4,6 +4,7 @@ use redis_module::RedisValue;
 use std::collections::HashMap;
 use std::fmt::Display;
 use crate::common::types::Timestamp;
+use crate::ts::time_series::TimeSeries;
 
 pub static META_KEY_LABEL: &str = "__meta:key__";
 
@@ -219,4 +220,14 @@ pub fn redis_value_to_std_duration(value: &RedisValue) -> std::time::Duration {
 
 pub fn string_hash_map_to_redis_value(map: &HashMap<String, String>) -> RedisValue {
     RedisValue::from(map.clone())
+}
+
+
+pub(super) fn get_ts_metric_selector(ts: &TimeSeries) -> RedisValue {
+    let mut map: HashMap<RedisValueKey, RedisValue> = HashMap::with_capacity(ts.labels.len() + 1);
+    map.insert(RedisValueKey::String(METRIC_NAME_LABEL.into()), RedisValue::from(&ts.metric_name));
+    for (k, v) in ts.labels.iter() {
+        map.insert(RedisValueKey::String(k.into()), RedisValue::from(v));
+    }
+    RedisValue::Map(map)
 }
