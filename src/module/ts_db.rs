@@ -11,7 +11,7 @@ use std::os::raw::{c_int, c_void};
 use std::ptr::null_mut;
 
 pub static REDIS_PROMQL_SERIES_VERSION: i32 = 1;
-pub static REDIS_PROMQL_TIMESERIES_TYPE: RedisType = RedisType::new(
+pub static REDIS_PROMQL_SERIES_TYPE: RedisType = RedisType::new(
     "RedPromTS",
     REDIS_PROMQL_SERIES_VERSION,
     RedisModuleTypeMethods {

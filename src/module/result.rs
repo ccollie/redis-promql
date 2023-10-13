@@ -222,7 +222,6 @@ pub fn string_hash_map_to_redis_value(map: &HashMap<String, String>) -> RedisVal
     RedisValue::from(map.clone())
 }
 
-
 pub(super) fn get_ts_metric_selector(ts: &TimeSeries) -> RedisValue {
     let mut map: HashMap<RedisValueKey, RedisValue> = HashMap::with_capacity(ts.labels.len() + 1);
     map.insert(RedisValueKey::String(METRIC_NAME_LABEL.into()), RedisValue::from(&ts.metric_name));

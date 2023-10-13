@@ -1,9 +1,9 @@
 use std::sync::{Arc, OnceLock};
 use metricsql_engine::prelude::{Context as QueryContext};
-use crate::index::TimeseriesIndex;
+use crate::index::TimeSeriesIndex;
 use crate::provider::TsdbDataProvider;
 
-static TIMESERIES_INDEX: OnceLock<TimeseriesIndex> = OnceLock::new();
+static TIMESERIES_INDEX: OnceLock<TimeSeriesIndex> = OnceLock::new();
 static QUERY_CONTEXT: OnceLock<QueryContext> = OnceLock::new();
 
 pub fn get_query_context() -> &'static QueryContext {
@@ -28,6 +28,6 @@ pub(crate) fn set_query_context(ctx: QueryContext) {
 }
 
 
-pub fn get_timeseries_index() -> &'static TimeseriesIndex {
-    TIMESERIES_INDEX.get_or_init(|| TimeseriesIndex::new())
+pub fn get_timeseries_index() -> &'static TimeSeriesIndex {
+    TIMESERIES_INDEX.get_or_init(|| TimeSeriesIndex::new())
 }

@@ -323,8 +323,6 @@ impl TimeSeries {
             }
         }
 
-        // CompactionDelRange(series, start_ts, end_ts, last_ts_before_deletion);
-
         Ok(deleted_samples)
     }
 

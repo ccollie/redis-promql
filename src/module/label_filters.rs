@@ -2,6 +2,7 @@ use ahash::AHashSet;
 use metricsql_parser::prelude::{LabelFilter, LabelFilterOp, Matchers};
 use redis_module::{Context as RedisContext, RedisError, RedisResult, RedisValue};
 use crate::common::regex_util::get_or_values;
+use crate::globals::get_timeseries_index;
 use crate::module::call_redis_command;
 
 static LABEL_PARSING_ERROR: &str = "TSDB: failed parsing labels";
@@ -65,6 +66,7 @@ pub(crate) fn get_series_keys_by_matchers(
     matchers: &Matchers,
     keys: &mut AHashSet<String>
 ) -> RedisResult<()> {
+    let index = get_timeseries_index();
     let args = matchers_to_query_args(matchers)?;
     let reply = call_redis_command(ctx, "TS.QUERYINDEX", args.as_slice())?;
     if let RedisValue::Array(mut values) = reply {
@@ -84,15 +86,4 @@ pub(crate) fn get_series_keys_by_matchers(
     }
 
     Ok(())
-}
-
-pub(crate) fn get_series_keys_by_matchers_vec(
-    ctx: &RedisContext,
-    matchers: &Vec<Matchers>,
-) -> RedisResult<AHashSet<String>> {
-    let mut keys: AHashSet<String> = AHashSet::with_capacity(16); // todo: properly estimate
-    for matcher in matchers {
-        get_series_keys_by_matchers(ctx, matcher, &mut keys)?;
-    }
-    Ok(keys)
 }

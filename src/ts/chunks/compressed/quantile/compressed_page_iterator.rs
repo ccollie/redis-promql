@@ -19,10 +19,10 @@ impl<'a> DecompressorContext<'a> {
         let mut t_decompressor = Decompressor::<i64>::default();
 
         // read timestamp metadata
-        let mut compressed = read_metadata(&mut t_decompressor, data)?;
+        let compressed = read_metadata(&mut t_decompressor, data)?;
         let mut v_decompressor = Decompressor::<f64>::default();
 
-        compressed = read_metadata(&mut v_decompressor, compressed)?;
+        let _ = read_metadata(&mut v_decompressor, compressed)?;
 
         Ok(Self {
             data,
@@ -143,8 +143,8 @@ impl<'a> Iterator for CompressedPageIterator<'a> {
                 return None;
             }
         }
-        let mut timestamps = &self.timestamps[0..];
-        let mut values = &self.values[0..];
+        let timestamps = &self.timestamps[0..];
+        let values = &self.values[0..];
 
         // filter out timestamps out of range
         trim_data(timestamps, values, self.start, self.end);

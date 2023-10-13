@@ -9,8 +9,8 @@ pub const MAX_UNCOMPRESSED_SAMPLES: usize = 256;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct UncompressedChunk {
-    pub(in crate::ts) timestamps: Vec<i64>,
-    pub(in crate::ts) values: Vec<f64>
+    pub timestamps: Vec<i64>,
+    pub values: Vec<f64>
 }
 
 impl UncompressedChunk {
@@ -191,9 +191,13 @@ impl TimesSeriesBlock for UncompressedChunk {
         let half = self.timestamps.len() / 2;
         let (left_timestamps, right_timestamps) = self.timestamps.split_at(half);
         let (left_values, right_values) = self.values.split_at(half);
-        self.timestamps = left_timestamps.to_vec();
-        self.values = left_values.to_vec();
+        let res = Self::new(right_timestamps.to_vec(), right_values.to_vec());
 
-        Ok(Self::new(right_timestamps.to_vec(), right_values.to_vec()))
+        let llen = left_timestamps.len();
+
+        self.timestamps.truncate(llen);
+        self.values.truncate(llen);
+
+        Ok(res)
     }
 }

@@ -10,6 +10,7 @@ mod function_del;
 mod function_range;
 mod function_madd;
 mod function_add;
+mod function_alter;
 
 pub(crate) use utils::*;
 pub(crate) use timeseries_api::*;

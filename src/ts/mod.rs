@@ -9,12 +9,12 @@ mod duplicate_policy;
 use redis_module::{Context, RedisResult, RedisString, RedisError};
 pub(crate) use types::*;
 pub use duplicate_policy::*;
-use crate::module::REDIS_PROMQL_TIMESERIES_TYPE;
+use crate::module::REDIS_PROMQL_SERIES_TYPE;
 use crate::ts::time_series::TimeSeries;
 
 pub(crate) fn get_timeseries_mut<'a>(ctx: &'a Context, key: &RedisString, must_exist: bool) -> RedisResult<Option<&'a mut TimeSeries>> {
     let redis_key = ctx.open_key_writable(key.into());
-    let result = redis_key.get_value::<TimeSeries>(&REDIS_PROMQL_TIMESERIES_TYPE)?;
+    let result = redis_key.get_value::<TimeSeries>(&REDIS_PROMQL_SERIES_TYPE)?;
     if must_exist && result.is_none() {
         return Err(RedisError::Str("ERR TSDB: the key is not a timeseries"));
     }
@@ -23,7 +23,7 @@ pub(crate) fn get_timeseries_mut<'a>(ctx: &'a Context, key: &RedisString, must_e
 
 pub(crate) fn get_timeseries<'a>(ctx: &'a Context, key: &RedisString, must_exist: bool) -> RedisResult<Option<&'a TimeSeries>> {
     let redis_key = ctx.open_key(key.into());
-    let result = redis_key.get_value::<TimeSeries>(&REDIS_PROMQL_TIMESERIES_TYPE)?;
+    let result = redis_key.get_value::<TimeSeries>(&REDIS_PROMQL_SERIES_TYPE)?;
     if must_exist && result.is_none() {
         return Err(RedisError::Str("ERR TSDB: the key is not a timeseries"));
     }

@@ -1,6 +1,6 @@
 use redis_module::{Context, NextArg, REDIS_OK, RedisError, RedisResult, RedisString, RedisValue};
 use crate::common::parse_timestamp;
-use crate::module::function_add::internal_add;
+use crate::module::timeseries_api::internal_add;
 use crate::ts::get_timeseries_mut;
 
 pub(crate) fn madd(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
@@ -33,7 +33,7 @@ pub(crate) fn madd(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
                 let value = args.next_f64()?;
                 // Safety: we checked above that the key exists
                 let series = res.unwrap().unwrap();
-                if let Ok(res) = internal_add(series, timestamp, value, policy) {
+                if let Ok(res) = internal_add(ctx, series, timestamp, value, policy) {
                 }
             }
         }

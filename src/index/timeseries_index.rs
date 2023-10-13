@@ -13,15 +13,12 @@ use crate::ts::{get_timeseries, Labels};
 
 pub type RedisContext = Context;
 
-// todo: make configurable
-static LABEL_CACHE_MAX_SIZE: usize = 100;
-
 // Note. Unfortunately we can't use ahash here because it's RandomState uses `allocator-api`,
 // which at the time of writing this is unstable. Maybee xxxhash-rust will be a good alternative.
 pub type BitmapMap = BTreeMap<String, RoaringTreemap>;
 
 /// Index for quick access to timeseries by label, label value or metric name.
-pub struct TimeseriesIndex {
+pub struct TimeSeriesIndex {
     group_sequence: AtomicU64,
     /// Map from timeseries id to timeseries key.
     id_to_key: RwLock<AHashMap<u64, String>>,
@@ -29,17 +26,17 @@ pub struct TimeseriesIndex {
     label_to_ts: RwLock<BitmapMap>,
     /// Map from label name + label value to set of timeseries ids.
     label_kv_to_ts: RwLock<BitmapMap>,
-    timeseries_sequence: AtomicU64,
+    series_sequence: AtomicU64,
 }
 
-impl TimeseriesIndex {
-    pub fn new() -> TimeseriesIndex {
-        TimeseriesIndex {
+impl TimeSeriesIndex {
+    pub fn new() -> TimeSeriesIndex {
+        TimeSeriesIndex {
             group_sequence: AtomicU64::new(0),
             id_to_key: Default::default(),
             label_to_ts: Default::default(),
             label_kv_to_ts: Default::default(),
-            timeseries_sequence: Default::default(),
+            series_sequence: Default::default(),
         }
     }
 
@@ -53,7 +50,7 @@ impl TimeseriesIndex {
         let mut label_kv_to_ts = self.label_kv_to_ts.write().unwrap();
         label_kv_to_ts.clear();
 
-        self.timeseries_sequence.store(0, Ordering::Relaxed);
+        self.series_sequence.store(0, Ordering::Relaxed);
     }
 
     pub fn label_count(&self) -> usize {
@@ -68,7 +65,7 @@ impl TimeseriesIndex {
 
     pub(crate) fn next_id(&self) -> u64 {
         // wee use Relaxed here since we only need uniqueness, not monotonicity
-        self.timeseries_sequence.fetch_add(1, Ordering::Relaxed)
+        self.series_sequence.fetch_add(1, Ordering::Relaxed)
     }
 
     pub(crate) fn index_time_series(&self, ts: &mut TimeSeries, key: String) {
@@ -269,7 +266,7 @@ fn get_label_value_bitmap(
     label: &str,
     predicate: impl Fn(&str) -> bool,
 ) -> RoaringTreemap {
-    let prefix = format!("{}=", label);
+    let prefix = format!("{label}=");
     label_kv_to_ts
         .range(prefix..)
         .flat_map(|(key, map)| {

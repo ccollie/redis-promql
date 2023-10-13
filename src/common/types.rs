@@ -116,6 +116,9 @@ impl TryFrom<&str> for TimestampRangeValue {
             "*" => Ok(TimestampRangeValue::Now),
             _ => {
                 let ts = parse_timestamp(value).map_err(|_| RedisError::Str("invalid timestamp"))?;
+                if ts < 0 {
+                    return Err(RedisError::Str("TSDB: invalid timestamp, must be a non-negative integer"));
+                }
                 Ok(TimestampRangeValue::Value(ts))
             }
         }

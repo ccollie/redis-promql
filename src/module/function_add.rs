@@ -1,13 +1,11 @@
 use crate::module::function_create::{create_timeseries, TimeSeriesOptions};
-use crate::module::{REDIS_PROMQL_TIMESERIES_TYPE};
-use crate::ts::time_series::TimeSeries;
+use crate::module::{REDIS_PROMQL_SERIES_TYPE};
 use crate::ts::{DuplicatePolicy, get_timeseries_mut};
-use metricsql_engine::Timestamp;
 use redis_module::key::RedisKeyWritable;
 use redis_module::{Context, NextArg, RedisError, RedisResult, RedisString, RedisValue};
 use ahash::AHashMap;
 use crate::common::{parse_duration, parse_number_with_unit, parse_timestamp};
-use crate::globals::get_timeseries_index;
+use crate::module::timeseries_api::internal_add;
 
 const CMD_ARG_RETENTION: &str = "RETENTION";
 const CMD_ARG_DUPLICATE_POLICY: &str = "DUPLICATE_POLICY";
@@ -23,12 +21,13 @@ pub fn add(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let timestamp = parse_timestamp(args.next_str()?)?;
     let value = args.next_f64()?;
 
-    let mut options = TimeSeriesOptions::new(&key);
+    let mut options = TimeSeriesOptions::default();
 
     let series = get_timeseries_mut(ctx, &key, false)?;
     if let Some(series) = series {
         args.done()?;
         internal_add(
+            ctx,
             series,
             timestamp,
             value,
@@ -86,12 +85,11 @@ pub fn add(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         };
     }
 
-    let ts_index = get_timeseries_index();
-    let mut ts = create_timeseries(options);
-    ts_index.index_timeseries(&mut ts, key.to_string());
+    let mut ts = create_timeseries(&key, options);
 
     let dupe_policy = ts.duplicate_policy.unwrap_or_default();
     internal_add(
+        ctx,
         &mut ts,
         timestamp,
         value,
@@ -99,43 +97,7 @@ pub fn add(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     )?;
 
     let redis_key = RedisKeyWritable::open(ctx.ctx, &key);
-    redis_key.set_value(&REDIS_PROMQL_TIMESERIES_TYPE, ts)?;
+    redis_key.set_value(&REDIS_PROMQL_SERIES_TYPE, ts)?;
 
     return Ok(RedisValue::Integer(timestamp));
-}
-
-pub(super) fn internal_add(
-    series: &mut TimeSeries,
-    timestamp: Timestamp,
-    value: f64,
-    dp_override: DuplicatePolicy,
-) -> Result<(), RedisError> {
-    let last_ts = series.last_timestamp;
-    let retention = series.retention.as_millis() as i64;
-    // ensure inside retention period.
-    if retention > 0 && (timestamp < last_ts) && retention < (last_ts - timestamp) {
-        return Err(RedisError::Str("TSDB: Timestamp is older than retention"));
-    }
-
-    if let Some(dedup_interval) = series.dedupe_interval {
-        let millis = dedup_interval.as_millis() as i64;
-        if millis > 0 && (timestamp - last_ts) < millis {
-            return Err(RedisError::Str(
-                "TSDB: new sample in less than dedupe interval",
-            ));
-        }
-    }
-
-    if timestamp <= series.last_timestamp && series.total_samples != 0 {
-        let val = series.upsert_sample(timestamp, value, Some(dp_override));
-        if val.is_err() {
-            let msg = "TSDB: Error at upsert, cannot update when DUPLICATE_POLICY is set to BLOCK";
-            return Err(RedisError::Str(msg));
-        }
-        return Ok(());
-    }
-
-    series
-        .append(timestamp, value)
-        .map_err(|_| RedisError::Str("TSDB: Error at append"))
 }

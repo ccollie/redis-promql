@@ -2,7 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::time::Duration;
-use crate::module::{DEFAULT_CHUNK_SIZE_BYTES, DuplicatePolicy};
+use crate::module::{DEFAULT_CHUNK_SIZE_BYTES};
+use crate::ts::DuplicatePolicy;
 
 pub const DEFAULT_RULE_UPDATE_ENTRIES_LIMIT: usize = 10;
 pub const DEFAULT_MAX_SERIES_LIMIT: usize = 30_000;

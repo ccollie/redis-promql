@@ -8,7 +8,7 @@ use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
 use redis_module::Context;
 use crate::globals::get_timeseries_index;
-use crate::index::TimeseriesIndex;
+use crate::index::TimeSeriesIndex;
 
 pub struct TsdbDataProvider {}
 
@@ -16,7 +16,7 @@ impl TsdbDataProvider {
     fn get_series_data(
         &self,
         ctx: &Context,
-        index: &TimeseriesIndex,
+        index: &TimeSeriesIndex,
         search_query: &SearchQuery,
     ) -> Vec<QueryResult> {
         index

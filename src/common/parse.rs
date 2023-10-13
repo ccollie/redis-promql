@@ -45,6 +45,12 @@ pub fn parse_duration(arg: &str) -> RedisResult<Duration> {
     }
 }
 
+pub fn parse_double(arg: &str) -> RedisResult<f64> {
+    arg.parse::<f64>().map_err(|_e| {
+        RedisError::Str("TSDB: invalid value")
+    })
+}
+
 pub fn parse_number_with_unit(arg: &str) -> TsdbResult<f64> {
     parse_number(arg).map_err(|_e| {
         TsdbError::InvalidNumber(arg.to_string())
