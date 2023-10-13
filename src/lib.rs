@@ -10,6 +10,7 @@ mod provider;
 mod globals;
 mod config;
 mod ts;
+mod rules;
 
 use module::*;
 use crate::globals::get_timeseries_index;
