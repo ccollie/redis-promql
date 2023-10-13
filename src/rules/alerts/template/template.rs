@@ -38,8 +38,6 @@ pub(crate) struct TextTemplate {
 
 static MASTER_TEMPLATE: OnceLock<RwLock<TextTemplate>> = OnceLock::new();
 
-type DatasourceMetric = crate::rules::alerts::datasource::Metric;
-
 fn get_master_template_ref() -> &'static RwLock<TextTemplate> {
     MASTER_TEMPLATE.get_or_init(|| {
         create_master_template()

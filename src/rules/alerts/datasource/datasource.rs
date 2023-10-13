@@ -53,6 +53,9 @@ pub struct Metric {
     pub(crate) values: Vec<f64>
 }
 
+// teemporary. Please remove
+pub type DatasourceMetric = Metric;
+
 static EMPTY_STRING: &str = "";
 
 impl Metric {

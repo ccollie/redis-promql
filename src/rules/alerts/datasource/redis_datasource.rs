@@ -3,6 +3,7 @@ use std::ops::Add;
 use std::time::Duration;
 
 use metricsql_engine::prelude::query::{QueryParams};
+use metricsql_engine::TimestampTrait;
 use crate::globals::get_query_context;
 
 use crate::rules::alerts::{AlertsResult, DataSourceType, Querier, QuerierBuilder, QuerierParams, QueryResult};
@@ -99,7 +100,7 @@ impl RedisDatasource {
     fn get_range_req_params(&self, query: String, start: Timestamp, end: Timestamp) -> QueryParams {
         let mut start = start;
         if !self.evaluation_offset.is_zero() {
-            start = truncate(start, &self.evaluation_interval).add(&self.evaluation_offset);
+            start = start.truncate(self.evaluation_interval).add(&self.evaluation_offset);
         }
         let mut params = QueryParams::new(query, start);
         params.end = end;
@@ -117,7 +118,7 @@ impl RedisDatasource {
         let mut timestamp = timestamp;
         if self.evaluation_offset.is_zero() {
             // calculate the min timestamp on the evaluationInterval
-            let interval_start = truncate(timestamp, &self.evaluation_interval);
+            let interval_start = timestamp.truncate(self.evaluation_interval);
             let ts = interval_start.add(&self.evaluation_offset);
             if timestamp < ts {
                 // if passed timestamp is before the expected evaluation offset,
@@ -133,7 +134,7 @@ impl RedisDatasource {
         }
         if self.query_time_alignment {
             // see https://github.com/VictoriaMetrics/VictoriaMetrics/issues/1232
-            timestamp = truncate(timestamp, &self.evaluation_interval);
+            timestamp = timestamp.truncate(self.evaluation_interval);
         }
         if self.look_back.as_millis() > 0 {
             timestamp = timestamp.add(-self.look_back)
@@ -171,15 +172,6 @@ impl QuerierBuilder for RedisDatasource {
     }
 }
 
-fn truncate(ts: Timestamp, duration: &Duration) -> Timestamp {
-    let mut ts = ts;
-    if duration.is_zero() {
-        return ts;
-    }
-    let mut t = ts;
-    t -= t % (duration.as_millis() as i64);
-    return t;
-}
 
 fn duration_to_chrono(duration: &Duration) -> chrono::Duration {
     return chrono::Duration::from_std(*duration).unwrap();
