@@ -31,7 +31,7 @@ pub struct TimeSeries {
 
     /// We only compress blocks that have 128 integers. The last block which
     /// may have <=127 items is stored in uncompressed form.
-    pub(crate) last_chunk: TimeSeriesChunk,
+    pub last_chunk: TimeSeriesChunk,
 
     pub total_samples: u64,
 
@@ -226,7 +226,6 @@ impl TimeSeries {
     pub fn get_last_block(&self) -> &TimeSeriesChunk {
         &self.last_chunk
     }
-
     pub fn overlaps(&self, start_ts: Timestamp, end_ts: Timestamp) -> bool {
         self.last_timestamp >= start_ts && self.first_timestamp <= end_ts
     }

@@ -7,11 +7,11 @@ use metricsql_engine::METRIC_NAME_LABEL;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use xxhash_rust::xxh3::xxh3_64;
+use crate::common::FastStringTransformer;
 
-use crate::common::bytes_util::FastStringTransformer;
 use crate::common::regex_util::PromRegex;
 use crate::rules::relabel::{GraphiteLabelRule, GraphiteMatchTemplate, IfExpression};
-use crate::rules::relabel::relabel_config::{defaultRegexForRelabelConfig, RelabelAction};
+use crate::rules::relabel::relabel_config::{RelabelAction};
 use crate::rules::types::Label;
 
 /// DebugStep contains debug information about a single relabeling rule step

@@ -2,8 +2,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
 use std::time::Duration;
-use redis_module::Context;
+use redis_module::{Context, ContextGuard, ThreadSafeContext};
 use crate::rules::alerts::{AlertsError, AlertsResult};
+use crate::rules::RawTimeSeries;
 use crate::ts::time_series::TimeSeries;
 
 /// a queue for writing timeseries back to redis.
@@ -75,23 +76,21 @@ impl WriteQueue {
     }
 
     pub fn is_closed(&self) -> bool {
-        self.closed.Load()
+        self.closed.load(Ordering::SeqCst)
     }
 
     /// push adds timeseries into queue for writing into remote storage.
     /// Push returns and error if client is stopped or if queue is full.
-    pub fn push(&self, s: TimeSeries) -> Result<(), String> {
+    pub fn push(&self, s: Vec<TimeSeries>) -> Result<(), String> {
         if self.is_closed() {
             return Err("client is closed".to_string())
         }
         let mut writer = self.data.write().unwrap();
         if writer.len() >= self.max_queue_size {
-            // self.flush( )
-            let msg = format!("failed to push timeseries - queue is full ({} entries). ",
-                             self.max_queue_size);
+            self.flush()?;
             // Err()
         }
-        writer.push(s);
+        writer.extend(s.into_iter());
         Ok(())
     }
 
@@ -104,23 +103,42 @@ impl WriteQueue {
     }
 
     /// flush is a blocking function that marshals WriteRequest and sends it to remote-write endpoint.
-    pub fn flush(&self, ctx: &Context) {
+    pub fn flush(&self) {
         let mut writer = self.data.write().unwrap();
-        for batch in writer.chunks(self.max_batch_size) {
+        let thread_ctx = ThreadSafeContext::new();
+
+        let mut iter = writer.chunks_exact_mut(self.max_batch_size);
+        while let Some(mut batch) = iter.next() {
             if self.is_closed() {
                 return
             }
-            if let Err(err) = self.send(ctx, batch) {
-                let msg = format!("failed to store timeseries data: {:?}", err);
-                ctx.log_warning(&msg);
-                continue
+            let ctx = thread_ctx.lock();
+            match self.send(&ctx, &mut batch) {
+                Ok(_) => {
+                    ctx.log_debug(&*format!("successfully sent {} series to remote storage", batch.len()));
+                    drop(ctx)
+                }
+                Err(err) => {
+                    let msg = format!("failed to store timeseries data: {:?}", err);
+                    ctx.log_warning(&msg);
+                    drop(ctx);
+                    continue
+                }
             }
-            ctx.log_debug(&*format!("successfully sent {} series to remote storage", batch.len()))
         }
+
+        let mut remainder = iter.into_remainder().to_vec();
+        writer.clear();
+        writer.append(&mut remainder);
     }
 
-    fn send(&self, ctx: &Context, series: &[TimeSeries]) -> AlertsResult<()> {
-        todo!("send data to remote storage")
+    fn send(&self, ctx: &ContextGuard, series: &mut [TimeSeries]) -> AlertsResult<()> {
+        loop {
+            ctx.call("INCR", &["threads"]).unwrap();
+            // release the lock as soon as we're done accessing redis memory
+            drop(ctx);
+            thread::sleep(Duration::from_millis(1000));
+        }
     }
 
 }
