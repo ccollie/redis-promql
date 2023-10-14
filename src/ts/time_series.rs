@@ -174,8 +174,8 @@ impl TimeSeries {
     /// Get the time series between give start and end time (both inclusive).
     pub fn get_range(
         &self,
-        range_start_time: Timestamp,
-        range_end_time: Timestamp,
+        start_time: Timestamp,
+        end_time: Timestamp,
     ) -> TsdbResult<Vec<Sample>> {
         // While each TimeSeriesBlock as well as TimeSeriesBlockCompressed has data points sorted by time, in a
         // multithreaded environment, they might not be sorted across blocks. Hence, we collect all the samples in a heap,
@@ -185,7 +185,7 @@ impl TimeSeries {
         let mut timestamps = Vec::with_capacity(64);
         let mut values = Vec::with_capacity(64);
 
-        self.get_range_raw(range_start_time, range_end_time, &mut timestamps, &mut values)?;
+        self.get_range_raw(start_time, end_time, &mut timestamps, &mut values)?;
         for (ts, value) in timestamps.iter().zip(values.iter()) {
             result.push(Sample::new(*ts, *value));
         }

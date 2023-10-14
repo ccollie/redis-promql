@@ -182,7 +182,7 @@ pub struct GroupConfig {
     /// Optional HTTP URL parameters added to each rule request
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    pub params: Option<HashMap<String, String>>,
+    pub params: Option<AHashMap<String, String>>,
     /// Headers contains optional HTTP headers added to each rule request
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) headers: Headers,

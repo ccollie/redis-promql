@@ -48,7 +48,12 @@ pub(crate) fn create_and_store_series(ctx: &Context, key: &RedisString, options:
     Ok(())
 }
 
-pub(crate) fn get_timeseries_mut<'a>(ctx: &'a Context, key: &RedisString, must_exist: bool) -> RedisResult<Option<&'a mut TimeSeries>> {
+pub(crate) fn series_exists(ctx: &Context, key: &RedisString) -> bool {
+    let series_key = ctx.open_key(key.into());
+    !series_key.is_empty()
+}
+
+pub(crate) fn get_series_mut<'a>(ctx: &'a Context, key: &RedisString, must_exist: bool) -> RedisResult<Option<&'a mut TimeSeries>> {
     let redis_key = ctx.open_key_writable(key.into());
     let result = redis_key.get_value::<TimeSeries>(&REDIS_PROMQL_SERIES_TYPE)?;
     if must_exist && result.is_none() {

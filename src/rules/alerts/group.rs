@@ -1,26 +1,25 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::default::Default;
 use std::hash::Hasher;
 use std::ops::Add;
-use std::sync::Mutex;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
-use ahash::AHashSet;
+use ahash::AHashMap;
 
 use enquote::enquote;
 use metricsql_engine::TimestampTrait;
 use metricsql_parser::common::METRIC_NAME;
 use serde::{Deserialize, Serialize};
 use xxhash_rust::xxh3::Xxh3;
-use crate::common::constants::STALE_NAN;
 use crate::common::current_time_millis;
+use crate::common::types::Label;
 use crate::config::get_global_settings;
 
-use crate::rules::{EvalContext, new_time_series, Rule, RuleType};
+use crate::rules::{EvalContext, Rule, RuleType};
 use crate::rules::alerts::{AlertingRule, AlertsError, AlertsResult, DataSourceType, GroupConfig, Notifier, RecordingRule, WriteQueue};
 use crate::rules::alerts::datasource::datasource::{QuerierBuilder, QuerierParams};
 use crate::rules::alerts::executor::Executor;
-use crate::rules::types::{Label, RawTimeSeries};
 use crate::ts::{Labels, Timestamp};
 
 /// Group is an entity for grouping rules
@@ -37,9 +36,9 @@ pub struct Group {
     pub limit: usize,
     pub last_evaluation: Timestamp,
     pub labels: Labels,
-    pub params: HashMap<String, String>,
+    pub params: AHashMap<String, String>,
     pub headers: Labels,
-    pub notifier_headers: HashMap<String, String>,
+    pub notifier_headers: AHashMap<String, String>,
     pub metrics: GroupMetrics,
     #[serde(skip)]
     cancelled: AtomicBool,
@@ -154,7 +153,6 @@ impl Group {
         self.rule_count() == 0
     }
 
-
     /// restores alerts state for group rules
     pub fn restore(&mut self, ctx: &EvalContext, qb: impl QuerierBuilder, ts: Timestamp, look_back: Duration) -> AlertsResult<()> {
         let settings = get_global_settings();
@@ -167,7 +165,7 @@ impl Group {
                 evaluation_interval: self.interval.clone(),
                 eval_offset: Default::default(),
                 query_params: self.params.clone(),
-                headers: self.headers.into(),
+                headers: self.headers.clone(),
                 debug: ar.debug,
             });
             ar.restore(ctx, ts, look_back)
@@ -258,41 +256,39 @@ impl Group {
             .is_some()
     }
 
-    fn eval<'a>(&mut self, ctx: &'a EvalContext, ts: Timestamp) {
-        let settings = get_global_settings();
+    pub(super) fn eval<'a>(&mut self, ts: Timestamp) {
         self.metrics.iteration_total.fetch_add(1, Ordering::Relaxed);
 
         let start = current_time_millis();
 
         if self.is_empty() {
-            self.metrics.iteration_duration.fetch_add(start as u64, Ordering::Relaxed);
             self.last_evaluation = start;
             return;
         }
 
-        let resolve_duration = get_resolve_duration(
-            self.interval, &settings.resend_delay,
-            &settings.max_resolve_duration);
-
+        let resolve_duration = self.resolve_duration();
         let ts = self.adjust_req_timestamp(ts);
 
-        let errs = e.exec_concurrently(ctx, g.rules, ts, resolve_duration, self.limit);
+        let errs = e.exec_concurrently(g.rules, ts, resolve_duration, self.limit);
         for err in errs {
             if err != nil {
                 let msg = format!("group {}: {:?}", self.name, err);
                 ctx.log_warning(&msg);
             }
         }
-        self.metrics.iteration_duration.UpdateDuration(start);
         self.last_evaluation = start
     }
 
-    pub fn run<'a>(&mut self, ctx: &'a EvalContext, nts: fn() -> Vec<dyn Notifier>, qb: impl QuerierBuilder) {
+    pub fn run<'a>(&mut self,
+                   ctx: &'a EvalContext,
+                   nts: fn() -> Vec<dyn Notifier>,
+                   write_queue: Arc<WriteQueue>,
+                   qb: impl QuerierBuilder) {
         let settings = get_global_settings();
         let eval_ts = current_time_millis();
 
         let mut e = Executor {
-            rw,
+            rw: Arc::clone(&write_queue),
             notifiers: nts,
             notifier_headers: self.notifier_headers.clone(),
             previously_sent_series_to_rw: Default::default(),
@@ -323,6 +319,13 @@ impl Group {
         }
         let eval_ts = eval_ts.add((missed + 1) * self.interval);
         self.eval(ctx, eval_ts)
+    }
+
+    pub(super) fn resolve_duration(&self) -> Duration {
+        let settings = get_global_settings();
+        get_resolve_duration(
+            self.interval, &settings.resend_delay,
+            &settings.max_resolve_duration)
     }
 
     pub(super) fn adjust_req_timestamp(&self, timestamp: Timestamp) -> Timestamp {
@@ -388,6 +391,29 @@ fn get_resolve_duration(group_interval: Duration, delta: &Duration,
         resolve_duration = max_duration
     }
     return resolve_duration;
+}
+
+/// delay_before_start returns a duration on the interval between [ts..ts+interval].
+/// delay_before_start accounts for `offset`, so returned duration should be always
+/// bigger than the `offset`.
+fn delay_before_start(ts: Timestamp, key: u64, interval: Duration, offset: Option<Duration>) -> Duration {
+    let mut rand_sleep = interval * (key / (1 << 64)) as u32;
+    let sleep_offset = Duration::from_millis((ts % interval.as_millis() as u64) as u64);
+    if rand_sleep < sleep_offset {
+        rand_sleep += interval
+    }
+    rand_sleep -= sleep_offset;
+    // check if `ts` after rand_sleep is before `offset`,
+    // if it is, add extra eval_offset to rand_sleep.
+    // see https://github.com/VictoriaMetrics/VictoriaMetrics/issues/3409.
+    if let Some(offset) = offset {
+        let tmp_eval_ts = ts.add(rand_sleep);
+        if tmp_eval_ts < tmp_eval_ts.truncate(interval).add(*offset) {
+            rand_sleep += *offset
+        }
+    }
+
+    rand_sleep
 }
 
 pub(super) fn labels_to_string(labels: &[Label]) -> String {

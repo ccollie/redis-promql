@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt::Display;
 use std::str::FromStr;
 use std::time::Duration;
@@ -7,11 +6,11 @@ use ahash::AHashMap;
 use gtmpl::{Context, Template};
 use gtmpl_derive::Gtmpl;
 use serde::{Deserialize, Serialize};
+use crate::common::types::Label;
 
 use crate::rules::alerts::{AlertsError, AlertsResult, ErrorGroup};
 use crate::rules::alerts::template::{clone_template, funcs_with_query, get_template, get_with_funcs, QueryFn};
 use crate::rules::relabel::ParsedRelabelConfig;
-use crate::rules::types::Label;
 use crate::ts::Timestamp;
 
 /// AlertState is the state of an alert.
@@ -65,7 +64,7 @@ pub struct Alert {
     pub state: AlertState,
     /// expr contains the expression that was executed to generate the Alert
     pub expr: String,
-    /// active_at defines the moment of time when Alert has become active
+    /// active_at defines the moment of time when the Alert has become active
     pub active_at: Timestamp,
     /// start defines the moment of time when the alert starts firing
     pub start: Timestamp,

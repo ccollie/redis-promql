@@ -2,14 +2,14 @@ mod bytes_util;
 mod time;
 pub mod types;
 pub mod regex_util;
-mod humanize;
+pub mod humanize;
 mod utils;
 mod parse;
 pub mod constants;
 
 use std::sync::OnceLock;
 use regex::Regex;
-pub use humanize::*;
+
 pub use utils::*;
 pub use parse::*;
 pub use bytes_util::*;

@@ -2,10 +2,12 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
 use std::time::Duration;
-use redis_module::{Context, ContextGuard, ThreadSafeContext};
+use redis_module::{ContextGuard, RedisString, ThreadSafeContext};
+use crate::index::RedisContext;
+use crate::module::{create_and_store_series, get_series_mut, series_exists};
 use crate::rules::alerts::{AlertsError, AlertsResult};
-use crate::rules::RawTimeSeries;
 use crate::ts::time_series::TimeSeries;
+use crate::ts::TimeSeriesOptions;
 
 /// a queue for writing timeseries back to redis.
 pub struct WriteQueue {
@@ -119,7 +121,7 @@ impl WriteQueue {
                     drop(ctx)
                 }
                 Err(err) => {
-                    let msg = format!("failed to store timeseries data: {:?}", err);
+                    let msg = format!("failed to store series data: {:?}", err);
                     ctx.log_warning(&msg);
                     drop(ctx);
                     continue
@@ -132,13 +134,24 @@ impl WriteQueue {
         writer.append(&mut remainder);
     }
 
+    fn create_series<'a>(&self, ctx: &'a RedisContext, key: &RedisString) -> AlertsResult<&'a mut TimeSeries> {
+        let mut options = TimeSeriesOptions::default();
+        create_and_store_series(ctx, key, options)
+            .map_err(|e| AlertsError::Generic(format!("failed to create series: {:?}", e)))?;
+        let series = get_series_mut(ctx, key, true)
+            .map_err(|e| AlertsError::Generic(format!("failed to get series: {:?}", e)))?
+            .unwrap();
+        Ok(series)
+    }
+
     fn send(&self, ctx: &ContextGuard, series: &mut [TimeSeries]) -> AlertsResult<()> {
-        loop {
-            ctx.call("INCR", &["threads"]).unwrap();
-            // release the lock as soon as we're done accessing redis memory
-            drop(ctx);
-            thread::sleep(Duration::from_millis(1000));
+        if series.is_empty() {
+            return Ok(())
         }
+        if !series_exists(&ctx, &series[0].key) {
+            // create series
+        }
+        Ok(())
     }
 
 }

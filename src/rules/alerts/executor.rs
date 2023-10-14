@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use ahash::{AHashMap, AHashSet};
+use metricsql_engine::TimestampTrait;
 use crate::common::constants::STALE_NAN;
 use crate::common::types::{Label, Timestamp};
 use crate::config::get_global_settings;
@@ -12,19 +13,37 @@ use crate::rules::relabel::labels_to_string;
 pub type PreviouslySentSeries = HashMap<u64, HashMap<String, Vec<Label>>>;
 
 pub struct Executor {
+    eval_ts: Timestamp,
     pub(crate) notifiers: fn() -> Vec<Box<dyn Notifier>>,
     pub(crate) notifier_headers: AHashMap<String, String>,
 
-    pub(crate) rw: WriteQueue,
+    pub(crate) rw: Arc<WriteQueue>,
 
     /// previously_sent_series_to_rw stores series sent to RW on previous iteration
     /// HashMap<RuleID, HashMap<ruleLabels, Vec<Label>>
     /// where `ruleID` is id of the Rule within a Group and `ruleLabels` is Vec<Label> marshalled
     /// to a string
-    pub(crate) previously_sent_series_to_rw: Mutex<PreviouslySentSeries>,
+    previously_sent_series: Mutex<PreviouslySentSeries>,
 }
 
+/// SKIP_RAND_SLEEP_ON_GROUP_START will skip random sleep delay in group first evaluation
+static mut SKIP_RAND_SLEEP_ON_GROUP_START: bool = false;
+
 impl Executor {
+    pub fn new(
+        notifiers: fn() -> Vec<Box<dyn Notifier>>,
+        notifier_headers: AHashMap<String, String>,
+        rw: Arc<WriteQueue>,
+    ) -> Self {
+        Executor {
+            eval_ts: Timestamp::now(),
+            notifiers,
+            notifier_headers,
+            rw,
+            previously_sent_series: Mutex::new(HashMap::new()),
+        }
+    }
+
     /// get_stale_series checks whether there are stale series from previously sent ones.
     fn get_stale_series(&self, rule: impl Rule, tss: &[RawTimeSeries], timestamp: Timestamp) -> Vec<RawTimeSeries> {
         let mut rule_labels: HashMap<String, &Vec<Label>> = HashMap::with_capacity(tss.len());
@@ -37,7 +56,7 @@ impl Executor {
         let rid = rule.id();
         let mut stale_s: Vec<RawTimeSeries> = Vec::with_capacity(tss.len());
         // check whether there are series which disappeared and need to be marked as stale
-        let mut map = self.previously_sent_series_to_rw.lock().unwrap();
+        let mut map = self.previously_sent_series.lock().unwrap();
 
         if let Some(entry) = map.get_mut(&rid) {
             for (key, labels) in entry.iter_mut() {
@@ -58,18 +77,18 @@ impl Executor {
         return stale_s;
     }
 
-    /// purge_stale_series deletes references in tracked previously_sent_series_to_rw list to rules
+    /// deletes references in tracked previously_sent_series_to_rw list to rules
     /// which aren't present in the given active_rules list. The method is used when the list
     /// of loaded rules has changed and executor has to remove references to non-existing rules.
     pub(super) fn purge_stale_series(&mut self, active_rules: &[impl Rule]) {
         let id_hash_set: AHashSet<u64> = active_rules.iter().map(|r| r.id()).collect();
 
-        let mut map = self.previously_sent_series_to_rw.lock().unwrap();
+        let mut map = self.previously_sent_series.lock().unwrap();
 
         map.retain(|id, _| id_hash_set.contains(id));
     }
 
-    fn exec_concurrently(&mut self, rules: &[impl Rule], ts: Timestamp, resolve_duration: Duration, limit: usize) -> AlertsResult<()> {
+    pub(super) fn exec_concurrently(&mut self, rules: &[impl Rule], ts: Timestamp, resolve_duration: Duration, limit: usize) -> AlertsResult<()> {
         for rule in rules {
             res < -self.exec(rule, ts, resolve_duration, limit)
         }
@@ -77,15 +96,8 @@ impl Executor {
     }
 
     pub fn exec(&mut self, rule: &mut impl Rule, ts: Timestamp, resolve_duration: Duration, limit: usize) -> AlertsResult<()> {
-        let mut tss = rule.exec(ts, limit);
-        let settings = get_global_settings();
-
-        if let Err(err) = tss {
-            // todo: specific error type
-            let msg = format!("rule {:?}: failed to execute: {:?}", rule, err);
-            return Err(AlertsError::QueryExecutionError(msg));
-        }
-        let tss = tss.unwrap();
+        let tss = rule.exec(ts, limit)
+            .map_err(|err| AlertsError::QueryExecutionError(format!("rule {:?}: failed to execute: {:?}", rule, err)))?;
 
         self.push_to_rw(&rule, &tss)?;
 
@@ -93,6 +105,7 @@ impl Executor {
         self.push_to_rw(&rule, &stale_series)?;
 
         if rule.rule_type() == RuleType::Alerting {
+            let settings = get_global_settings();
             let alerting_rule = rule.as_any().downcast_ref::<AlertingRule>().unwrap();
             return self.send_notifications(alerting_rule, ts, resolve_duration, settings.resend_delay);
         }
@@ -126,5 +139,9 @@ impl Executor {
             }
         }
         return err_gr.Err();
+    }
+
+    pub(super) fn on_tick(&mut self) {
+
     }
 }

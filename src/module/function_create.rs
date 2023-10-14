@@ -1,12 +1,8 @@
-use redis_module::{Context, NextArg, NotifyEvent, REDIS_OK, RedisError, RedisResult, RedisString};
-use std::time::Duration;
+use redis_module::{Context, NextArg, REDIS_OK, RedisError, RedisResult, RedisString};
 use ahash::AHashMap;
-use redis_module::key::RedisKeyWritable;
 use crate::common::parse_duration;
-use crate::globals::get_timeseries_index;
-use crate::module::{create_and_store_series, DEFAULT_CHUNK_SIZE_BYTES, REDIS_PROMQL_SERIES_TYPE};
+use crate::module::create_and_store_series;
 use crate::ts::{DuplicatePolicy, TimeSeriesOptions};
-use crate::ts::time_series::TimeSeries;
 
 const CMD_ARG_RETENTION: &str = "RETENTION";
 const CMD_ARG_DUPLICATE_POLICY: &str = "DUPLICATE_POLICY";
