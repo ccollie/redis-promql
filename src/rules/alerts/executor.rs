@@ -19,7 +19,7 @@ pub struct Executor {
 
     pub(crate) rw: Arc<WriteQueue>,
 
-    /// previously_sent_series_to_rw stores series sent to RW on previous iteration
+    /// previously_sent_series stores series sent to RW on previous iteration
     /// HashMap<RuleID, HashMap<ruleLabels, Vec<Label>>
     /// where `ruleID` is id of the Rule within a Group and `ruleLabels` is Vec<Label> marshalled
     /// to a string
