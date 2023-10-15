@@ -16,7 +16,6 @@ pub struct Executor {
     eval_ts: Timestamp,
     pub(crate) notifiers: fn() -> Vec<Box<dyn Notifier>>,
     pub(crate) notifier_headers: AHashMap<String, String>,
-
     pub(crate) rw: Arc<WriteQueue>,
 
     /// previously_sent_series stores series sent to RW on previous iteration
