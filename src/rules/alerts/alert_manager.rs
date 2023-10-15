@@ -49,7 +49,7 @@ impl Manager {
                     ar_present = true
                 }
             }
-            let ng = rule.NewGroup(cfg, self.querierBuilder, *evaluationInterval, &self.labels);
+            let ng = Group::new(cfg, self.querierBuilder, *evaluationInterval, &self.labels);
             groups_registry.insert(ng.ID(), ng)
         }
 
