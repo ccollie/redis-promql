@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use crate::common::{METRIC_NAME_LABEL, parse_series_selector};
 use crate::globals::get_timeseries_index;
 use crate::module::{normalize_range_args, parse_timestamp_arg};
-use crate::module::result::{get_ts_metric_selector, META_KEY_LABEL};
+use crate::module::result::get_ts_metric_selector;
 
 // todo: series count
 
@@ -29,6 +29,15 @@ pub(crate) fn series(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     ].into_iter().collect();
 
     Ok(RedisValue::Map(map))
+}
+
+pub(crate) fn cardinality(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let label_args = parse_metadata_command_args(ctx, args, true)?;
+    let ts_index = get_timeseries_index();
+
+    let series = ts_index.series_by_matchers(ctx, &label_args.matchers, label_args.start, label_args.end);
+
+    Ok(RedisValue::Integer(series.len() as i64))
 }
 
 /// https://prometheus.io/docs/prometheus/latest/querying/api/#getting-label-names
