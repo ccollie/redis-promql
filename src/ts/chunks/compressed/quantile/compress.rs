@@ -8,7 +8,7 @@ use crate::error::{TsdbError, TsdbResult};
 use crate::ts::chunks::compressed::common::PageMetadata;
 use crate::ts::chunks::compressed::common::serialize::{read_usize, write_usize};
 
-const DATA_PAGE_SIZE: usize = 256;
+pub(super) const DATA_PAGE_SIZE: usize = 256;
 
 // todo: pass in opts. we can upfront determine if we need to use delta encoding
 // and type of value (gauge, counter, etc)
@@ -130,6 +130,8 @@ fn map_unmarshal_err(e: impl Error, what: &str) -> TsdbError {
 #[cfg(test)]
 mod test {
     use std::time::{Duration, Instant, SystemTime};
+    use q_compress::errors::QCompressResult;
+    use rand::Rng;
 
     fn main() -> QCompressResult<()> {
         let mut rng = rand::thread_rng();

@@ -19,7 +19,7 @@ pub(crate) fn series(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 
     let values: RedisValue = series
         .into_iter()
-        .map(get_ts_metric_selector)
+        .map(|ts| get_ts_metric_selector(ts))
         .collect::<Vec<_>>()
         .into();
 

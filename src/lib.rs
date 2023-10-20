@@ -57,6 +57,7 @@ redis_module! {
         ["PROM.ALTER-SERIES", commands::alter, "write deny-oom", 1, 1, 1],
         ["PROM.ADD", commands::add, "write deny-oom", 1, 1, 1],
         ["PROM.MADD", commands::madd, "write deny-oom", 1, 1, 1],
+        ["PROM.DEL", commands::del_range, "write deny-oom", 1, 1, 1],
         ["PROM.QUERY", commands::prom_query, "write deny-oom", 1, 1, 1],
         ["PROM.QUERY-RANGE", commands::prom_query_range, "write deny-oom", 1, 1, 1],
         ["PROM.RANGE", commands::range, "write deny-oom", 1, 1, 1],

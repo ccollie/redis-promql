@@ -11,6 +11,7 @@ bincode = { version = "2.0.0-rc.3", features = ["alloc", "serde"] }
 chrono = { version = "0.4.31", features = ["serde"] }
 dynamic-lru-cache = "0.2.1"
 lazy_static = { version = "1.4.0", features = [] }
+lending-iterator = "0.1.7"
 linkme = "0.3.17"
 lru_time_cache = "0.11.11"
 metricsql_engine = { git = "https://github.com/ccollie/metricsql", branch = "main" }
@@ -28,6 +29,8 @@ regex-syntax = { version = "0.8.2", features = [] }
 roaring = { version = "0.10.2", features = ["serde"]}
 xxhash-rust = { version = "0.8.7", features = ["xxh3"] }
 rand = "0.8.5"
+
+[dev.dependencies]
 
 
 [lib]
