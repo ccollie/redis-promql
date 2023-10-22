@@ -99,7 +99,7 @@ const DEFAULT_COMPRESSION_OPTIMIZATION: CompressionOptimization = CompressionOpt
 const COMPRESSION_PARALLELIZATION_THRESHOLD: usize = 64;
 
 /// `CompressedBlock` holds information about location and time range of a block of compressed data.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CompressedChunk {
     pub min_time: i64,
     pub max_time: i64,
@@ -266,10 +266,10 @@ impl CompressedChunk {
         if self.is_empty() {
             return Ok(0);
         }
-        let ssve_count = timestamps.len();
+        let save_count = timestamps.len();
         self.decompress(timestamps, values)?;
         trim_vec_data(timestamps, values, start, end);
-        Ok(timestamps.len() - ssve_count)
+        Ok(timestamps.len() - save_count)
     }
 
     fn data_size(&self) -> usize {

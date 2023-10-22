@@ -91,6 +91,10 @@ impl TimeSeriesChunk {
         }
     }
 
+    pub fn is_compressed(&self) -> bool {
+        matches!(self, TimeSeriesChunk::Uncompressed(_))
+    }
+
     pub fn is_empty(&self) -> bool {
         use TimeSeriesChunk::*;
         match self {

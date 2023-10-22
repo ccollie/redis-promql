@@ -163,11 +163,10 @@ impl Chunk for UncompressedChunk {
     }
 
     fn remove_range(&mut self, start_ts: Timestamp, end_ts: Timestamp) -> TsdbResult<usize> {
-        let start_idx = self
-            .timestamps
-            .iter()
-            .position(|&ts| ts >= start_ts)
-            .unwrap_or(self.timestamps.len());
+        let start_idx = match self.binary_search(start_ts) {
+            Ok(idx) => idx,
+            Err(idx) => idx,
+        };
 
         let end_idx = self
             .timestamps

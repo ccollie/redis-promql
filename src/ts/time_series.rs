@@ -273,7 +273,7 @@ impl TimeSeries {
         }
 
         let end_start = end_ts + 1; // ugly. use proper units/
-                                    // trim last block
+        // trim last block
         deleted_count += self.last_chunk.remove_range(end_start, i64::MAX)?;
 
         self.total_samples -= deleted_count as u64;
@@ -305,16 +305,13 @@ impl TimeSeries {
                 (chunk.num_samples() + deleted_samples) as u64 == self.total_samples;
 
             // Should we delete the entire chunk?
-            let ts_del_condition =
-                (chunk_first_ts >= start_ts && chunk_last_ts <= end_ts) && (!is_only_chunk); // We assume at least one allocated chunk in the series
-
-            if !ts_del_condition {
+            // We assume at least one allocated chunk in the series
+            if chunk.is_contained_by_range(start_ts, end_ts) && (!is_only_chunk) {
+                deleted_samples += chunk.num_samples();
+                indexes_to_delete.push(idx);
+            } else {
                 deleted_samples += chunk.remove_range(start_ts, end_ts)?;
-                continue;
             }
-
-            deleted_samples += chunk.num_samples();
-            indexes_to_delete.push(idx);
         }
 
         self.total_samples -= deleted_samples as u64;
