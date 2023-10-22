@@ -1,12 +1,12 @@
 use crate::error::{TsdbError, TsdbResult};
-use crate::ts::chunks::uncompressed::UncompressedChunk;
-use crate::ts::chunks::{Compression, TimeSeriesChunk, TimesSeriesBlock};
 use crate::ts::constants::{BLOCK_SIZE_FOR_TIME_SERIES, DEFAULT_CHUNK_SIZE_BYTES, SPLIT_FACTOR};
 use crate::ts::{DuplicatePolicy, Sample, Timestamp};
 use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
 use std::collections::BinaryHeap;
 use std::time::Duration;
+use super::{Chunk, ChunkCompression, TimeSeriesChunk};
+use crate::ts::uncompressed_chunk::UncompressedChunk;
 
 pub type Labels = AHashMap<String, String>;
 
@@ -25,7 +25,7 @@ pub struct TimeSeries {
     pub(crate) dedupe_interval: Option<Duration>,
     pub(crate) duplicate_policy: Option<DuplicatePolicy>,
 
-    pub(crate) chunk_compression: Compression,
+    pub(crate) chunk_compression: ChunkCompression,
     pub(crate) chunk_size_bytes: usize,
     pub(crate) chunks: Vec<TimeSeriesChunk>,
 
@@ -87,6 +87,7 @@ impl TimeSeries {
                 TimeSeriesChunk::Uncompressed(ref mut uncompressed_chunk) => {
                     let tsbc = TimeSeriesChunk::new(
                         self.chunk_compression,
+                        self.chunk_size_bytes,
                         &uncompressed_chunk.timestamps,
                         &uncompressed_chunk.values,
                     )?;
@@ -206,28 +207,28 @@ impl TimeSeries {
         // Get overlapping data points from the compressed blocks.
         for chunk in self.chunks.iter() {
             if chunk.overlaps(start_time, end_time) {
-                chunk.iterate_range(
+                chunk.process_range(
                     &mut _state,
                     start_time,
                     end_time,
-                    |_, times, vals, done| {
+                    |_, times, vals| {
                         timestamps.extend_from_slice(times);
                         values.extend_from_slice(vals);
-                        Ok(!done)
+                        Ok(())
                     },
                 )?;
             }
         }
 
         if self.last_chunk.overlaps(start_time, end_time) {
-            self.last_chunk.iterate_range(
+            self.last_chunk.process_range(
                 &mut _state,
                 start_time,
                 end_time,
-                |_, times, vals, done| {
+                |_, times, vals| {
                     timestamps.extend_from_slice(times);
                     values.extend_from_slice(vals);
-                    Ok(!done)
+                    Ok(())
                 },
             )?;
         }

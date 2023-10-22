@@ -2,7 +2,7 @@ use redis_module::{Context, NextArg, NotifyEvent, REDIS_OK, RedisError, RedisRes
 use std::time::Duration;
 use ahash::AHashMap;
 use redis_module::key::RedisKeyWritable;
-use crate::common::parse_duration;
+use crate::common::{parse_chunk_size, parse_duration};
 use crate::globals::get_timeseries_index;
 use crate::module::{DEFAULT_CHUNK_SIZE_BYTES, REDIS_PROMQL_SERIES_TYPE};
 use crate::ts::DuplicatePolicy;
@@ -42,6 +42,7 @@ impl TimeSeriesOptions {
 
 const CMD_ARG_RETENTION: &str = "RETENTION";
 const CMD_ARG_DUPLICATE_POLICY: &str = "DUPLICATE_POLICY";
+const CMD_ARG_CHUNK_SIZE: &str = "CHUNK_SIZE";
 const CMD_ARG_DEDUPE_INTERVAL: &str = "DEDUPE_INTERVAL";
 const CMD_ARG_LABELS: &str = "LABELS";
 const CMD_ARG_METRIC_NAME: &str = "METRIC_NAME";
@@ -100,6 +101,14 @@ pub fn parse_create_options(ctx: &Context, args: Vec<RedisString>) -> RedisResul
             arg if arg.eq_ignore_ascii_case(CMD_ARG_METRIC_NAME) => {
                 let next = args.next_str()?;
                 options.metric_name = Some(next.to_string());
+            }
+            arg if arg.eq_ignore_ascii_case(CMD_ARG_CHUNK_SIZE) => {
+                let next = args.next_str()?;
+                if let Ok(val) = parse_chunk_size(next) {
+                    options.chunk_size(val);
+                } else {
+                    return Err(RedisError::Str("ERR invalid CHUNK_SIZE value"));
+                }
             }
             arg if arg.eq_ignore_ascii_case(CMD_ARG_LABELS) => {
                 let mut labels: AHashMap<String, String> = Default::default();

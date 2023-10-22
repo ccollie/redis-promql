@@ -1,24 +1,22 @@
-use serde::{Deserialize, Serialize};
 use crate::error::{TsdbError, TsdbResult};
-use crate::ts::{DuplicatePolicy, DuplicateStatus, handle_duplicate_sample, Sample, Timestamp};
-use crate::ts::chunks::{DataPage, TimesSeriesBlock};
-use crate::ts::utils::{get_timestamp_index_bounds, trim_data};
+use crate::ts::utils::get_timestamp_index_bounds;
+use crate::ts::{handle_duplicate_sample, DuplicatePolicy, DuplicateStatus, Sample, Timestamp};
+use serde::{Deserialize, Serialize};
+use crate::ts::chunk::Chunk;
 
 // todo: move to constants
 pub const MAX_UNCOMPRESSED_SAMPLES: usize = 256;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct UncompressedChunk {
+    pub max_size: usize,
     pub timestamps: Vec<i64>,
-    pub values: Vec<f64>
+    pub values: Vec<f64>,
 }
 
 impl UncompressedChunk {
-    pub fn new(timestamps: Vec<i64>, values: Vec<f64>) -> Self {
-        Self {
-            timestamps,
-            values,
-        }
+    pub fn new(size: usize, timestamps: Vec<i64>, values: Vec<f64>) -> Self {
+        Self { timestamps, values, max_size: size }
     }
 
     pub fn len(&self) -> usize {
@@ -43,14 +41,10 @@ impl UncompressedChunk {
     }
 
     /// Get the data points in the specified range (both range_start_time and range_end_time inclusive).
-    pub fn get_samples_in_range(
-        &self,
-        start_time: i64,
-        end_time: i64,
-    ) -> Vec<Sample> {
+    pub fn get_samples_in_range(&self, start_time: i64, end_time: i64) -> Vec<Sample> {
         let mut result = Vec::new();
 
-        for (time, val) in self.timestamps.iter().zip(self.values.iter()){
+        for (time, val) in self.timestamps.iter().zip(self.values.iter()) {
             let time = *time;
             if time > end_time {
                 break;
@@ -63,7 +57,11 @@ impl UncompressedChunk {
         result
     }
 
-    fn handle_insert(&mut self, sample: &mut Sample, policy: DuplicatePolicy) -> Result<(), TsdbError> {
+    fn handle_insert(
+        &mut self,
+        sample: &mut Sample,
+        policy: DuplicatePolicy,
+    ) -> Result<(), TsdbError> {
         let timestamps = &self.timestamps[0..];
         let ts = sample.timestamp;
 
@@ -97,32 +95,41 @@ impl UncompressedChunk {
         Ok(())
     }
 
-    pub(crate) fn iterate_range<F, State>(&self, start: Timestamp, end: Timestamp, state: &mut State, mut f: F) -> TsdbResult<()>
-        where F: FnMut(&mut State, &[i64], &[f64], bool) -> TsdbResult<bool> {
-
+    pub(crate) fn process_range<F, State>(
+        &self,
+        start: Timestamp,
+        end: Timestamp,
+        state: &mut State,
+        mut f: F,
+    ) -> TsdbResult<()>
+    where
+        F: FnMut(&mut State, &[i64], &[f64]) -> TsdbResult<()>,
+    {
         let (start_idx, end_idx) = get_timestamp_index_bounds(&self.timestamps, start, end);
 
         if start_idx <= end_idx {
             // todo(perf): use pool
-            let timestamps = &self.timestamps[start_idx .. end_idx];
-            let values = &self.values[start_idx .. end_idx];
+            let timestamps = &self.timestamps[start_idx..end_idx];
+            let values = &self.values[start_idx..end_idx];
 
-            f(state, &timestamps, &values, true)?;
+            f(state, &timestamps, &values)
         } else {
             let timestamps = vec![];
             let values = vec![];
-            f(state, &timestamps, &values, true)?;
+            f(state, &timestamps, &values)
         }
-        Ok(())
     }
 
-    pub fn iter(&self, start_ts: Timestamp, end_ts: Timestamp) -> impl Iterator<Item=Sample> + '_  {
+    pub fn iter(
+        &self,
+        start_ts: Timestamp,
+        end_ts: Timestamp,
+    ) -> impl Iterator<Item = Sample> + '_ {
         SampleIter::new(self, start_ts, end_ts)
     }
 }
 
-impl TimesSeriesBlock for UncompressedChunk {
-
+impl Chunk for UncompressedChunk {
     fn first_timestamp(&self) -> Timestamp {
         if self.timestamps.is_empty() {
             return 0;
@@ -156,11 +163,16 @@ impl TimesSeriesBlock for UncompressedChunk {
     }
 
     fn remove_range(&mut self, start_ts: Timestamp, end_ts: Timestamp) -> TsdbResult<usize> {
-        let start_idx = self.timestamps.iter()
+        let start_idx = self
+            .timestamps
+            .iter()
             .position(|&ts| ts >= start_ts)
             .unwrap_or(self.timestamps.len());
 
-        let end_idx = self.timestamps.iter().rev()
+        let end_idx = self
+            .timestamps
+            .iter()
+            .rev()
             .position(|&ts| ts <= end_ts)
             .unwrap_or(0);
 
@@ -168,7 +180,7 @@ impl TimesSeriesBlock for UncompressedChunk {
             return Ok(0);
         }
 
-        let _ = self.values.drain(start_idx .. end_idx);
+        let _ = self.values.drain(start_idx..end_idx);
         let iter = self.timestamps.drain(start_idx..end_idx);
         Ok(iter.count())
     }
@@ -182,7 +194,11 @@ impl TimesSeriesBlock for UncompressedChunk {
         Ok(())
     }
 
-    fn upsert_sample(&mut self, sample: &mut Sample, dp_policy: DuplicatePolicy) -> TsdbResult<usize> {
+    fn upsert_sample(
+        &mut self,
+        sample: &mut Sample,
+        dp_policy: DuplicatePolicy,
+    ) -> TsdbResult<usize> {
         let ts = sample.timestamp;
 
         let count = self.timestamps.len();
@@ -202,11 +218,14 @@ impl TimesSeriesBlock for UncompressedChunk {
         return Ok(self.len() - count);
     }
 
-    fn split(&mut self) -> TsdbResult<Self> where Self: Sized {
+    fn split(&mut self) -> TsdbResult<Self>
+    where
+        Self: Sized,
+    {
         let half = self.timestamps.len() / 2;
         let (left_timestamps, right_timestamps) = self.timestamps.split_at(half);
         let (left_values, right_values) = self.values.split_at(half);
-        let res = Self::new(right_timestamps.to_vec(), right_values.to_vec());
+        let res = Self::new(self.max_size, right_timestamps.to_vec(), right_values.to_vec());
 
         let llen = left_timestamps.len();
 

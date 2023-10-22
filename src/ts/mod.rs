@@ -3,11 +3,17 @@ mod types;
 mod dedup;
 mod utils;
 mod constants;
-pub mod chunks;
 mod duplicate_policy;
+mod encoding;
+mod compressed_chunk;
+mod uncompressed_chunk;
+mod chunk;
 
 use redis_module::{Context, RedisResult, RedisString, RedisError};
 pub(crate) use types::*;
+pub(super) use chunk::*;
+pub(crate) use utils::*;
+pub(crate) use constants::*;
 pub use duplicate_policy::*;
 use crate::module::REDIS_PROMQL_SERIES_TYPE;
 use crate::ts::time_series::TimeSeries;
