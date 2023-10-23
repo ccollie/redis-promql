@@ -40,7 +40,7 @@ impl TryFrom<&str> for ChunkCompression {
     }
 }
 
-pub trait Chunk {
+pub trait Chunk: Sized {
     fn first_timestamp(&self) -> Timestamp;
     fn last_timestamp(&self) -> Timestamp;
     fn num_samples(&self) -> usize;
@@ -53,9 +53,7 @@ pub trait Chunk {
         sample: &mut Sample,
         dp_policy: DuplicatePolicy,
     ) -> TsdbResult<usize>;
-    fn split(&mut self) -> TsdbResult<Self>
-    where
-        Self: Sized;
+    fn split(&mut self) -> TsdbResult<Self>;
     fn overlaps(&self, start_ts: i64, end_ts: i64) -> bool {
         self.first_timestamp() <= end_ts && self.last_timestamp() >= start_ts
     }
@@ -100,6 +98,22 @@ impl TimeSeriesChunk {
         match self {
             Uncompressed(chunk) => chunk.is_empty(),
             Compressed(chunk) => chunk.is_empty(),
+        }
+    }
+
+    pub fn is_full(&self) -> bool {
+        use TimeSeriesChunk::*;
+        match self {
+            Uncompressed(chunk) => chunk.is_full(),
+            Compressed(chunk) => chunk.is_full(),
+        }
+    }
+
+    pub fn clear(&mut self) {
+        use TimeSeriesChunk::*;
+        match self {
+            Uncompressed(chunk) => chunk.clear(),
+            Compressed(chunk) => chunk.clear(),
         }
     }
 

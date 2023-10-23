@@ -4,8 +4,8 @@ use ahash::AHashMap;
 use redis_module::key::RedisKeyWritable;
 use crate::common::{parse_chunk_size, parse_duration};
 use crate::globals::get_timeseries_index;
-use crate::module::{DEFAULT_CHUNK_SIZE_BYTES, REDIS_PROMQL_SERIES_TYPE};
-use crate::ts::DuplicatePolicy;
+use crate::module::{REDIS_PROMQL_SERIES_TYPE};
+use crate::ts::{DEFAULT_CHUNK_SIZE_BYTES, DuplicatePolicy};
 use crate::ts::time_series::{Labels, TimeSeries};
 
 #[derive(Default)]

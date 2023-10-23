@@ -19,6 +19,12 @@ impl UncompressedChunk {
         Self { timestamps, values, max_size: size }
     }
 
+    pub fn with_max_size(size: usize) -> Self {
+        let mut res = Self::default();
+        res.max_size = size;
+        res
+    }
+
     pub fn len(&self) -> usize {
         self.timestamps.len()
     }
@@ -29,6 +35,11 @@ impl UncompressedChunk {
 
     pub fn is_full(&self) -> bool {
         self.timestamps.len() >= MAX_UNCOMPRESSED_SAMPLES
+    }
+
+    pub fn clear(&mut self) {
+        self.timestamps.clear();
+        self.values.clear();
     }
 
     pub fn overlaps(&self, start_time: i64, end_time: i64) -> bool {
@@ -163,7 +174,7 @@ impl Chunk for UncompressedChunk {
     }
 
     fn remove_range(&mut self, start_ts: Timestamp, end_ts: Timestamp) -> TsdbResult<usize> {
-        let start_idx = match self.binary_search(start_ts) {
+        let start_idx = match self.timestamps.binary_search(&start_ts) {
             Ok(idx) => idx,
             Err(idx) => idx,
         };
@@ -222,15 +233,10 @@ impl Chunk for UncompressedChunk {
         Self: Sized,
     {
         let half = self.timestamps.len() / 2;
-        let (left_timestamps, right_timestamps) = self.timestamps.split_at(half);
-        let (left_values, right_values) = self.values.split_at(half);
-        let res = Self::new(self.max_size, right_timestamps.to_vec(), right_values.to_vec());
+        let new_timestamps = self.timestamps.split_off(half);
+        let new_values = self.values.split_off(half);
 
-        let llen = left_timestamps.len();
-
-        self.timestamps.truncate(llen);
-        self.values.truncate(llen);
-
+        let res = Self::new(self.max_size, new_timestamps, new_values);
         Ok(res)
     }
 }

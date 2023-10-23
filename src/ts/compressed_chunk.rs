@@ -1,6 +1,6 @@
 use std::fmt::Display;
 use crate::error::{TsdbError, TsdbResult};
-use crate::ts::{DuplicatePolicy, DuplicateStatus, handle_duplicate_sample, Sample, Timestamp};
+use crate::ts::{DEFAULT_CHUNK_SIZE_BYTES, DuplicatePolicy, DuplicateStatus, handle_duplicate_sample, Sample, Timestamp};
 use metricsql_encoding::encoders::{
     float::decode as gorilla_decompress,
     qcompress::decode as quantile_decompress, qcompress::encode as quantile_compress,
@@ -9,7 +9,6 @@ use metricsql_encoding::encoders::{
 };
 use metricsql_common::{get_pooled_vec_f64, get_pooled_vec_i64};
 use serde::{Deserialize, Serialize};
-use crate::module::DEFAULT_CHUNK_SIZE_BYTES;
 use crate::ts::chunk::Chunk;
 use crate::ts::utils::{get_timestamp_index_bounds, trim_vec_data};
 
@@ -99,7 +98,7 @@ const DEFAULT_COMPRESSION_OPTIMIZATION: CompressionOptimization = CompressionOpt
 const COMPRESSION_PARALLELIZATION_THRESHOLD: usize = 64;
 
 /// `CompressedBlock` holds information about location and time range of a block of compressed data.
-#[derive(Debug, Clone, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CompressedChunk {
     pub min_time: i64,
     pub max_time: i64,
@@ -154,6 +153,19 @@ impl CompressedChunk {
 
     pub fn is_empty(&self) -> bool {
         self.count == 0
+    }
+
+    pub fn is_full(&self) -> bool {
+        self.data_size() >= self.max_size
+    }
+
+    pub fn clear(&mut self) {
+        self.count = 0;
+        self.timestamps.clear();
+        self.values.clear();
+        self.min_time = 0;
+        self.max_time = 0;
+        self.last_value = f64::NAN; // todo - use option instead
     }
 
     pub fn compress(
