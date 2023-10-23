@@ -8,6 +8,7 @@ mod encoding;
 mod compressed_chunk;
 mod uncompressed_chunk;
 mod chunk;
+mod merge;
 
 use redis_module::{Context, RedisResult, RedisString, RedisError};
 pub(crate) use types::*;
