@@ -1,5 +1,4 @@
 pub mod time_series;
-mod types;
 mod dedup;
 mod utils;
 mod constants;
@@ -11,7 +10,6 @@ mod chunk;
 mod merge;
 
 use redis_module::{Context, RedisResult, RedisString, RedisError};
-pub(crate) use types::*;
 pub(super) use chunk::*;
 pub(crate) use utils::*;
 pub(crate) use constants::*;

@@ -1,8 +1,12 @@
+use ahash::AHashSet;
+use metricsql_common::{get_pooled_vec_f64, get_pooled_vec_i64};
 use crate::error::{TsdbError, TsdbResult};
 use crate::ts::utils::get_timestamp_index_bounds;
-use crate::ts::{handle_duplicate_sample, DuplicatePolicy, DuplicateStatus, Sample, Timestamp};
+use crate::ts::{handle_duplicate_sample, DuplicatePolicy, DuplicateStatus};
 use serde::{Deserialize, Serialize};
+use crate::common::types::{Sample, Timestamp};
 use crate::ts::chunk::Chunk;
+use crate::ts::merge::{DataBlock, merge_into};
 
 // todo: move to constants
 pub const MAX_UNCOMPRESSED_SAMPLES: usize = 256;
@@ -76,34 +80,62 @@ impl UncompressedChunk {
         let timestamps = &self.timestamps[0..];
         let ts = sample.timestamp;
 
-        match timestamps.binary_search(&ts) {
-            Ok(idx) => {
-                // update value in case timestamp exists
-                let ts = timestamps[idx];
-                let value = self.values[idx];
-                let current = Sample {
-                    timestamp: ts,
-                    value,
-                };
-                let cr = handle_duplicate_sample(policy, current, sample);
-                if cr != DuplicateStatus::Ok {
-                    // todo: format ts as iso-8601 or rfc3339
-                    let msg = format!("{} @ {}", value, ts);
-                    return Err(TsdbError::DuplicateSample(msg));
-                }
-                self.values[idx] = sample.value;
+        let (idx, found) = self.find_timestamp_index(ts);
+        if found {
+            // update value in case timestamp exists
+            let ts = timestamps[idx];
+            let value = self.values[idx];
+            let current = Sample {
+                timestamp: ts,
+                value,
+            };
+            let cr = handle_duplicate_sample(policy, current, sample);
+            if cr != DuplicateStatus::Ok {
+                // todo: format ts as iso-8601 or rfc3339
+                let msg = format!("{} @ {}", value, ts);
+                return Err(TsdbError::DuplicateSample(msg));
             }
-            Err(idx) => {
-                if idx < timestamps.len() {
-                    self.timestamps.insert(idx, ts);
-                    self.values.insert(idx, sample.value);
-                } else {
-                    self.timestamps.push(ts);
-                    self.values.push(sample.value);
-                }
+            self.values[idx] = sample.value;
+        } else {
+            if idx < timestamps.len() {
+                self.timestamps.insert(idx, ts);
+                self.values.insert(idx, sample.value);
+            } else {
+                self.timestamps.push(ts);
+                self.values.push(sample.value);
             }
         }
         Ok(())
+    }
+
+    // todo: move to trait ?
+    pub fn merge_samples(
+        &mut self,
+        samples: &[Sample],
+        min_timestamp: Timestamp,
+        duplicate_policy: DuplicatePolicy,
+        duplicates: &mut AHashSet<Timestamp>) -> TsdbResult<usize> {
+        if samples.is_empty() {
+            return Ok(0);
+        }
+
+        let mut timestamps = get_pooled_vec_i64(samples.len());
+        let mut values= get_pooled_vec_f64(samples.len());
+
+        for sample in samples {
+            timestamps.push(sample.timestamp);
+            values.push(sample.value);
+        }
+
+        let mut block = DataBlock::new(&mut timestamps, &mut values);
+
+        let mut src_timestamps = &mut self.timestamps;
+        let mut src_values = &mut self.values;
+
+        let mut dst = DataBlock::new(&mut src_timestamps, &mut src_values);
+        let res = merge_into(&mut dst, &mut block, min_timestamp, duplicate_policy, duplicates);
+
+        Ok(res)
     }
 
     pub(crate) fn process_range<F, State>(
@@ -137,6 +169,20 @@ impl UncompressedChunk {
         end_ts: Timestamp,
     ) -> impl Iterator<Item = Sample> + '_ {
         SampleIter::new(self, start_ts, end_ts)
+    }
+
+    fn find_timestamp_index(&self, ts: Timestamp) -> (usize, bool) {
+        if self.len() > 32 {
+            match self.timestamps.binary_search(&ts) {
+                Ok(idx) => (idx, true),
+                Err(idx) => (idx, false),
+            }
+        } else {
+            match self.timestamps.iter().position(|&t| t == ts){
+                Some(idx) => (idx, true),
+                None => (self.len(), false),
+            }
+        }
     }
 }
 
@@ -204,6 +250,29 @@ impl Chunk for UncompressedChunk {
         Ok(())
     }
 
+    fn get_range(&self, start: Timestamp, end: Timestamp, timestamps: &mut Vec<i64>, values: &mut Vec<f64>) -> TsdbResult<()> {
+        let (start_idx, _) = self.find_timestamp_index(start);
+        if start_idx >= self.timestamps.len() {
+            return Ok(());
+        }
+        let src_timestamps = &self.timestamps[start_idx..];
+        let src_values = &self.values[start_idx..];
+        let mut end_index: usize = src_timestamps.len() - 1;
+        for ts in src_timestamps.iter().rev() {
+            if *ts <= end {
+                break;
+            }
+            end_index -= 1;
+        }
+        let len = end_index - start_idx + 1;
+        timestamps.reserve(len);
+        values.reserve(len);
+        timestamps.extend_from_slice(&src_timestamps[0..len]);
+        values.extend_from_slice(&src_values[0..len]);
+
+        Ok(())
+    }
+
     fn upsert_sample(
         &mut self,
         sample: &mut Sample,
@@ -227,6 +296,7 @@ impl Chunk for UncompressedChunk {
 
         return Ok(self.len() - count);
     }
+
 
     fn split(&mut self) -> TsdbResult<Self>
     where

@@ -1,9 +1,10 @@
 use crate::error::{TsdbError, TsdbResult};
-use crate::ts::{DuplicatePolicy, Sample};
+use crate::ts::{DuplicatePolicy};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
+use ahash::AHashSet;
 use redis_module::{RedisError, RedisResult};
-use crate::common::types::Timestamp;
+use crate::common::types::{Sample, Timestamp};
 use crate::index::RedisContext;
 use crate::ts::compressed_chunk::CompressedChunk;
 use crate::ts::uncompressed_chunk::UncompressedChunk;
@@ -48,6 +49,9 @@ pub trait Chunk: Sized {
     fn size(&self) -> usize;
     fn remove_range(&mut self, start_ts: Timestamp, end_ts: Timestamp) -> TsdbResult<usize>;
     fn add_sample(&mut self, sample: &Sample) -> TsdbResult<()>;
+
+    fn get_range(&self, start: Timestamp, end: Timestamp, timestamps: &mut Vec<i64>, values: &mut Vec<f64>) -> TsdbResult<()>;
+
     fn upsert_sample(
         &mut self,
         sample: &mut Sample,
@@ -131,7 +135,7 @@ impl TimeSeriesChunk {
         first_time <= end_time && last_time >= start_time
     }
 
-    pub fn process_range<F, State>(&self, state: &mut State, start: Timestamp, end: Timestamp, f: F) -> TsdbResult<()>
+    pub fn process_range<F, State>(&mut self, state: &mut State, start: Timestamp, end: Timestamp, f: F) -> TsdbResult<()>
         where F: FnMut(&mut State, &[i64], &[f64]) -> TsdbResult<()> {
         use TimeSeriesChunk::*;
         match self {
@@ -140,6 +144,23 @@ impl TimeSeriesChunk {
             },
             Compressed(chunk) => {
                 chunk.process_range(start, end, state, f)
+            },
+        }
+    }
+
+    pub fn merge_samples(
+        &mut self,
+        samples: &[Sample],
+        min_timestamp: Timestamp,
+        duplicate_policy: DuplicatePolicy,
+        duplicates: &mut AHashSet<Timestamp>) -> TsdbResult<usize> {
+        use TimeSeriesChunk::*;
+        match self {
+            Uncompressed(chunk) => {
+                chunk.merge_samples(samples, min_timestamp, duplicate_policy, duplicates)
+            },
+            Compressed(chunk) => {
+                chunk.merge_samples(samples, min_timestamp, duplicate_policy, duplicates)
             },
         }
     }
@@ -199,6 +220,14 @@ impl Chunk for TimeSeriesChunk {
         match self {
             Uncompressed(chunk) => chunk.add_sample(sample),
             Compressed(chunk) => chunk.add_sample(sample)
+        }
+    }
+
+    fn get_range(&self, start: Timestamp, end: Timestamp, timestamps: &mut Vec<i64>, values: &mut Vec<f64>) -> TsdbResult<()> {
+        use TimeSeriesChunk::*;
+        match self {
+            Uncompressed(chunk) => chunk.get_range(start, end, timestamps, values),
+            Compressed(chunk) => chunk.get_range(start, end, timestamps, values)
         }
     }
 

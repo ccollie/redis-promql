@@ -1,6 +1,6 @@
-use crate::ts::Sample;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
+use crate::common::types::Sample;
 
 #[derive(Debug, Default, PartialEq, Deserialize, Serialize, Clone, Copy)]
 pub enum DuplicatePolicy {

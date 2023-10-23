@@ -1,10 +1,11 @@
 use crate::error::{TsdbError, TsdbResult};
 use crate::ts::constants::{BLOCK_SIZE_FOR_TIME_SERIES, DEFAULT_CHUNK_SIZE_BYTES, SPLIT_FACTOR};
-use crate::ts::{DuplicatePolicy, Sample, Timestamp};
+use crate::ts::{DuplicatePolicy};
 use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
 use std::collections::BinaryHeap;
 use std::time::Duration;
+use crate::common::types::{Sample, Timestamp};
 use super::{Chunk, ChunkCompression, TimeSeriesChunk};
 use crate::ts::uncompressed_chunk::UncompressedChunk;
 
@@ -79,40 +80,40 @@ impl TimeSeries {
             })
         };
 
-        if ret_val.is_err()
-            && ret_val.err().unwrap() == TsdbError::CapacityFull(BLOCK_SIZE_FOR_TIME_SERIES)
-        {
-            let chunk_len = self.chunks.len();
-            let chunk = self.chunks.last().unwrap();
-            // The last block is full. So, compress it and append it time_series_block_compressed.
-            // todo: see if previous block is not full, and if not simply append to it
-            let last_chunk = if let TimeSeriesChunk::Uncompressed(uncompressed_chunk) = chunk {
+        if let Err(err) = ret_val {
+            if err == TsdbError::CapacityFull(BLOCK_SIZE_FOR_TIME_SERIES) {
+                // The last block is full. So, compress it and append it time_series_block_compressed.
+                let chunk_len = self.chunks.len();
+                let chunk = self.chunks.last().unwrap();
+                // The last block is full. So, compress it and append it time_series_block_compressed.
+                // todo: see if previous block is not full, and if not simply append to it
+                let last_chunk = if let TimeSeriesChunk::Uncompressed(uncompressed_chunk) = chunk {
 
-                let new_chunk = TimeSeriesChunk::new(
-                    self.chunk_compression,
-                    chunk_size,
-                    &uncompressed_chunk.timestamps,
-                    &uncompressed_chunk.values,
-                )?;
-                // insert before last elem
-                self.chunks.insert(chunk_len - 1, new_chunk);
-                // todo: clear and return last element
-                let res = self.get_last_chunk();
-                res.clear();
-                res
+                    let new_chunk = TimeSeriesChunk::new(
+                        self.chunk_compression,
+                        chunk_size,
+                        &uncompressed_chunk.timestamps,
+                        &uncompressed_chunk.values,
+                    )?;
+                    // insert before last elem
+                    self.chunks.insert(chunk_len - 1, new_chunk);
+                    // todo: clear and return last element
+                    let res = self.get_last_chunk();
+                    res.clear();
+                    res
+                } else {
+                    // Create a new last block and append the time+value to it.
+                    self.append_uncompressed_chunk();
+                    self.get_last_chunk()
+                };
+
+                last_chunk.add_sample(&Sample {
+                    timestamp: time,
+                    value,
+                })?
             } else {
-                // Create a new last block and append the time+value to it.
-                self.append_uncompressed_chunk();
-                self.get_last_chunk()
-            };
-
-
-            last_chunk.add_sample(&Sample {
-                timestamp: time,
-                value,
-            })?
-
-        // We created a new block and pushed initial value - so set is_initial to true.
+                return Err(err);
+            }
         }
 
         if time < self.first_timestamp {
@@ -123,6 +124,7 @@ impl TimeSeries {
             self.last_timestamp = time;
             self.last_value = value;
         }
+
         Ok(())
     }
 
@@ -174,7 +176,6 @@ impl TimeSeries {
             self.duplicate_policy.unwrap_or_default(), //.unwrap_or(/* TSGlobalConfig.duplicatePolicy),
         );
 
-
         let block_count = self.chunks.len();
         let max_size = self.chunk_size_bytes;
         let last_chunk = self.get_last_chunk();
@@ -220,10 +221,6 @@ impl TimeSeries {
 
     /// Get the time series between give start and end time (both inclusive).
     pub fn get_range(&self, start_time: Timestamp, end_time: Timestamp) -> TsdbResult<Vec<Sample>> {
-        // While each TimeSeriesBlock as well as TimeSeriesBlockCompressed has data points sorted by time, in a
-        // multithreaded environment, they might not be sorted across blocks. Hence, we collect all the samples in a heap,
-        // and return a vector created from the heap, so that the return value is a sorted vector of data points.
-
         let mut result: BinaryHeap<Sample> = BinaryHeap::new();
         let mut timestamps = Vec::with_capacity(64);
         let mut values = Vec::with_capacity(64);
@@ -251,16 +248,7 @@ impl TimeSeries {
             if first > end_time {
                 break;
             }
-            chunk.process_range(
-                &mut (),
-                start_time,
-                end_time,
-                |_, times, vals| {
-                    timestamps.extend_from_slice(times);
-                    values.extend_from_slice(vals);
-                    Ok(())
-                },
-            )?;
+            chunk.get_range(first, end_time, timestamps, values)?;
         }
 
         Ok(())
