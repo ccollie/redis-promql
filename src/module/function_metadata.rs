@@ -144,11 +144,11 @@ fn parse_metadata_command_args(
         match arg {
             arg if arg.eq_ignore_ascii_case(CMD_ARG_START) => {
                 let next = args.next_str()?;
-                start_value = Some(parse_timestamp_arg(ctx, &next, "START")?);
+                start_value = Some(parse_timestamp_arg(&next, "START")?);
             }
             arg if arg.eq_ignore_ascii_case(CMD_ARG_END) => {
                 let next = args.next_str()?;
-                end_value = Some(parse_timestamp_arg(ctx, &next, "END")?);
+                end_value = Some(parse_timestamp_arg( &next, "END")?);
             }
             arg if arg.eq_ignore_ascii_case(CMD_ARG_MATCH) => {
                 while let Ok(matcher) = args.next_str() {

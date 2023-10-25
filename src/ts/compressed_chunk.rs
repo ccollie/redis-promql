@@ -8,7 +8,7 @@ use metricsql_encoding::encoders::{
     qcompress::encode_with_options as quantile_compress_with_options,
     timestamp::decode as timestamp_decompress, timestamp::encode as timestamp_compress,
 };
-use metricsql_common::{get_pooled_vec_f64, get_pooled_vec_i64};
+use metricsql_common::pool::{get_pooled_vec_f64, get_pooled_vec_i64};
 use serde::{Deserialize, Serialize};
 use crate::common::types::{Sample, Timestamp};
 use crate::ts::chunk::Chunk;

@@ -31,6 +31,15 @@ pub fn trim_data<'a>(timestamps: &'a [i64], values: &'a [f64], start_ts: Timesta
 // todo: needs test
 
 pub fn trim_vec_data<'a>(timestamps: &mut Vec<i64>, values: &mut Vec<f64>, start_ts: Timestamp, end_ts: Timestamp) {
+    if timestamps.is_empty() {
+        return;
+    }
+    let last = timestamps[timestamps.len() - 1];
+    if last < start_ts {
+        timestamps.clear();
+        values.clear();
+        return;
+    }
     let (start_idx, end_idx) = get_timestamp_index_bounds(timestamps, start_ts, end_ts);
 
     if start_idx > end_idx {

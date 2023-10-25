@@ -4,7 +4,7 @@ use crate::ts::{DuplicatePolicy, get_timeseries_mut};
 use redis_module::key::RedisKeyWritable;
 use redis_module::{Context, NextArg, RedisError, RedisResult, RedisString, RedisValue};
 use ahash::AHashMap;
-use crate::common::{parse_duration, parse_number_with_unit, parse_timestamp};
+use crate::common::{parse_duration_arg, parse_number_with_unit, parse_timestamp};
 use crate::module::timeseries_api::internal_add;
 
 const CMD_ARG_RETENTION: &str = "RETENTION";
@@ -39,16 +39,16 @@ pub fn add(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     while let Ok(arg) = args.next_str() {
         match arg {
             arg if arg.eq_ignore_ascii_case(CMD_ARG_RETENTION) => {
-                let next = args.next_str()?;
-                if let Ok(val) = parse_duration(&next) {
+                let next = args.next_arg()?;
+                if let Ok(val) = parse_duration_arg(&next) {
                     options.retention(val);
                 } else {
                     return Err(RedisError::Str("ERR invalid RETENTION value"));
                 }
             }
             arg if arg.eq_ignore_ascii_case(CMD_ARG_DEDUPE_INTERVAL) => {
-                let next = args.next_str()?;
-                if let Ok(val) = parse_duration(&next) {
+                let next = args.next_arg()?;
+                if let Ok(val) = parse_duration_arg(&next) {
                     options.dedupe_interval(val);
                 } else {
                     return Err(RedisError::Str("ERR invalid DEDUPE_INTERVAL value"));

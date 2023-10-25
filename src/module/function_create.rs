@@ -2,7 +2,7 @@ use redis_module::{Context, NextArg, NotifyEvent, REDIS_OK, RedisError, RedisRes
 use std::time::Duration;
 use ahash::AHashMap;
 use redis_module::key::RedisKeyWritable;
-use crate::common::{parse_chunk_size, parse_duration};
+use crate::common::{parse_chunk_size, parse_duration_arg};
 use crate::globals::get_timeseries_index;
 use crate::module::{REDIS_PROMQL_SERIES_TYPE};
 use crate::ts::{DEFAULT_CHUNK_SIZE_BYTES, DuplicatePolicy};
@@ -75,16 +75,16 @@ pub fn parse_create_options(ctx: &Context, args: Vec<RedisString>) -> RedisResul
     while let Ok(arg) = args.next_str() {
         match arg {
             arg if arg.eq_ignore_ascii_case(CMD_ARG_RETENTION) => {
-                let next = args.next_str()?;
-                if let Ok(val) = parse_duration(&next) {
+                let next = args.next_arg()?;
+                if let Ok(val) = parse_duration_arg(&next) {
                     options.retention(val);
                 } else {
                     return Err(RedisError::Str("ERR invalid RETENTION value"));
                 }
             }
             arg if arg.eq_ignore_ascii_case(CMD_ARG_DEDUPE_INTERVAL) => {
-                let next = args.next_str()?;
-                if let Ok(val) = parse_duration(&next) {
+                let next = args.next_arg()?;
+                if let Ok(val) = parse_duration_arg(&next) {
                     options.dedupe_interval(val);
                 } else {
                     return Err(RedisError::Str("ERR invalid DEDUPE_INTERVAL value"));

@@ -2,8 +2,9 @@
 // https://github.com/cryptorelay/redis-aggregation/tree/master
 // License: Apache License 2.0
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde::ser::{Error, SerializeSeq};
+use redis_module::{RedisError, RedisString};
+use serde::{Deserializer, Serializer};
+use serde::ser::SerializeSeq;
 
 type Time = i64;
 type Value = f64;
@@ -16,7 +17,7 @@ pub trait AggOp {
     fn current(&self) -> Option<Value>;
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, Debug)]
 pub struct AggFirst(Option<Value>);
 impl AggOp for AggFirst {
     fn save(&self) -> (&str, String) {
@@ -38,7 +39,7 @@ impl AggOp for AggFirst {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, Debug)]
 pub struct AggLast(Option<Value>);
 impl AggOp for AggLast {
     fn save(&self) -> (&str, String) {
@@ -58,7 +59,7 @@ impl AggOp for AggLast {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, Debug)]
 pub struct AggMin(Option<Value>);
 impl AggOp for AggMin {
     fn save(&self) -> (&str, String) {
@@ -82,7 +83,7 @@ impl AggOp for AggMin {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, Debug)]
 pub struct AggMax(Option<Value>);
 impl AggOp for AggMax {
     fn save(&self) -> (&str, String) {
@@ -106,7 +107,7 @@ impl AggOp for AggMax {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, Debug)]
 pub struct AggRange {
     min: Value,
     max: Value,
@@ -144,7 +145,7 @@ impl AggOp for AggRange {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, Debug)]
 pub struct AggAvg {
     count: usize,
     sum: Value,
@@ -178,7 +179,7 @@ impl AggOp for AggAvg {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, Debug)]
 pub struct AggSum(Value);
 impl AggOp for AggSum {
     fn save(&self) -> (&str, String) {
@@ -198,7 +199,7 @@ impl AggOp for AggSum {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, Debug)]
 pub struct AggCount(usize);
 impl AggOp for AggCount {
     fn save(&self) -> (&str, String) {
@@ -218,7 +219,7 @@ impl AggOp for AggCount {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, Debug)]
 pub struct AggStd {
     sum: Value,
     sum_2: Value,
@@ -260,7 +261,7 @@ impl AggStd {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, Debug)]
 pub struct AggVarP(AggStd);
 impl AggOp for AggVarP {
     fn save(&self) -> (&str, String) {
@@ -284,7 +285,7 @@ impl AggOp for AggVarP {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, Debug)]
 pub struct AggVarS(AggStd);
 impl AggOp for AggVarS {
     fn save(&self) -> (&str, String) {
@@ -310,7 +311,7 @@ impl AggOp for AggVarS {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, Debug)]
 pub struct AggStdP(AggStd);
 impl AggOp for AggStdP {
     fn save(&self) -> (&str, String) {
@@ -334,7 +335,7 @@ impl AggOp for AggStdP {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, Debug)]
 pub struct AggStdS(AggStd);
 impl AggOp for AggStdS {
     fn save(&self) -> (&str, String) {
@@ -378,31 +379,8 @@ pub fn parse_agg_type(name: &str) -> Option<Box<dyn AggOp>> {
     }
 }
 
-impl Serialize for Box<dyn AggOp> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-    {
-        let (name, value) = self.save();
-        let mut seq = serializer.serialize_seq(Some(2))?;
-        seq.serialize_element(name)?;
-        seq.serialize_element(&value)?;
-        seq.end()
-    }
-}
 
-impl<'de> Deserialize<'de> for Box<dyn AggOp> {
-    fn deserialize<D>(deserializer: D) -> Result<Box<dyn AggOp>, D::Error>
-        where
-            D: Deserializer<'de>,
-    {
-        let (name, value) = Deserialize::deserialize(deserializer)?;
-        let mut agg = parse_agg_type(name).ok_or(Error::custom("invalid agg type"))?;
-        agg.load(value);
-        Ok(agg)
-    }
-}
-
+#[derive(Clone, Debug)]
 pub enum Aggregator {
     First(AggFirst),
     Last(AggLast),
@@ -416,6 +394,26 @@ pub enum Aggregator {
     StdP(AggStdP),
     VarS(AggVarS),
     VarP(AggVarP),
+}
+
+impl TryFrom<&RedisString> for Aggregator {
+    type Error = RedisError;
+
+    fn try_from(value: &RedisString) -> Result<Self, Self::Error> {
+        let str = value.to_string_lossy();
+        str.as_str().try_into()
+    }
+}
+
+impl TryFrom<&str> for Aggregator {
+    type Error = RedisError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        if let Some(agg) = Self::new(value) {
+            return Ok(agg);
+        }
+        Err(RedisError::Str("TSDB: unknown AGGREGATION type"))
+    }
 }
 
 impl Aggregator {

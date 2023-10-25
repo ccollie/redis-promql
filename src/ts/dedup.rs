@@ -12,7 +12,7 @@ pub fn deduplicate_samples(
     if src_timestamps.len() < 2 {
         return None;
     }
-    let dedup_interval = dedup_interval.num_milliseconds() as i64;
+    let dedup_interval = dedup_interval.as_millis() as i64;
 
     let first_ts = src_timestamps[0];
     if first_ts > end_ts {

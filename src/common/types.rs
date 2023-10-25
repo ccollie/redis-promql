@@ -7,6 +7,9 @@ use crate::common::parse_timestamp;
 use crate::index::RedisContext;
 
 pub type Timestamp = metricsql_engine::prelude::Timestamp;
+pub type PooledTimestampVec = metricsql_common::pool::PooledVecI64;
+pub type PooledValuesVec = metricsql_common::pool::PooledVecF64;
+
 
 /// Represents a data point in time series.
 #[derive(Debug, Deserialize, Serialize)]
@@ -125,6 +128,32 @@ impl TryFrom<&str> for TimestampRangeValue {
     }
 }
 
+impl TryFrom<&RedisString> for TimestampRangeValue {
+    type Error = RedisError;
+
+    fn try_from(value: &RedisString) -> Result<Self, Self::Error> {
+        if value.len() == 1 {
+            let bytes = value.as_slice();
+            match bytes[0] {
+                b'-' => return Ok(TimestampRangeValue::Earliest),
+                b'+' => return Ok(TimestampRangeValue::Latest),
+                b'*' => return Ok(TimestampRangeValue::Now),
+                _ => {}
+            }
+        }
+        return if let Ok(int_val) = value.parse_integer() {
+            if int_val < 0 {
+                return Err(RedisError::Str("TSDB: invalid timestamp, must be a non-negative integer"));
+            }
+            Ok(TimestampRangeValue::Value(int_val))
+        } else {
+            let date_str = value.to_string_lossy();
+            let ts = parse_timestamp(&date_str).map_err(|_| RedisError::Str("invalid timestamp"))?;
+            Ok(TimestampRangeValue::Value(ts))
+        }
+    }
+}
+
 impl From<Timestamp> for TimestampRangeValue {
     fn from(ts: Timestamp) -> Self {
         TimestampRangeValue::Value(ts)
@@ -167,7 +196,7 @@ impl PartialOrd for TimestampRangeValue {
     }
 }
 
-
+// todo: better naming
 pub struct TimestampRange {
     start: TimestampRangeValue,
     end: TimestampRangeValue,
@@ -176,7 +205,7 @@ pub struct TimestampRange {
 impl TimestampRange {
     pub fn new(start: TimestampRangeValue, end: TimestampRangeValue) -> RedisResult<Self> {
         if start > end {
-            return Err( RedisError::Str("invalid range"));
+            return Err( RedisError::Str("invalid timestamp range: start > end"));
         }
         Ok(TimestampRange { start, end })
     }

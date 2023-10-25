@@ -11,7 +11,6 @@ mod merge;
 
 use redis_module::{Context, RedisResult, RedisString, RedisError};
 pub(super) use chunk::*;
-pub(crate) use utils::*;
 pub(crate) use constants::*;
 pub use duplicate_policy::*;
 use crate::module::REDIS_PROMQL_SERIES_TYPE;

@@ -5,7 +5,6 @@ use std::fmt::Display;
 use ahash::AHashSet;
 use redis_module::{RedisError, RedisResult};
 use crate::common::types::{Sample, Timestamp};
-use crate::index::RedisContext;
 use crate::ts::compressed_chunk::CompressedChunk;
 use crate::ts::uncompressed_chunk::UncompressedChunk;
 
@@ -81,7 +80,6 @@ impl TimeSeriesChunk {
                 let chunk = CompressedChunk::with_values(chunk_size, timestamps, values)?;
                 Ok(Compressed(chunk))
             },
-            _ => panic!("unsupported compression type"),
         }
     }
 
@@ -248,7 +246,7 @@ impl Chunk for TimeSeriesChunk {
     }
 }
 
-pub(crate) fn validate_chunk_size(ctx: &RedisContext, chunk_size_bytes: usize) -> RedisResult<()> {
+pub(crate) fn validate_chunk_size(chunk_size_bytes: usize) -> RedisResult<()> {
     fn get_error_result() -> RedisResult<()> {
         let msg = format!("TSDB: CHUNK_SIZE value must be a multiple of 2 in the range [{MIN_CHUNK_SIZE} .. {MAX_CHUNK_SIZE}]");
         Err(RedisError::String(msg))

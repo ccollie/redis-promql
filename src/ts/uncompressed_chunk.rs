@@ -1,5 +1,5 @@
 use ahash::AHashSet;
-use metricsql_common::{get_pooled_vec_f64, get_pooled_vec_i64};
+use metricsql_common::pool::{get_pooled_vec_f64, get_pooled_vec_i64};
 use crate::error::{TsdbError, TsdbResult};
 use crate::ts::utils::get_timestamp_index_bounds;
 use crate::ts::{handle_duplicate_sample, DuplicatePolicy, DuplicateStatus};
