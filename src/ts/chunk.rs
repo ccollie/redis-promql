@@ -3,8 +3,9 @@ use crate::ts::{DuplicatePolicy};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use ahash::AHashSet;
+use metricsql_common::pool::{get_pooled_vec_f64, get_pooled_vec_i64};
 use redis_module::{RedisError, RedisResult};
-use crate::common::types::{Sample, Timestamp};
+use crate::common::types::{PooledTimestampVec, PooledValuesVec, Sample, Timestamp};
 use crate::ts::compressed_chunk::CompressedChunk;
 use crate::ts::uncompressed_chunk::UncompressedChunk;
 
@@ -146,6 +147,10 @@ impl TimeSeriesChunk {
         }
     }
 
+    pub fn iter_range<'a>(&'a self, start: Timestamp, end: Timestamp) -> impl Iterator<Item=Sample> + 'a {
+        SampleIterator::new(self, start, end)
+    }
+
     pub fn merge_samples(
         &mut self,
         samples: &[Sample],
@@ -243,6 +248,67 @@ impl Chunk for TimeSeriesChunk {
             Uncompressed(chunk) => Ok(Uncompressed(chunk.split()?)),
             Compressed(chunk) => Ok(Compressed(chunk.split()?))
         }
+    }
+}
+
+struct SampleIterator<'a> {
+    chunk: &'a TimeSeriesChunk,
+    timestamps: PooledTimestampVec,
+    values: PooledValuesVec,
+    sample_index: usize,
+    start: Timestamp,
+    end: Timestamp,
+    is_init: bool,
+}
+
+impl<'a> SampleIterator<'a> {
+    fn new(chunk: &'a TimeSeriesChunk, start: Timestamp, end: Timestamp) -> Self {
+
+        let capacity = chunk.num_samples();
+        let timestamps = get_pooled_vec_i64(capacity);
+        let values = get_pooled_vec_f64(capacity);
+
+        Self {
+            chunk,
+            timestamps,
+            values,
+            sample_index: 0,
+            start,
+            end,
+            is_init: false,
+        }
+    }
+}
+
+// todo: implement next_chunk
+impl<'a> Iterator for SampleIterator<'a> {
+    type Item = Sample;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.is_init {
+            self.is_init = true;
+            let first = self.chunk.first_timestamp();
+            if first > self.end {
+                return None;
+            }
+            if let Err(_) =
+                self.chunk.get_range(self.start, self.end, &mut self.timestamps, &mut self.values)
+            {
+                return None;
+            }
+            self.sample_index = if self.start <= first {
+                0
+            } else {
+                match self.timestamps.binary_search(&self.start) {
+                    Ok(idx) => idx,
+                    Err(idx) => idx,
+                }
+            }
+        }
+        let timestamp = self.timestamps[self.sample_index];
+        let value = self.values[self.sample_index];
+        self.sample_index += 1;
+        Some(Sample::new(timestamp, value))
     }
 }
 

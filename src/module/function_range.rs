@@ -17,7 +17,6 @@ const CMD_ARG_COUNT: &str = "COUNT";
 const CMD_ARG_EMPTY: &str = "EMPTY";
 const CMD_ARG_AGGREGATION: &str = "AGGREGATION";
 const CMD_ARG_BUCKET_TIMESTAMP: &str = "BUCKETTIMESTAMP";
-
 const MAX_TS_VALUES_FILTER: usize = 25;
 
 #[derive(Debug, Default, PartialEq, Clone, Copy)]
@@ -212,7 +211,7 @@ fn parse_timestamp_filter(args: &mut Skip<IntoIter<RedisString>>) -> RedisResult
 pub fn parse_aggregation_args(args: &mut Skip<IntoIter<RedisString>>) -> RedisResult<AggregationOptions> {
     // AGGREGATION token already seen
     let agg_str = args.next_str()
-        .map_err(|e| RedisError::Str("TSDB: Error parsing AGGREGATION"))?;
+        .map_err(|_e| RedisError::Str("TSDB: Error parsing AGGREGATION"))?;
     let aggregator = Aggregator::try_from(agg_str)?;
     let bucket_duration = parse_duration_arg(&args.next_arg()?)
         .map_err(|e| RedisError::Str("Error parsing bucketDuration"))?;

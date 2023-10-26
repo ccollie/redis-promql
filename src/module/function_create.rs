@@ -49,7 +49,7 @@ const CMD_ARG_METRIC_NAME: &str = "METRIC_NAME";
 
 
 pub fn create(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
-    let (parsed_key, options) = parse_create_options(ctx, args)?;
+    let (parsed_key, options) = parse_create_options(args)?;
     let key = RedisKeyWritable::open(ctx.ctx, &parsed_key);
     // check if this refers to an existing series
     if !key.is_empty() {
@@ -66,7 +66,7 @@ pub fn create(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     REDIS_OK
 }
 
-pub fn parse_create_options(ctx: &Context, args: Vec<RedisString>) -> RedisResult<(RedisString, TimeSeriesOptions)> {
+pub fn parse_create_options(args: Vec<RedisString>) -> RedisResult<(RedisString, TimeSeriesOptions)> {
     let mut args = args.into_iter().skip(1);
     let key = args.next().ok_or_else(|| RedisError::Str("Err missing key argument"))?;
 

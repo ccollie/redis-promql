@@ -4,7 +4,7 @@ use crate::module::commands::parse_create_options;
 use crate::ts::get_timeseries_mut;
 
 pub fn alter(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
-    let (parsed_key, options) = parse_create_options(ctx, args)?;
+    let (parsed_key, options) = parse_create_options(args)?;
 
     let mut series = get_timeseries_mut(ctx, &parsed_key, true)?.unwrap();
 

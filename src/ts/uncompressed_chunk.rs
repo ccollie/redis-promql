@@ -163,7 +163,7 @@ impl UncompressedChunk {
         }
     }
 
-    pub fn iter(
+    pub fn iter_range(
         &self,
         start_ts: Timestamp,
         end_ts: Timestamp,

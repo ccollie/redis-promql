@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::str::FromStr;
 use std::time::Duration;
-use redis_module::{Context, RedisError, RedisString};
+use redis_module::{Context, RedisError, RedisResult, RedisString};
 use serde::{Deserialize, Serialize};
 use crate::common::types::Timestamp;
 use crate::ts::{DEFAULT_CHUNK_SIZE_BYTES, DuplicatePolicy};
@@ -106,20 +106,8 @@ pub(super) fn internal_add(
     value: f64,
     dp_override: DuplicatePolicy,
 ) -> Result<(), RedisError> {
-    let last_ts = series.last_timestamp;
     // ensure inside retention period.
-    if series.is_older_than_retention(timestamp) {
-        return Err(RedisError::Str("TSDB: Timestamp is older than retention"));
-    }
-
-    if let Some(dedup_interval) = series.dedupe_interval {
-        let millis = dedup_interval.as_millis() as i64;
-        if millis > 0 && (timestamp - last_ts) < millis {
-            return Err(RedisError::Str(
-                "TSDB: new sample in less than dedupe interval",
-            ));
-        }
-    }
+    validate_sample_timestamp_for_insert(series, timestamp)?;
 
     if timestamp <= series.last_timestamp && series.total_samples != 0 {
         let val = series.upsert_sample(timestamp, value, Some(dp_override));
@@ -131,6 +119,26 @@ pub(super) fn internal_add(
     }
 
     series
-        .append(timestamp, value)
+        .add_sample(timestamp, value)
         .map_err(|_| RedisError::Str("TSDB: Error at append"))
+}
+
+pub fn validate_sample_timestamp_for_insert(series: &TimeSeries, ts: Timestamp) -> RedisResult<()> {
+    let last_ts = series.last_timestamp;
+    // ensure inside retention period.
+    if series.is_older_than_retention(ts) {
+        return Err(RedisError::Str("TSDB: Timestamp is older than retention"));
+    }
+
+    if let Some(dedup_interval) = series.dedupe_interval {
+        if !series.is_empty() {
+            let millis = dedup_interval.as_millis() as i64;
+            if millis > 0 && (ts - last_ts) < millis {
+                return Err(RedisError::Str(
+                    "TSDB: new sample in less than dedupe interval",
+                ));
+            }
+        }
+    }
+    Ok(())
 }

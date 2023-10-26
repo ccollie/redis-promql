@@ -4,7 +4,6 @@ use metricsql_engine::TimestampTrait;
 use redis_module::{RedisError, RedisResult, RedisString};
 use serde::{Deserialize, Serialize};
 use crate::common::parse_timestamp;
-use crate::index::RedisContext;
 
 pub type Timestamp = metricsql_engine::prelude::Timestamp;
 pub type PooledTimestampVec = metricsql_common::pool::PooledVecI64;
@@ -88,17 +87,6 @@ pub enum TimestampRangeValue {
 }
 
 impl TimestampRangeValue {
-    pub fn to_redis_string(&self, ctx: &RedisContext) -> RedisString {
-        match self {
-            TimestampRangeValue::Earliest => ctx.create_string("-"),
-            TimestampRangeValue::Latest => ctx.create_string("+"),
-            TimestampRangeValue::Now => ctx.create_string("*"),
-            TimestampRangeValue::Value(ts) => {
-                ctx.create_string(ts.to_string())
-            },
-        }
-    }
-
     pub fn to_timestamp(&self) -> Timestamp {
         match self {
             TimestampRangeValue::Earliest => 0,

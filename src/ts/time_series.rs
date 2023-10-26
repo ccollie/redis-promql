@@ -60,17 +60,61 @@ impl TimeSeries {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.total_samples == 0
+    }
+
     pub fn add_sample(&mut self, time: Timestamp, value: f64) -> TsdbResult<()> {
-        if self.chunks.is_empty() {
-            // First insertion in this time series.
-            self.chunks
-                .push(TimeSeriesChunk::Uncompressed(UncompressedChunk::default()));
+        let chunk = self.get_last_chunk_for_update()?;
+        chunk.add_sample(&Sample { timestamp: time, value })?;
+
+        if time < self.first_timestamp {
+            self.first_timestamp = time;
         }
+        self.last_value = value;
+        self.last_timestamp = time;
+        self.total_samples += 1;
         Ok(())
     }
 
+    fn get_last_chunk_for_update(&mut self) -> TsdbResult<&mut TimeSeriesChunk> {
+        if self.chunks.is_empty() {
+            self.append_uncompressed_chunk();
+            return Ok(self.get_last_chunk());
+        }
+
+        let chunk = self.chunks.last().unwrap();
+        if chunk.is_full() {
+            // The last block is full. So, compress it and append it time_series_block_compressed.
+            // todo: see if previous block is not full, and if not simply merge into to it
+            let chunk_len = self.chunks.len();
+            let chunk_size = self.chunk_size_bytes;
+            let compression = self.chunk_compression;
+
+            if let TimeSeriesChunk::Uncompressed(uncompressed_chunk) = chunk {
+                let new_chunk = TimeSeriesChunk::new(
+                    compression,
+                    chunk_size,
+                    &uncompressed_chunk.timestamps,
+                    &uncompressed_chunk.values,
+                )?;
+                // insert before last elem
+                self.chunks.insert(chunk_len - 1, new_chunk);
+                // todo: clear and return last element
+                let res = self.get_last_chunk();
+                res.clear();
+                // res
+                return Ok(res)
+            } else {
+                self.append_uncompressed_chunk();
+            }
+        }
+
+        Ok(self.get_last_chunk())
+    }
+
     /// append the given time and value to the time series.
-    pub fn append(&mut self, time: Timestamp, value: f64) -> TsdbResult<()> {
+    pub fn add(&mut self, time: Timestamp, value: f64) -> TsdbResult<()> {
         let chunk_size = self.chunk_size_bytes;
 
         // Try to append the time+value to the last block.
@@ -459,7 +503,7 @@ impl<'a> SampleIterator<'a> {
         self.chunk_index += 1;
         self.timestamps.clear();
         self.values.clear();
-        if let Err(e) =
+        if let Err(_e) =
             chunk.get_range(self.start, self.end, &mut self.timestamps, &mut self.values)
         {
             self.err = true;
@@ -488,14 +532,14 @@ impl<'a> SampleIterator<'a> {
             }
 
             let mut idx = 0;
-            self.timestamps.retain(|ts| {
+            self.timestamps.retain(|_| {
                 let keep = indices_to_remove.contains(&idx);
                 idx += 1;
                 keep
             });
 
             idx = 0;
-            self.values.retain(|ts| {
+            self.values.retain(|_| {
                 let keep = indices_to_remove.contains(&idx);
                 idx += 1;
                 keep
