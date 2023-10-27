@@ -4,14 +4,14 @@ use crate::error::{TsdbError, TsdbResult};
 use crate::ts::utils::get_timestamp_index_bounds;
 use crate::ts::{handle_duplicate_sample, DuplicatePolicy, DuplicateStatus};
 use serde::{Deserialize, Serialize};
-use crate::common::types::{Sample, Timestamp};
+use crate::common::types::{Sample, SAMPLE_SIZE, Timestamp};
 use crate::ts::chunk::Chunk;
 use crate::ts::merge::{DataBlock, merge_into};
 
 // todo: move to constants
 pub const MAX_UNCOMPRESSED_SAMPLES: usize = 256;
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UncompressedChunk {
     pub max_size: usize,
     pub timestamps: Vec<i64>,
@@ -151,7 +151,6 @@ impl UncompressedChunk {
         let (start_idx, end_idx) = get_timestamp_index_bounds(&self.timestamps, start, end);
 
         if start_idx <= end_idx {
-            // todo(perf): use pool
             let timestamps = &self.timestamps[start_idx..end_idx];
             let values = &self.values[start_idx..end_idx];
 
@@ -161,6 +160,10 @@ impl UncompressedChunk {
             let values = vec![];
             f(state, &timestamps, &values)
         }
+    }
+
+    pub fn bytes_per_sample(&self) -> usize {
+        return SAMPLE_SIZE
     }
 
     pub fn iter_range(
@@ -339,5 +342,10 @@ impl<'a> Iterator for SampleIter<'a> {
         let val = self.chunk.values[self.index];
         self.index += 1;
         Some(Sample::new(ts, val))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.end_index - self.index;
+        (len, Some(len))
     }
 }

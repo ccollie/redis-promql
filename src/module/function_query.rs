@@ -82,7 +82,7 @@ pub(crate) fn prom_query_range(_ctx: &Context, args: Vec<RedisString>) -> RedisR
 ///         [TIMEOUT duration]
 ///         [ROUNDING digits]
 ///
-pub fn prom_query(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+pub fn prom_query(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let mut args = args.into_iter().skip(1);
     let query = args.next_string()?;
     let mut time_value: Option<TimestampRangeValue> = None;

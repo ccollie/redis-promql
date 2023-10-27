@@ -43,7 +43,7 @@ pub fn deduplicate_samples(
     ts_next = ts_next - (ts_next % dedup_interval);
     let mut j: usize = 0;
     let mut count = 0;
-    let mut last_timestamp: Option<Timestamp> = None;
+    let last_timestamp: Option<Timestamp> = None;
 
     // todo: eliminate bounds checks
     for i in start_idx + 1 ..src_timestamps.len() {

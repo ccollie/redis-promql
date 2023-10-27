@@ -1,6 +1,5 @@
 use redis_module::{Context, NextArg, RedisError, RedisResult, RedisString, RedisValue};
-use crate::module::parse_timestamp_arg;
-use crate::ts::get_timeseries_mut;
+use crate::module::{get_timeseries_mut, parse_timestamp_arg};
 
 pub fn del_range(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let mut args = args.into_iter().skip(1);

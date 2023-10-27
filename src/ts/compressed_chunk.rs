@@ -1,21 +1,26 @@
-use std::fmt::Display;
-use ahash::AHashSet;
+use crate::common::types::{Sample, Timestamp};
 use crate::error::{TsdbError, TsdbResult};
-use crate::ts::{DEFAULT_CHUNK_SIZE_BYTES, DuplicatePolicy, DuplicateStatus, handle_duplicate_sample};
+use crate::ts::chunk::Chunk;
+use crate::ts::merge::{merge_into, DataBlock};
+use crate::ts::utils::{get_timestamp_index_bounds, trim_vec_data};
+use crate::ts::{
+    handle_duplicate_sample, DuplicatePolicy, DuplicateStatus, DEFAULT_CHUNK_SIZE_BYTES,
+};
+use ahash::AHashSet;
+use metricsql_common::pool::{get_pooled_vec_f64, get_pooled_vec_i64};
 use metricsql_encoding::encoders::{
-    float::decode as gorilla_decompress,
-    qcompress::decode as quantile_decompress, qcompress::encode as quantile_compress,
+    float::decode as gorilla_decompress, qcompress::decode as quantile_decompress,
+    qcompress::encode as quantile_compress,
     qcompress::encode_with_options as quantile_compress_with_options,
     timestamp::decode as timestamp_decompress, timestamp::encode as timestamp_compress,
 };
-use metricsql_common::pool::{get_pooled_vec_f64, get_pooled_vec_i64};
 use serde::{Deserialize, Serialize};
-use crate::common::types::{Sample, Timestamp};
-use crate::ts::chunk::Chunk;
-use crate::ts::merge::{DataBlock, merge_into};
-use crate::ts::utils::{get_timestamp_index_bounds, trim_vec_data};
+use std::fmt::Display;
 
 type CompressorConfig = metricsql_encoding::encoders::qcompress::CompressorConfig;
+
+/// Rough estimate for when we have insufficient data to calculate
+const BASE_COMPRESSION_RATE: f64 = 0.35;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -171,11 +176,7 @@ impl CompressedChunk {
         self.last_value = f64::NAN; // todo - use option instead
     }
 
-    pub fn compress(
-        &mut self,
-        timestamps: &[Timestamp],
-        values: &[f64],
-    ) -> TsdbResult<()> {
+    pub fn compress(&mut self, timestamps: &[Timestamp], values: &[f64]) -> TsdbResult<()> {
         if timestamps.is_empty() {
             return Ok(());
         }
@@ -238,7 +239,6 @@ impl CompressedChunk {
         Ok(())
     }
 
-
     pub(crate) fn process_range<F, State>(
         &mut self,
         start: Timestamp,
@@ -246,8 +246,8 @@ impl CompressedChunk {
         state: &mut State,
         mut f: F,
     ) -> TsdbResult<()>
-        where
-            F: FnMut(&mut State, &[i64], &[f64]) -> TsdbResult<()>,
+    where
+        F: FnMut(&mut State, &[i64], &[f64]) -> TsdbResult<()>,
     {
         let mut handle_empty = |state: &mut State| -> TsdbResult<()> {
             let mut timestamps = vec![];
@@ -260,7 +260,7 @@ impl CompressedChunk {
         }
 
         let mut timestamps = get_pooled_vec_i64(self.count);
-        let mut values= get_pooled_vec_f64(self.count);
+        let mut values = get_pooled_vec_f64(self.count);
         self.decompress(&mut timestamps, &mut values)?;
         // special case of range exceeding block range
         if start <= self.min_time && end >= self.max_time {
@@ -277,13 +277,14 @@ impl CompressedChunk {
         samples: &[Sample],
         min_timestamp: Timestamp,
         duplicate_policy: DuplicatePolicy,
-        duplicates: &mut AHashSet<Timestamp>) -> TsdbResult<usize> {
+        duplicates: &mut AHashSet<Timestamp>,
+    ) -> TsdbResult<usize> {
         if samples.is_empty() {
             return Ok(0);
         }
 
         let mut timestamps = get_pooled_vec_i64(samples.len());
-        let mut values= get_pooled_vec_f64(samples.len());
+        let mut values = get_pooled_vec_f64(samples.len());
 
         for sample in samples {
             timestamps.push(sample.timestamp);
@@ -293,11 +294,17 @@ impl CompressedChunk {
         let mut block = DataBlock::new(&mut timestamps, &mut values);
 
         let mut src_timestamps = get_pooled_vec_i64(self.count);
-        let mut src_values= get_pooled_vec_f64(self.count);
+        let mut src_values = get_pooled_vec_f64(self.count);
         self.decompress(&mut src_timestamps, &mut src_values)?;
 
         let mut dst = DataBlock::new(&mut src_timestamps, &mut src_values);
-        let res = merge_into(&mut dst, &mut block, min_timestamp, duplicate_policy, duplicates);
+        let res = merge_into(
+            &mut dst,
+            &mut block,
+            min_timestamp,
+            duplicate_policy,
+            duplicates,
+        );
         self.compress(&dst.timestamps, &dst.values)?;
 
         Ok(res)
@@ -305,6 +312,27 @@ impl CompressedChunk {
 
     fn data_size(&self) -> usize {
         self.timestamps.len() + self.values.len()
+    }
+
+    pub fn bytes_per_sample(&self) -> usize {
+        if self.count == 0 {
+            return 0;
+        }
+        self.data_size() / self.count
+    }
+
+    // estimate remaining capacity based on the current data size and chunk max_size
+    pub fn remaining_capacity(&self) -> usize {
+        self.max_size - self.data_size()
+    }
+
+    /// estimate the number of samples that can be stored in the remaining capacity
+    /// note that for low sample counts this will be very inaccuura
+    pub fn remaining_samples(&self) -> usize {
+        if self.count == 0 {
+            return 0;
+        }
+        self.remaining_capacity() / self.bytes_per_sample()
     }
 
     pub fn total_size(&self) -> usize {
@@ -351,7 +379,7 @@ impl Chunk for CompressedChunk {
             return Ok(0);
         }
         let mut timestamps = get_pooled_vec_i64(self.count);
-        let mut values= get_pooled_vec_f64(self.count);
+        let mut values = get_pooled_vec_f64(self.count);
         self.decompress(&mut timestamps, &mut values)?;
         let (start_idx, end_idx) = get_timestamp_index_bounds(&timestamps, start_ts, end_ts);
         if start_idx > end_idx {
@@ -371,8 +399,11 @@ impl Chunk for CompressedChunk {
     }
 
     fn add_sample(&mut self, sample: &Sample) -> TsdbResult<()> {
+        if self.is_full() {
+            return Err(TsdbError::CapacityFull(self.max_size));
+        }
         let mut timestamps = get_pooled_vec_i64(self.count);
-        let mut values= get_pooled_vec_f64(self.count);
+        let mut values = get_pooled_vec_f64(self.count);
         self.decompress(&mut timestamps, &mut values)?;
         timestamps.push(sample.timestamp);
         values.push(sample.value);
@@ -394,14 +425,18 @@ impl Chunk for CompressedChunk {
         Ok(())
     }
 
-    fn upsert_sample(&mut self, sample: &mut Sample, dp_policy: DuplicatePolicy) -> TsdbResult<usize> {
+    fn upsert_sample(
+        &mut self,
+        sample: &mut Sample,
+        dp_policy: DuplicatePolicy,
+    ) -> TsdbResult<usize> {
         let ts = sample.timestamp;
         let mut duplicate_found = false;
 
         // this compressed method does not do streaming compressed, so we have to accumulate all the samples
         // in a new chunk and then swap it with the old one
         let mut timestamps = get_pooled_vec_i64(self.count);
-        let mut values= get_pooled_vec_f64(self.count);
+        let mut values = get_pooled_vec_f64(self.count);
         self.decompress(&mut timestamps, &mut values)?;
 
         match timestamps.binary_search(&ts) {
@@ -416,11 +451,11 @@ impl Chunk for CompressedChunk {
                 }
                 duplicate_found = true;
                 values[pos] = sample.value;
-            },
+            }
             Err(idx) => {
                 timestamps.insert(idx, ts);
                 values.insert(idx, sample.value);
-            },
+            }
         };
 
         let mut size = timestamps.len();
@@ -433,13 +468,16 @@ impl Chunk for CompressedChunk {
         Ok(size)
     }
 
-    fn split(&mut self) -> TsdbResult<Self> where Self: Sized {
+    fn split(&mut self) -> TsdbResult<Self>
+    where
+        Self: Sized,
+    {
         let mid = self.num_samples() / 2;
 
         // this compression method does not do streaming compression, so we have to accumulate all the samples
         // in a new chunk and then swap it with the old
         let mut timestamps = get_pooled_vec_i64(self.count);
-        let mut values= get_pooled_vec_f64(self.count);
+        let mut values = get_pooled_vec_f64(self.count);
         self.decompress(&mut timestamps, &mut values)?;
 
         {
@@ -519,7 +557,7 @@ fn decompress_values(src: &[u8], dst: &mut Vec<f64>) -> TsdbResult<()> {
             quantile_decompress(&src[1..], dst)
                 .map_err(|_e| TsdbError::CannotDeserialize("values".to_string()))?;
         }
-        Err(e) => {
+        Err(_e) => {
             return Err(TsdbError::CannotDeserialize("values".to_string()));
         }
     }

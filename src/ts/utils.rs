@@ -7,6 +7,7 @@ pub(crate) fn get_timestamp_index_bounds(timestamps: &[i64], start_ts: Timestamp
         Err(idx) => idx,
     };
 
+    // todo: optimize by searching only stamps[start_idx..]
     let end_idx = match stamps.binary_search(&end_ts) {
         Ok(idx) => idx,
         Err(idx) => idx,

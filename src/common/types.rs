@@ -76,6 +76,7 @@ impl PartialOrd for Sample {
     }
 }
 
+pub const SAMPLE_SIZE: usize = std::mem::size_of::<Sample>();
 pub const MAX_TIMESTAMP: i64 = 253402300799;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Copy)]

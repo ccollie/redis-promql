@@ -104,12 +104,34 @@ impl TimeSeriesChunk {
         }
     }
 
+    pub fn max_size_in_bytes(&self) -> usize {
+        use TimeSeriesChunk::*;
+        match self {
+            Uncompressed(chunk) => chunk.max_size,
+            Compressed(chunk) => chunk.max_size,
+        }
+    }
+
     pub fn is_full(&self) -> bool {
         use TimeSeriesChunk::*;
         match self {
             Uncompressed(chunk) => chunk.is_full(),
             Compressed(chunk) => chunk.is_full(),
         }
+    }
+
+    pub fn bytes_per_sample(&self) -> usize {
+        use TimeSeriesChunk::*;
+        match self {
+            Uncompressed(chunk) => chunk.bytes_per_sample(),
+            Compressed(chunk) => chunk.bytes_per_sample(),
+        }
+    }
+
+    pub fn utilization(&self) -> f64 {
+        let used = self.size();
+        let total = self.max_size_in_bytes();
+        used as f64 / total as f64
     }
 
     pub fn clear(&mut self) {
@@ -147,7 +169,7 @@ impl TimeSeriesChunk {
         }
     }
 
-    pub fn iter_range<'a>(&'a self, start: Timestamp, end: Timestamp) -> impl Iterator<Item=Sample> + 'a {
+    pub fn iter_range<'a>(&'a self, start: Timestamp, end: Timestamp) -> impl IntoIterator<Item=Sample> + 'a {
         SampleIterator::new(self, start, end)
     }
 
@@ -309,6 +331,12 @@ impl<'a> Iterator for SampleIterator<'a> {
         let value = self.values[self.sample_index];
         self.sample_index += 1;
         Some(Sample::new(timestamp, value))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let count = self.timestamps.len();
+        let lower = count - self.sample_index;
+        (lower, Some(count))
     }
 }
 

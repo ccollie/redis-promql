@@ -5,9 +5,8 @@ use redis_module::{Context, NextArg, RedisError, RedisResult, RedisString, Redis
 use crate::aggregators::Aggregator;
 use crate::common::{parse_duration_arg, parse_integer_arg, parse_number_with_unit, parse_timestamp};
 use crate::common::types::Timestamp;
-use crate::module::parse_timestamp_arg;
+use crate::module::{get_timeseries_mut, parse_timestamp_arg};
 use crate::module::result::sample_to_result;
-use crate::ts::{get_timeseries_mut};
 
 
 const CMD_ARG_FILTER_BY_VALUE: &str = "FILTER_BY_VALUE";
@@ -214,7 +213,7 @@ pub fn parse_aggregation_args(args: &mut Skip<IntoIter<RedisString>>) -> RedisRe
         .map_err(|_e| RedisError::Str("TSDB: Error parsing AGGREGATION"))?;
     let aggregator = Aggregator::try_from(agg_str)?;
     let bucket_duration = parse_duration_arg(&args.next_arg()?)
-        .map_err(|e| RedisError::Str("Error parsing bucketDuration"))?;
+        .map_err(|_e| RedisError::Str("Error parsing bucketDuration"))?;
 
     let mut aggr: AggregationOptions = AggregationOptions {
         aggregator,

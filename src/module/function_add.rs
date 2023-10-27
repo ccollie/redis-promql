@@ -1,11 +1,10 @@
 use crate::module::function_create::{create_timeseries, TimeSeriesOptions};
-use crate::module::{REDIS_PROMQL_SERIES_TYPE};
-use crate::ts::{DuplicatePolicy, get_timeseries_mut};
+use crate::module::{get_timeseries_mut, REDIS_PROMQL_SERIES_TYPE};
+use crate::ts::{DuplicatePolicy};
 use redis_module::key::RedisKeyWritable;
 use redis_module::{Context, NextArg, RedisError, RedisResult, RedisString, RedisValue};
 use ahash::AHashMap;
 use crate::common::{parse_duration_arg, parse_number_with_unit, parse_timestamp};
-use crate::module::timeseries_api::internal_add;
 
 const CMD_ARG_RETENTION: &str = "RETENTION";
 const CMD_ARG_DUPLICATE_POLICY: &str = "DUPLICATE_POLICY";
@@ -26,13 +25,7 @@ pub fn add(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let series = get_timeseries_mut(ctx, &key, false)?;
     if let Some(series) = series {
         args.done()?;
-        internal_add(
-            ctx,
-            series,
-            timestamp,
-            value,
-            series.duplicate_policy.unwrap_or_default(),
-        )?;
+        series.add(timestamp, value, None)?;
         return Ok(RedisValue::Integer(timestamp));
     }
 
@@ -86,15 +79,7 @@ pub fn add(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     }
 
     let mut ts = create_timeseries(&key, options);
-
-    let dupe_policy = ts.duplicate_policy.unwrap_or_default();
-    internal_add(
-        ctx,
-        &mut ts,
-        timestamp,
-        value,
-        dupe_policy,
-    )?;
+    ts.add(timestamp, value, None)?;
 
     let redis_key = RedisKeyWritable::open(ctx.ctx, &key);
     redis_key.set_value(&REDIS_PROMQL_SERIES_TYPE, ts)?;

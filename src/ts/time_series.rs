@@ -1,7 +1,7 @@
 use super::{Chunk, ChunkCompression, TimeSeriesChunk};
 use crate::common::types::{PooledTimestampVec, PooledValuesVec, Sample, Timestamp};
 use crate::error::{TsdbError, TsdbResult};
-use crate::ts::constants::{BLOCK_SIZE_FOR_TIME_SERIES, DEFAULT_CHUNK_SIZE_BYTES, SPLIT_FACTOR};
+use crate::ts::constants::{DEFAULT_CHUNK_SIZE_BYTES, SPLIT_FACTOR};
 use crate::ts::uncompressed_chunk::UncompressedChunk;
 use crate::ts::DuplicatePolicy;
 use ahash::{AHashMap, AHashSet};
@@ -14,7 +14,7 @@ pub type Labels = AHashMap<String, String>;
 
 /// Represents a time series. The time series consists of time series blocks, each containing BLOCK_SIZE_FOR_TIME_SERIES
 /// data points. All but the last block are compressed.
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct TimeSeries {
     pub(crate) id: u64,
 
@@ -64,113 +64,150 @@ impl TimeSeries {
         self.total_samples == 0
     }
 
-    pub fn add_sample(&mut self, time: Timestamp, value: f64) -> TsdbResult<()> {
-        let chunk = self.get_last_chunk_for_update()?;
-        chunk.add_sample(&Sample { timestamp: time, value })?;
-
-        if time < self.first_timestamp {
-            self.first_timestamp = time;
+    pub fn add(
+        &mut self,
+        ts: Timestamp,
+        value: f64,
+        dp_override: Option<DuplicatePolicy>,
+    ) -> TsdbResult<()> {
+        if self.is_older_than_retention(ts) {
+            return Err(TsdbError::SampleTooOld);
         }
+
+        let last_ts = self.last_timestamp;
+        if !self.is_empty() {
+            if let Some(dedup_interval) = self.dedupe_interval {
+                let millis = dedup_interval.as_millis() as i64;
+                if millis > 0 && (ts - last_ts) < millis {
+                    // todo: use policy to derive a value to insert
+                    let msg = "New sample encountered in less than dedupe interval";
+                    return Err(TsdbError::DuplicateSample(msg.to_string()));
+                }
+            }
+
+            if ts <= last_ts {
+                let _ = self.upsert_sample(ts, value, dp_override);
+                return Ok(());
+            }
+        }
+
+        self.add_sample(ts, value)
+    }
+
+    pub(super) fn add_sample(&mut self, time: Timestamp, value: f64) -> TsdbResult<()> {
+        let sample = Sample {
+            timestamp: time,
+            value,
+        };
+        if self.is_empty() {
+            let mut new_chunk = TimeSeriesChunk::Uncompressed(UncompressedChunk::with_max_size(
+                self.chunk_size_bytes,
+            ));
+            new_chunk.add_sample(&sample)?;
+
+            self.first_timestamp = time;
+            self.chunks.push(new_chunk);
+        } else {
+            // append sample. False means we've overflowed capacity
+            if !self.append(&sample)? {
+                self.add_chunk_with_sample(&sample)?;
+            }
+        }
+
         self.last_value = value;
         self.last_timestamp = time;
         self.total_samples += 1;
         Ok(())
     }
 
-    fn get_last_chunk_for_update(&mut self) -> TsdbResult<&mut TimeSeriesChunk> {
-        if self.chunks.is_empty() {
-            self.append_uncompressed_chunk();
-            return Ok(self.get_last_chunk());
+    #[inline]
+    fn append(&mut self, sample: &Sample) -> TsdbResult<bool> {
+        let chunk = self.get_last_chunk();
+        match chunk.add_sample(sample) {
+            Err(TsdbError::CapacityFull(_)) => Ok(false),
+            Err(e) => return Err(e),
+            _ => Ok(true),
         }
-
-        let chunk = self.chunks.last().unwrap();
-        if chunk.is_full() {
-            // The last block is full. So, compress it and append it time_series_block_compressed.
-            // todo: see if previous block is not full, and if not simply merge into to it
-            let chunk_len = self.chunks.len();
-            let chunk_size = self.chunk_size_bytes;
-            let compression = self.chunk_compression;
-
-            if let TimeSeriesChunk::Uncompressed(uncompressed_chunk) = chunk {
-                let new_chunk = TimeSeriesChunk::new(
-                    compression,
-                    chunk_size,
-                    &uncompressed_chunk.timestamps,
-                    &uncompressed_chunk.values,
-                )?;
-                // insert before last elem
-                self.chunks.insert(chunk_len - 1, new_chunk);
-                // todo: clear and return last element
-                let res = self.get_last_chunk();
-                res.clear();
-                // res
-                return Ok(res)
-            } else {
-                self.append_uncompressed_chunk();
-            }
-        }
-
-        Ok(self.get_last_chunk())
     }
 
-    /// append the given time and value to the time series.
-    pub fn add(&mut self, time: Timestamp, value: f64) -> TsdbResult<()> {
+    /// Add a new chunk and compact the current last chunk if necessary.
+    fn add_chunk_with_sample(&mut self, sample: &Sample) -> TsdbResult<()> {
+        let chunks_len = self.chunks.len();
+
+        // The last block is full. So, compress it and append it time_series_block_compressed.
         let chunk_size = self.chunk_size_bytes;
+        let compression = self.chunk_compression;
+        let min_timestamp = self.get_min_timestamp();
 
-        // Try to append the time+value to the last block.
-        let ret_val = {
-            let last_chunk = self.get_last_chunk();
-            last_chunk.add_sample(&Sample {
-                timestamp: time,
-                value,
-            })
-        };
+        // arrrgh! rust treats vecs as a single unit wrt borrowing, but the following iterator trick
+        // seems to work
+        let mut iter = self.chunks.iter_mut().rev();
+        let last_chunk = iter.next().unwrap();
 
-        if let Err(err) = ret_val {
-            if err == TsdbError::CapacityFull(BLOCK_SIZE_FOR_TIME_SERIES) {
-                // The last block is full. So, compress it and append it time_series_block_compressed.
-                let chunk_len = self.chunks.len();
-                let chunk = self.chunks.last().unwrap();
-                // The last block is full. So, compress it and append it time_series_block_compressed.
-                // todo: see if previous block is not full, and if not simply append to it
-                let last_chunk = if let TimeSeriesChunk::Uncompressed(uncompressed_chunk) = chunk {
-                    let new_chunk = TimeSeriesChunk::new(
-                        self.chunk_compression,
-                        chunk_size,
-                        &uncompressed_chunk.timestamps,
-                        &uncompressed_chunk.values,
-                    )?;
-                    // insert before last elem
-                    self.chunks.insert(chunk_len - 1, new_chunk);
-                    // todo: clear and return last element
-                    let res = self.get_last_chunk();
-                    res.clear();
-                    res
-                } else {
-                    // Create a new last block and append the time+value to it.
-                    self.append_uncompressed_chunk();
-                    self.get_last_chunk()
-                };
+        // check if previous block is has capacity, and if so merge into it
+        if let Some(prev_chunk) = iter.next() {
+            if Self::should_merge_into(prev_chunk, 1) {
+                // todo: use a pool of samples
+                let samples: Vec<Sample> = last_chunk
+                    .iter_range(min_timestamp, last_chunk.last_timestamp())
+                    .into_iter()
+                    .collect();
 
-                last_chunk.add_sample(&Sample {
-                    timestamp: time,
-                    value,
-                })?
-            } else {
-                return Err(err);
+                let mut duplicates = AHashSet::new();
+                let duplicate_policy = self.duplicate_policy.unwrap_or(DuplicatePolicy::Last);
+                prev_chunk.merge_samples(
+                    &samples,
+                    min_timestamp,
+                    duplicate_policy,
+                    &mut duplicates,
+                )?;
+
+                // reuse last block
+                last_chunk.clear();
+                last_chunk.add_sample(sample)?;
+
+                return Ok(());
             }
         }
 
-        if time < self.first_timestamp {
-            self.first_timestamp = time;
+        // if the last chunk is uncompressed, create a new compressed block and move samples to it
+        if let TimeSeriesChunk::Uncompressed(uncompressed_chunk) = last_chunk {
+            let new_chunk = TimeSeriesChunk::new(
+                compression,
+                chunk_size,
+                &uncompressed_chunk.timestamps,
+                &uncompressed_chunk.values,
+            )?;
+
+            // reuse last chunk
+            last_chunk.clear();
+
+            // insert new chunk before last block
+            self.chunks.insert(chunks_len - 1, new_chunk);
+            // res
+        } else {
+            let mut new_chunk = TimeSeriesChunk::Uncompressed(UncompressedChunk::with_max_size(
+                self.chunk_size_bytes,
+            ));
+            new_chunk.add_sample(sample)?;
+            self.chunks.push(new_chunk);
+
+            return Ok(());
         }
 
-        if time > self.last_timestamp {
-            self.last_timestamp = time;
-            self.last_value = value;
-        }
+        return Ok(());
+    }
 
-        Ok(())
+    /// Determine if we should merge an adjacent node into `chunk`.
+    /// Mostly used for when the last chunk overflows and we need to create a new one.
+    fn should_merge_into(chunk: &TimeSeriesChunk, num_samples: usize) -> bool {
+        if chunk.is_full() {
+            return false;
+        }
+        let sample_size_in_bytes = num_samples * chunk.bytes_per_sample();
+        let new_size = (sample_size_in_bytes + chunk.size()) as f64;
+        let new_utilization = new_size / chunk.max_size_in_bytes() as f64;
+        new_utilization <= 1.2 // todo: configurable const
     }
 
     fn append_uncompressed_chunk(&mut self) {
@@ -297,7 +334,11 @@ impl TimeSeries {
         Ok(())
     }
 
-    pub fn iter<'a>(&'a self, start: Timestamp, end: Timestamp) -> impl Iterator<Item = Sample> + 'a{
+    pub fn iter<'a>(
+        &'a self,
+        start: Timestamp,
+        end: Timestamp,
+    ) -> impl Iterator<Item = Sample> + 'a {
         SampleIterator::new(self, start, end)
     }
 
@@ -313,7 +354,7 @@ impl TimeSeries {
         false
     }
 
-    pub fn trim(&mut self, start: Timestamp, end: Timestamp) -> TsdbResult<()> {
+    pub fn trim(&mut self) -> TsdbResult<()> {
         if self.retention.is_zero() {
             return Ok(());
         }
