@@ -15,12 +15,14 @@ mod function_range;
 mod function_madd;
 mod function_add;
 mod function_alter;
+mod function_get;
 
 pub mod commands {
     pub(crate) use super::function_add::*;
     pub(crate) use super::function_alter::*;
     pub(crate) use super::function_create::*;
     pub(crate) use super::function_del::*;
+    pub(crate) use super::function_get::*;
     pub(crate) use super::function_madd::*;
     pub(crate) use super::function_metadata::*;
     pub(crate) use super::function_query::*;

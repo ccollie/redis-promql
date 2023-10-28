@@ -1,4 +1,3 @@
-use redis_module::RedisError;
 use thiserror::Error;
 
 #[derive(Debug, Error, Eq, PartialEq)]

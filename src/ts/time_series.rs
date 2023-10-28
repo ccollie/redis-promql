@@ -21,22 +21,16 @@ pub struct TimeSeries {
     pub metric_name: String,
 
     pub labels: Labels,
-
     pub retention: Duration,
-
     pub dedupe_interval: Option<Duration>,
     pub duplicate_policy: Option<DuplicatePolicy>,
-
     pub chunk_compression: ChunkCompression,
     pub chunk_size_bytes: usize,
     pub chunks: Vec<TimeSeriesChunk>,
 
     pub total_samples: u64,
-
     pub first_timestamp: Timestamp,
-
     pub last_timestamp: Timestamp,
-
     pub last_value: f64,
 }
 
@@ -130,7 +124,7 @@ impl TimeSeries {
         }
     }
 
-    /// Add a new chunk and compact the current last chunk if necessary.
+    /// Add a new chunk and compact the current chunk if necessary.
     fn add_chunk_with_sample(&mut self, sample: &Sample) -> TsdbResult<()> {
         let chunks_len = self.chunks.len();
 
@@ -144,9 +138,14 @@ impl TimeSeries {
         let mut iter = self.chunks.iter_mut().rev();
         let last_chunk = iter.next().unwrap();
 
-        // check if previous block is has capacity, and if so merge into it
+        // check if previous block has capacity, and if so merge into it
         if let Some(prev_chunk) = iter.next() {
-            if Self::should_merge_into(prev_chunk, 1) {
+            let remaining_capacity = prev_chunk.estimate_remaining_sample_capacity();
+            if remaining_capacity > last_chunk.num_samples() {
+                // copy all from last_chunk
+
+            }
+            if prev_chunk.has_sample_capacity( 1) {
                 // todo: use a pool of samples
                 let samples: Vec<Sample> = last_chunk
                     .iter_range(min_timestamp, last_chunk.last_timestamp())
@@ -198,18 +197,6 @@ impl TimeSeries {
         return Ok(());
     }
 
-    /// Determine if we should merge an adjacent node into `chunk`.
-    /// Mostly used for when the last chunk overflows and we need to create a new one.
-    fn should_merge_into(chunk: &TimeSeriesChunk, num_samples: usize) -> bool {
-        if chunk.is_full() {
-            return false;
-        }
-        let sample_size_in_bytes = num_samples * chunk.bytes_per_sample();
-        let new_size = (sample_size_in_bytes + chunk.size()) as f64;
-        let new_utilization = new_size / chunk.max_size_in_bytes() as f64;
-        new_utilization <= 1.2 // todo: configurable const
-    }
-
     fn append_uncompressed_chunk(&mut self) {
         let new_chunk =
             TimeSeriesChunk::Uncompressed(UncompressedChunk::with_max_size(self.chunk_size_bytes));
@@ -237,57 +224,21 @@ impl TimeSeries {
         value: f64,
         dp_override: Option<DuplicatePolicy>,
     ) -> TsdbResult<usize> {
-        fn handle_upsert(
-            chunk: &mut TimeSeriesChunk,
-            timestamp: Timestamp,
-            value: f64,
-            max_size: usize,
-            dp_policy: DuplicatePolicy,
-        ) -> TsdbResult<(usize, Option<TimeSeriesChunk>)> {
-            let mut sample = Sample { timestamp, value };
-            if chunk.size() as f64 > max_size as f64 * SPLIT_FACTOR {
-                let mut new_chunk = chunk.split()?;
-                let size = new_chunk.upsert_sample(&mut sample, dp_policy)?;
-                Ok((size, Some(new_chunk)))
-            } else {
-                let size = chunk.upsert_sample(&mut sample, dp_policy)?;
-                Ok((size, None))
-            }
-        }
 
         let dp_policy = dp_override.unwrap_or(
             self.duplicate_policy.unwrap_or_default(), //.unwrap_or(/* TSGlobalConfig.duplicatePolicy),
         );
 
-        let block_count = self.chunks.len();
-        let max_size = self.chunk_size_bytes;
-        let last_chunk = self.get_last_chunk();
-        let first_ts = last_chunk.first_timestamp();
-
-        let (size, new_chunk) = if timestamp < first_ts && block_count > 1 {
-            // Upsert in an older chunk
-            let (pos, found) = get_chunk_index(&self.chunks, timestamp);
-            if found {
-                let chunk = self.chunks.get_mut(pos).unwrap();
-                handle_upsert(chunk, timestamp, value, max_size, dp_policy)?
-            } else {
-                // if we get here we have a big hole. We're ordered ascending so wee can append to the
-                // previous block
-                let chunk = if pos > 0 {
-                    self.chunks.get_mut(pos - 1).unwrap()
-                } else {
-                    // we're at the beginning of the series
-                    self.get_first_chunk()
-                };
-                chunk.add_sample(&Sample { timestamp, value })?;
-                (1, None)
-            }
-        } else {
-            handle_upsert(last_chunk, timestamp, value, max_size, dp_policy)?
+        let (size, new_chunk) = {
+            let max_size = self.chunk_size_bytes;
+            let (pos, _) = get_chunk_index(&self.chunks, timestamp);
+            let chunk = self.chunks.get_mut(pos).unwrap();
+            Self::handle_upsert(chunk, timestamp, value, max_size, dp_policy)?
         };
 
         if let Some(new_chunk) = new_chunk {
             self.chunks.push(new_chunk);
+            // todo: how to avoid this ?
             self.chunks.sort_by_key(|chunk| chunk.first_timestamp());
         }
 
@@ -297,6 +248,24 @@ impl TimeSeries {
         }
 
         Ok(size)
+    }
+
+    fn handle_upsert(
+        chunk: &mut TimeSeriesChunk,
+        timestamp: Timestamp,
+        value: f64,
+        max_size: usize,
+        dp_policy: DuplicatePolicy,
+    ) -> TsdbResult<(usize, Option<TimeSeriesChunk>)> {
+        let mut sample = Sample { timestamp, value };
+        if chunk.size() as f64 > max_size as f64 * SPLIT_FACTOR {
+            let mut new_chunk = chunk.split()?;
+            let size = new_chunk.upsert_sample(&mut sample, dp_policy)?;
+            Ok((size, Some(new_chunk)))
+        } else {
+            let size = chunk.upsert_sample(&mut sample, dp_policy)?;
+            Ok((size, None))
+        }
     }
 
     /// Get the time series between give start and end time (both inclusive).
@@ -320,6 +289,9 @@ impl TimeSeries {
         timestamps: &mut Vec<Timestamp>,
         values: &mut Vec<f64>,
     ) -> TsdbResult<()> {
+        if self.is_empty() {
+            return Ok(());
+        }
         let (index, _) = get_chunk_index(&self.chunks, start_time);
         let chunks = &self.chunks[index..];
         // Get overlapping data points from the compressed blocks.
@@ -386,22 +358,36 @@ impl TimeSeries {
         // todo: tinyvec
         let mut indexes_to_delete = Vec::new();
 
-        let (index, _) = get_chunk_index(&self.chunks, start_ts);
+        let (mut index, _) = get_chunk_index(&self.chunks, start_ts);
         let chunks = &mut self.chunks[index..];
+
+        for chunk in chunks.iter_mut()
+            .take_while(|&block| !block.is_empty() && block.first_timestamp() <= end_ts) {
+
+            let is_only_chunk =
+                (chunk.num_samples() + deleted_samples) as u64 == self.total_samples;
+
+            if chunk.first_timestamp() >= start_ts && chunk.last_timestamp() <= end_ts {
+                // this chunk is completely covered by the requested range, so we can remove it
+                deleted_samples += chunk.num_samples();
+                indexes_to_delete.push(index);
+            } else {
+                deleted_samples += chunk.remove_range(start_ts, end_ts)?;
+            }
+            index += 1;
+        }
+
+        // Todo: although many chunks may be deleted, only a max of 2 will be modified, so
+        // we can try to merge it with the next chunk
 
         for (idx, chunk) in chunks.iter_mut().enumerate() {
             let chunk_first_ts = chunk.first_timestamp();
-            let chunk_last_ts = chunk.last_timestamp();
 
             // We deleted the latest samples, no more chunks/samples to delete or cur chunk start_ts is
             // larger than end_ts
             if chunk.is_empty() || chunk_first_ts > end_ts {
                 // Having empty chunk means the series is empty
                 break;
-            }
-
-            if chunk_last_ts < start_ts {
-                continue;
             }
 
             let is_only_chunk =
@@ -411,7 +397,7 @@ impl TimeSeries {
             // We assume at least one allocated chunk in the series
             if chunk.is_contained_by_range(start_ts, end_ts) && (!is_only_chunk) {
                 deleted_samples += chunk.num_samples();
-                indexes_to_delete.push(idx);
+                indexes_to_delete.push(index + idx);
             } else {
                 deleted_samples += chunk.remove_range(start_ts, end_ts)?;
             }
@@ -449,12 +435,11 @@ impl TimeSeries {
     }
 
     fn get_min_timestamp(&self) -> Timestamp {
-        let retention_millis = self.retention.as_millis() as i64;
-        if self.last_timestamp > retention_millis {
-            self.last_timestamp - retention_millis
-        } else {
-            0
+        if self.retention.is_zero() {
+            return 0;
         }
+        let retention_millis = self.retention.as_millis() as i64;
+        (self.last_timestamp - retention_millis).min(0)
     }
 }
 
@@ -464,7 +449,18 @@ impl Default for TimeSeries {
     }
 }
 
+/// Return the index of the chunk in which the timestamp belongs. Assumes !chunks.is_empty()
 fn get_chunk_index(chunks: &Vec<TimeSeriesChunk>, timestamp: Timestamp) -> (usize, bool) {
+    let len = chunks.len();
+    let slice = chunks.as_slice();
+    let first = slice[0].first_timestamp();
+    let last = slice[len - 1].last_timestamp();
+    if timestamp <= first {
+        return (0, false)
+    }
+    if timestamp >= last {
+        return (slice.len() - 1, false)
+    }
     return match chunks.binary_search_by(|probe| {
         if timestamp < probe.first_timestamp() {
             std::cmp::Ordering::Greater
@@ -562,7 +558,7 @@ impl<'a> SampleIterator<'a> {
             let timestamps = &self.timestamps[self.sample_index..];
             let values = &self.values[self.sample_index..];
 
-            // trim the timestamps by the filter function while retaining a list of thee
+            // trim the timestamps by the filter function while retaining a list of the
             // indices that were removed
             let mut indices_to_remove = AHashSet::new();
             for (idx, (ts, v)) in timestamps.iter().zip(values.iter()).enumerate() {
@@ -623,37 +619,38 @@ mod tests {
     #[test]
     fn test_one_entry() {
         let mut ts = TimeSeries::new();
-        ts.append(100, 200.0).unwrap();
+        ts.add(100, 200.0, None).unwrap();
 
-        assert_eq!(ts.get_last_chunk().len(), 1);
-        let last_block_lock = ts.get_last_chunk();
-        let time_series_data_points = &*last_block_lock
-            .get_time_series_data_points()
-            .read()
-            .unwrap();
-        let data_point = time_series_data_points.get(0).unwrap();
+        assert_eq!(ts.get_last_chunk().num_samples(), 1);
+        let last_block = ts.get_last_chunk();
+        let samples = last_block
+            .get_samples(0, 1000).unwrap();
+
+        let data_point = samples.get(0).unwrap();
         assert_eq!(data_point.get_time(), 100);
         assert_eq!(data_point.get_value(), 200.0);
+        assert_eq!(ts.total_samples, 1);
+        assert_eq!(ts.first_timestamp, 100);
+        assert_eq!(ts.last_timestamp, 100);
     }
 
     #[test]
     fn test_block_size_entries() {
         let mut ts = TimeSeries::new();
         for i in 0..BLOCK_SIZE_FOR_TIME_SERIES {
-            ts.append(i as i64, i as f64).unwrap();
+            ts.add(i as i64, i as f64, None).unwrap();
         }
 
         // All the entries will go to 'last', as we have pushed exactly BLOCK_SIZE_FOR_TIME_SERIES entries.
-        assert_eq!(ts.chunks.len(), 0);
-        assert_eq!(ts.get_last_chunk().len(), BLOCK_SIZE_FOR_TIME_SERIES);
+        assert_eq!(ts.chunks.len(), 2);
+        assert_eq!(ts.get_last_chunk().num_samples(), BLOCK_SIZE_FOR_TIME_SERIES);
 
         for i in 0..BLOCK_SIZE_FOR_TIME_SERIES {
             let last_block = ts.get_last_chunk();
-            let time_series_data_points =
-                &*last_block.get_time_series_data_points().read().unwrap();
-            let data_point = time_series_data_points.get(i).unwrap();
-            assert_eq!(data_point.get_time(), i as u64);
-            assert_eq!(data_point.get_value(), i as f64);
+            let samples = last_block.get_samples(0, 7000).unwrap();
+            let data_point = samples.get(i).unwrap();
+            assert_eq!(data_point.timestamp, i as i64);
+            assert_eq!(data_point.value, i as f64);
         }
     }
 }

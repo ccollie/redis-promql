@@ -1,5 +1,5 @@
 use crate::error::{TsdbError, TsdbResult};
-use crate::ts::{DuplicatePolicy};
+use crate::ts::{DuplicatePolicy, SeriesSlice};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use ahash::AHashSet;
@@ -8,6 +8,7 @@ use redis_module::{RedisError, RedisResult};
 use crate::common::types::{PooledTimestampVec, PooledValuesVec, Sample, Timestamp};
 use crate::ts::compressed_chunk::CompressedChunk;
 use crate::ts::uncompressed_chunk::UncompressedChunk;
+use crate::ts::utils::get_timestamp_index;
 
 pub const MIN_CHUNK_SIZE: usize = 48;
 pub const MAX_CHUNK_SIZE: usize = 1048576;
@@ -68,7 +69,6 @@ pub enum TimeSeriesChunk {
     Uncompressed(UncompressedChunk),
     Compressed(CompressedChunk),
 }
-
 impl TimeSeriesChunk {
     pub fn new(compression: ChunkCompression, chunk_size: usize, timestamps: &[Timestamp], values: &[f64]) -> TsdbResult<Self> {
         use TimeSeriesChunk::*;
@@ -134,6 +134,30 @@ impl TimeSeriesChunk {
         used as f64 / total as f64
     }
 
+    /// Determine if we this chunk has the capacity to should store a given number of samples.
+    /// This is used to decide to merge adjacent nodes, for example when the last chunk of a time series
+    /// overflows and we need to create a new one.
+    pub fn has_sample_capacity(&self, num_samples: usize) -> bool {
+        if self.is_full() {
+            return false;
+        }
+        let sample_size_in_bytes = num_samples * self.bytes_per_sample();
+        let new_size = (sample_size_in_bytes + self.size()) as f64;
+        let new_utilization = new_size / self.max_size_in_bytes() as f64;
+        new_utilization <= 1.2 // todo: configurable const
+    }
+
+    /// Get an estimate of the remaining capacity in number of samples
+    pub fn estimate_remaining_sample_capacity(&self) -> usize {
+        if self.is_full() {
+            return 0;
+        }
+        let used = self.size();
+        let total = self.max_size_in_bytes();
+        let remaining = total - used;
+        remaining / self.bytes_per_sample()
+    }
+
     pub fn clear(&mut self) {
         use TimeSeriesChunk::*;
         match self {
@@ -156,7 +180,7 @@ impl TimeSeriesChunk {
         first_time <= end_time && last_time >= start_time
     }
 
-    pub fn process_range<F, State>(&mut self, state: &mut State, start: Timestamp, end: Timestamp, f: F) -> TsdbResult<()>
+    pub fn process_range<F, State>(&self, state: &mut State, start: Timestamp, end: Timestamp, f: F) -> TsdbResult<()>
         where F: FnMut(&mut State, &[i64], &[f64]) -> TsdbResult<()> {
         use TimeSeriesChunk::*;
         match self {
@@ -173,9 +197,44 @@ impl TimeSeriesChunk {
         SampleIterator::new(self, start, end)
     }
 
-    pub fn merge_samples(
+    pub fn get_samples(&self, start: Timestamp, end: Timestamp) -> TsdbResult<Vec<Sample>> {
+        let mut samples = Vec::new();
+        self.process_range(&mut samples, start, end, |samples, timestamps, values| {
+            samples.reserve(timestamps.len());
+            for i in 0..timestamps.len() {
+                samples.push(Sample::new(timestamps[i], values[i]));
+            }
+            Ok(())
+        })?;
+        Ok(samples)
+    }
+
+    pub fn try_merge(&mut self, other: &mut Self) -> TsdbResult<usize> {
+        use TimeSeriesChunk::*;
+
+        if self.is_full() || other.is_empty() {
+            return Ok(0);
+        }
+        let capacity = self.estimate_remaining_sample_capacity();
+        match self {
+            Uncompressed(chunk) => {
+                match other {
+                    Uncompressed(other_chunk) => chunk.try_merge(other_chunk),
+                    Compressed(other_chunk) => chunk.try_merge(other_chunk),
+                }
+            },
+            Compressed(chunk) => {
+                match other {
+                    Uncompressed(other_chunk) => chunk.try_merge(other_chunk),
+                    Compressed(other_chunk) => chunk.try_merge(other_chunk),
+                }
+            },
+        }
+    }
+
+    pub fn merge_samples<'a>(
         &mut self,
-        samples: &[Sample],
+        samples: SeriesSlice<'a>,
         min_timestamp: Timestamp,
         duplicate_policy: DuplicatePolicy,
         duplicates: &mut AHashSet<Timestamp>) -> TsdbResult<usize> {
@@ -318,14 +377,14 @@ impl<'a> Iterator for SampleIterator<'a> {
             {
                 return None;
             }
-            self.sample_index = if self.start <= first {
-                0
+            if let Some(idx) = get_timestamp_index(&self.timestamps, self.start) {
+                self.sample_index = idx;
             } else {
-                match self.timestamps.binary_search(&self.start) {
-                    Ok(idx) => idx,
-                    Err(idx) => idx,
-                }
+                return None;
             }
+        }
+        if self.sample_index >= self.timestamps.len() {
+            return None;
         }
         let timestamp = self.timestamps[self.sample_index];
         let value = self.values[self.sample_index];

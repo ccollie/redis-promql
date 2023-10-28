@@ -1,14 +1,13 @@
-use std::cmp::Ordering;
-use std::fmt::Display;
+use crate::common::parse_timestamp;
 use metricsql_engine::TimestampTrait;
 use redis_module::{RedisError, RedisResult, RedisString};
 use serde::{Deserialize, Serialize};
-use crate::common::parse_timestamp;
+use std::cmp::Ordering;
+use std::fmt::Display;
 
 pub type Timestamp = metricsql_engine::prelude::Timestamp;
 pub type PooledTimestampVec = metricsql_common::pool::PooledVecI64;
 pub type PooledValuesVec = metricsql_common::pool::PooledVecF64;
-
 
 /// Represents a data point in time series.
 #[derive(Debug, Deserialize, Serialize)]
@@ -23,7 +22,10 @@ pub struct Sample {
 impl Sample {
     /// Create a new DataPoint from given time and value.
     pub fn new(time: Timestamp, value: f64) -> Self {
-        Sample { timestamp: time, value }
+        Sample {
+            timestamp: time,
+            value,
+        }
     }
 
     /// Get time.
@@ -107,9 +109,12 @@ impl TryFrom<&str> for TimestampRangeValue {
             "+" => Ok(TimestampRangeValue::Latest),
             "*" => Ok(TimestampRangeValue::Now),
             _ => {
-                let ts = parse_timestamp(value).map_err(|_| RedisError::Str("invalid timestamp"))?;
+                let ts =
+                    parse_timestamp(value).map_err(|_| RedisError::Str("invalid timestamp"))?;
                 if ts < 0 {
-                    return Err(RedisError::Str("TSDB: invalid timestamp, must be a non-negative integer"));
+                    return Err(RedisError::Str(
+                        "TSDB: invalid timestamp, must be a non-negative integer",
+                    ));
                 }
                 Ok(TimestampRangeValue::Value(ts))
             }
@@ -132,14 +137,17 @@ impl TryFrom<&RedisString> for TimestampRangeValue {
         }
         return if let Ok(int_val) = value.parse_integer() {
             if int_val < 0 {
-                return Err(RedisError::Str("TSDB: invalid timestamp, must be a non-negative integer"));
+                return Err(RedisError::Str(
+                    "TSDB: invalid timestamp, must be a non-negative integer",
+                ));
             }
             Ok(TimestampRangeValue::Value(int_val))
         } else {
             let date_str = value.to_string_lossy();
-            let ts = parse_timestamp(&date_str).map_err(|_| RedisError::Str("invalid timestamp"))?;
+            let ts =
+                parse_timestamp(&date_str).map_err(|_| RedisError::Str("invalid timestamp"))?;
             Ok(TimestampRangeValue::Value(ts))
-        }
+        };
     }
 }
 
@@ -172,11 +180,11 @@ impl PartialOrd for TimestampRangeValue {
             (Now, Value(v)) => {
                 let now = Timestamp::now();
                 now.partial_cmp(v)
-            },
+            }
             (Value(v), Now) => {
                 let now = Timestamp::now();
                 v.partial_cmp(&now)
-            },
+            }
             (Earliest, _) => Some(Ordering::Less),
             (_, Earliest) => Some(Ordering::Greater),
             (Latest, _) => Some(Ordering::Greater),
@@ -194,7 +202,7 @@ pub struct TimestampRange {
 impl TimestampRange {
     pub fn new(start: TimestampRangeValue, end: TimestampRangeValue) -> RedisResult<Self> {
         if start > end {
-            return Err( RedisError::Str("invalid timestamp range: start > end"));
+            return Err(RedisError::Str("invalid timestamp range: start > end"));
         }
         Ok(TimestampRange { start, end })
     }

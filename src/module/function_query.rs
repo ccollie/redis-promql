@@ -27,7 +27,7 @@ const CMD_ARG_ROUNDING: &str = "ROUNDING";
 ///     [STEP duration]
 ///     [ROUNDING digits]
 ///
-pub(crate) fn prom_query_range(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+pub(crate) fn query_range(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let mut args = args.into_iter().skip(1);
     let query = args.next_string()?;
     let mut start_value: Option<TimestampRangeValue> = None;

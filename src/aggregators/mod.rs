@@ -418,19 +418,19 @@ impl TryFrom<&str> for Aggregator {
 
 impl Aggregator {
     pub fn new(name: &str) -> Option<Self> {
-        match name.to_ascii_lowercase().as_str() {
-            "first" => Some(Aggregator::First(AggFirst::default())),
-            "last" => Some(Aggregator::Last(AggLast::default())),
-            "min" => Some(Aggregator::Min(AggMin::default())),
-            "max" => Some(Aggregator::Max(AggMax::default())),
-            "avg" => Some(Aggregator::Avg(AggAvg::default())),
-            "sum" => Some(Aggregator::Sum(AggSum::default())),
-            "count" => Some(Aggregator::Count(AggCount::default())),
-            "range" => Some(Aggregator::Range(AggRange::default())),
-            "stds" | "std.s" => Some(Aggregator::StdS(AggStdS::default())),
-            "stdp" | "std.p" => Some(Aggregator::StdP(AggStdP::default())),
-            "vars" | "var.s" => Some(Aggregator::VarS(AggVarS::default())),
-            "varp" | "var.p" => Some(Aggregator::VarP(AggVarP::default())),
+        match name {
+            s if s.eq_ignore_ascii_case("first") => Some(Aggregator::First(AggFirst::default())),
+            s if s.eq_ignore_ascii_case("last") => Some(Aggregator::Last(AggLast::default())),
+            s if s.eq_ignore_ascii_case("min") => Some(Aggregator::Min(AggMin::default())),
+            s if s.eq_ignore_ascii_case("max") => Some(Aggregator::Max(AggMax::default())),
+            s if s.eq_ignore_ascii_case("avg") => Some(Aggregator::Avg(AggAvg::default())),
+            s if s.eq_ignore_ascii_case("sum") => Some(Aggregator::Sum(AggSum::default())),
+            s if s.eq_ignore_ascii_case("count") => Some(Aggregator::Count(AggCount::default())),
+            s if s.eq_ignore_ascii_case("range") => Some(Aggregator::Range(AggRange::default())),
+            s if s.eq_ignore_ascii_case("std.s") => Some(Aggregator::StdS(AggStdS::default())),
+            s if s.eq_ignore_ascii_case("std.p") => Some(Aggregator::StdP(AggStdP::default())),
+            s if s.eq_ignore_ascii_case("var.s") => Some(Aggregator::VarS(AggVarS::default())),
+            s if s.eq_ignore_ascii_case("var.p") => Some(Aggregator::VarP(AggVarP::default())),
             _ => None,
         }
     }

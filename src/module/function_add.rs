@@ -1,6 +1,6 @@
-use crate::module::function_create::{create_timeseries, TimeSeriesOptions};
+use crate::module::function_create::{create_timeseries};
 use crate::module::{get_timeseries_mut, REDIS_PROMQL_SERIES_TYPE};
-use crate::ts::{DuplicatePolicy};
+use crate::ts::{DuplicatePolicy, TimeSeriesOptions};
 use redis_module::key::RedisKeyWritable;
 use redis_module::{Context, NextArg, RedisError, RedisResult, RedisString, RedisValue};
 use ahash::AHashMap;
@@ -42,7 +42,7 @@ pub fn add(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
             arg if arg.eq_ignore_ascii_case(CMD_ARG_DEDUPE_INTERVAL) => {
                 let next = args.next_arg()?;
                 if let Ok(val) = parse_duration_arg(&next) {
-                    options.dedupe_interval(val);
+                    options.dedupe_interval = Some(val);
                 } else {
                     return Err(RedisError::Str("ERR invalid DEDUPE_INTERVAL value"));
                 }

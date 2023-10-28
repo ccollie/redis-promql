@@ -39,12 +39,21 @@ impl TryFrom<&str> for BucketTimestampOutput {
     type Error = RedisError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value.to_lowercase().as_str() {
-            "start" | "-" => Ok(BucketTimestampOutput::Start),
-            "end" | "+" => Ok(BucketTimestampOutput::End),
-            "mid" | "middle"  => Ok(BucketTimestampOutput::Mid),
-            _ => Err(RedisError::Str("TSDB: invalid BUCKETTIMESTAMP parameter")),
+        if value.len() == 1 {
+            let c = value.chars().next().unwrap();
+            match c {
+                '-' => return Ok(BucketTimestampOutput::Start),
+                '+' => return Ok(BucketTimestampOutput::End),
+                _ => {}
+            }
         }
+        match value {
+            value if value.eq_ignore_ascii_case("start") => return Ok(BucketTimestampOutput::Start),
+            value if value.eq_ignore_ascii_case("end") => return Ok(BucketTimestampOutput::End),
+            value if value.eq_ignore_ascii_case("mid") => return Ok(BucketTimestampOutput::Mid),
+            _ => {}
+        }
+        return Err(RedisError::Str("TSDB: invalid BUCKETTIMESTAMP parameter"))
     }
 }
 
@@ -203,6 +212,7 @@ fn parse_timestamp_filter(args: &mut Skip<IntoIter<RedisString>>) -> RedisResult
         return Err(RedisError::Str("TSDB: FILTER_BY_TS one or more arguments are missing"));
     }
     values.sort();
+    values.dedup();
     return Ok(values);
 }
 

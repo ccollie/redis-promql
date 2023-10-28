@@ -1,12 +1,13 @@
+use crate::common::types::{Sample, Timestamp, SAMPLE_SIZE};
+use crate::error::{TsdbError, TsdbResult};
+use crate::ts::chunk::Chunk;
+use crate::ts::utils::get_timestamp_index_bounds;
+use crate::ts::{DuplicatePolicy, DuplicateStatus, SeriesSlice};
 use ahash::AHashSet;
 use metricsql_common::pool::{get_pooled_vec_f64, get_pooled_vec_i64};
-use crate::error::{TsdbError, TsdbResult};
-use crate::ts::utils::get_timestamp_index_bounds;
-use crate::ts::{handle_duplicate_sample, DuplicatePolicy, DuplicateStatus};
 use serde::{Deserialize, Serialize};
-use crate::common::types::{Sample, SAMPLE_SIZE, Timestamp};
-use crate::ts::chunk::Chunk;
-use crate::ts::merge::{DataBlock, merge_into};
+use crate::ts::duplicate_policy::handle_duplicate_sample;
+use crate::ts::merge::merge;
 
 // todo: move to constants
 pub const MAX_UNCOMPRESSED_SAMPLES: usize = 256;
@@ -20,7 +21,11 @@ pub struct UncompressedChunk {
 
 impl UncompressedChunk {
     pub fn new(size: usize, timestamps: Vec<i64>, values: Vec<f64>) -> Self {
-        Self { timestamps, values, max_size: size }
+        Self {
+            timestamps,
+            values,
+            max_size: size,
+        }
     }
 
     pub fn with_max_size(size: usize) -> Self {
@@ -38,7 +43,7 @@ impl UncompressedChunk {
     }
 
     pub fn is_full(&self) -> bool {
-        self.timestamps.len() >= MAX_UNCOMPRESSED_SAMPLES
+        self.timestamps.len() * self.bytes_per_sample() >= self.max_size
     }
 
     pub fn clear(&mut self) {
@@ -109,34 +114,39 @@ impl UncompressedChunk {
     }
 
     // todo: move to trait ?
-    pub fn merge_samples(
+    pub fn merge_samples<'a>(
         &mut self,
-        samples: &[Sample],
+        samples: SeriesSlice<'a>,
         min_timestamp: Timestamp,
         duplicate_policy: DuplicatePolicy,
-        duplicates: &mut AHashSet<Timestamp>) -> TsdbResult<usize> {
+        duplicates: &mut AHashSet<Timestamp>,
+    ) -> TsdbResult<usize> {
         if samples.is_empty() {
             return Ok(0);
         }
 
-        let mut timestamps = get_pooled_vec_i64(samples.len());
-        let mut values= get_pooled_vec_f64(samples.len());
+        let mut dest_timestamps = get_pooled_vec_i64(samples.len());
+        let mut dest_values = get_pooled_vec_f64(samples.len());
 
-        for sample in samples {
-            timestamps.push(sample.timestamp);
-            values.push(sample.value);
-        }
+        let right = SeriesSlice::new(&self.timestamps, &self.values);
+        let res = merge(
+            &mut dest_timestamps,
+            &mut dest_values,
+            samples,
+            right,
+            min_timestamp,
+            duplicate_policy,
+            duplicates,
+        );
 
-        let mut block = DataBlock::new(&mut timestamps, &mut values);
-
-        let mut src_timestamps = &mut self.timestamps;
-        let mut src_values = &mut self.values;
-
-        let mut dst = DataBlock::new(&mut src_timestamps, &mut src_values);
-        let res = merge_into(&mut dst, &mut block, min_timestamp, duplicate_policy, duplicates);
+        self.timestamps.clear();
+        self.timestamps.extend_from_slice(&dest_timestamps);
+        self.values.clear();
+        self.values.extend_from_slice(&dest_values);
 
         Ok(res)
     }
+
 
     pub(crate) fn process_range<F, State>(
         &self,
@@ -148,22 +158,20 @@ impl UncompressedChunk {
     where
         F: FnMut(&mut State, &[i64], &[f64]) -> TsdbResult<()>,
     {
-        let (start_idx, end_idx) = get_timestamp_index_bounds(&self.timestamps, start, end);
-
-        if start_idx <= end_idx {
+        if let Some((start_idx, end_idx)) = get_timestamp_index_bounds(&self.timestamps, start, end) {
             let timestamps = &self.timestamps[start_idx..end_idx];
             let values = &self.values[start_idx..end_idx];
 
-            f(state, &timestamps, &values)
-        } else {
-            let timestamps = vec![];
-            let values = vec![];
-            f(state, &timestamps, &values)
+            return f(state, &timestamps, &values)
         }
+
+        let timestamps = vec![];
+        let values = vec![];
+        f(state, &timestamps, &values)
     }
 
     pub fn bytes_per_sample(&self) -> usize {
-        return SAMPLE_SIZE
+        return SAMPLE_SIZE;
     }
 
     pub fn iter_range(
@@ -181,7 +189,7 @@ impl UncompressedChunk {
                 Err(idx) => (idx, false),
             }
         } else {
-            match self.timestamps.iter().position(|&t| t == ts){
+            match self.timestamps.iter().position(|&t| t == ts) {
                 Some(idx) => (idx, true),
                 None => (self.len(), false),
             }
@@ -253,25 +261,25 @@ impl Chunk for UncompressedChunk {
         Ok(())
     }
 
-    fn get_range(&self, start: Timestamp, end: Timestamp, timestamps: &mut Vec<i64>, values: &mut Vec<f64>) -> TsdbResult<()> {
-        let (start_idx, _) = self.find_timestamp_index(start);
-        if start_idx >= self.timestamps.len() {
+    fn get_range(
+        &self,
+        start: Timestamp,
+        end: Timestamp,
+        timestamps: &mut Vec<i64>,
+        values: &mut Vec<f64>,
+    ) -> TsdbResult<()> {
+        let bounds = get_timestamp_index_bounds(&self.timestamps, start, end);
+        if bounds.is_none() {
             return Ok(());
         }
-        let src_timestamps = &self.timestamps[start_idx..];
-        let src_values = &self.values[start_idx..];
-        let mut end_index: usize = src_timestamps.len() - 1;
-        for ts in src_timestamps.iter().rev() {
-            if *ts <= end {
-                break;
-            }
-            end_index -= 1;
-        }
-        let len = end_index - start_idx + 1;
+        let (start_idx, end_index) = bounds.unwrap();
+        let src_timestamps = &self.timestamps[start_idx..end_index];
+        let src_values = &self.values[start_idx..end_index];
+        let len = src_timestamps.len();
         timestamps.reserve(len);
         values.reserve(len);
-        timestamps.extend_from_slice(&src_timestamps[0..len]);
-        values.extend_from_slice(&src_values[0..len]);
+        timestamps.extend_from_slice(src_timestamps);
+        values.extend_from_slice(&src_values);
 
         Ok(())
     }
@@ -300,7 +308,6 @@ impl Chunk for UncompressedChunk {
         return Ok(self.len() - count);
     }
 
-
     fn split(&mut self) -> TsdbResult<Self>
     where
         Self: Sized,
@@ -322,11 +329,20 @@ struct SampleIter<'a> {
 
 impl<'a> SampleIter<'a> {
     pub fn new(chunk: &'a UncompressedChunk, start: Timestamp, end: Timestamp) -> Self {
-        let (start_index, end_index) = get_timestamp_index_bounds(&chunk.timestamps, start, end);
-        Self {
-            chunk,
-            index: start_index,
-            end_index,
+        if let Some((start_index, end_index)) =
+            get_timestamp_index_bounds(&chunk.timestamps, start, end)
+        {
+            Self {
+                chunk,
+                index: start_index,
+                end_index,
+            }
+        } else {
+            Self {
+                chunk,
+                index: 0,
+                end_index: 0,
+            }
         }
     }
 }

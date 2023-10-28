@@ -1,5 +1,6 @@
 use std::time::Duration;
 use crate::common::types::Timestamp;
+use crate::ts::utils::get_timestamp_index_bounds;
 
 /// removes samples from src* if they are closer to each other than dedup_interval in milliseconds.
 pub fn deduplicate_samples(
@@ -14,20 +15,12 @@ pub fn deduplicate_samples(
     }
     let dedup_interval = dedup_interval.as_millis() as i64;
 
-    let first_ts = src_timestamps[0];
-    if first_ts > end_ts {
-        // Fast path - all samples are outside the requested range
+    let bounds = get_timestamp_index_bounds(src_timestamps, start_ts, end_ts);
+    if bounds.is_none() {
         return None;
     }
 
-    let start_idx = match src_timestamps.binary_search(&start_ts) {
-        Ok(idx) => idx,
-        Err(idx) => idx
-    };
-
-    if start_idx >= src_timestamps.len() {
-        return None;
-    }
+    let (start_idx, end_idx) = bounds.unwrap();
 
     let src_ts = &mut src_timestamps[start_idx..];
     if src_ts.len() < 2 {
@@ -46,14 +39,10 @@ pub fn deduplicate_samples(
     let last_timestamp: Option<Timestamp> = None;
 
     // todo: eliminate bounds checks
-    for i in start_idx + 1 ..src_timestamps.len() {
+    for i in start_idx + 1 ..end_idx {
         let ts = src_timestamps[i];
         if ts <= ts_next {
             continue;
-        }
-
-        if ts > end_ts {
-            break;
         }
 
         src_timestamps[j] = ts;
