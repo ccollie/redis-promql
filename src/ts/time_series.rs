@@ -1,4 +1,4 @@
-use super::{Chunk, ChunkCompression, TimeSeriesChunk};
+use super::{Chunk, ChunkCompression, merge_by_capacity, TimeSeriesChunk};
 use crate::common::types::{PooledTimestampVec, PooledValuesVec, Sample, Timestamp};
 use crate::error::{TsdbError, TsdbResult};
 use crate::ts::constants::{DEFAULT_CHUNK_SIZE_BYTES, SPLIT_FACTOR};
@@ -28,7 +28,7 @@ pub struct TimeSeries {
     pub chunk_size_bytes: usize,
     pub chunks: Vec<TimeSeriesChunk>,
 
-    pub total_samples: u64,
+    pub total_samples: usize,
     pub first_timestamp: Timestamp,
     pub last_timestamp: Timestamp,
     pub last_value: f64,
@@ -132,6 +132,7 @@ impl TimeSeries {
         let chunk_size = self.chunk_size_bytes;
         let compression = self.chunk_compression;
         let min_timestamp = self.get_min_timestamp();
+        let duplicate_policy = self.duplicate_policy.unwrap_or(DuplicatePolicy::Last);
 
         // arrrgh! rust treats vecs as a single unit wrt borrowing, but the following iterator trick
         // seems to work
@@ -140,31 +141,14 @@ impl TimeSeries {
 
         // check if previous block has capacity, and if so merge into it
         if let Some(prev_chunk) = iter.next() {
-            let remaining_capacity = prev_chunk.estimate_remaining_sample_capacity();
-            if remaining_capacity > last_chunk.num_samples() {
-                // copy all from last_chunk
-
-            }
-            if prev_chunk.has_sample_capacity( 1) {
-                // todo: use a pool of samples
-                let samples: Vec<Sample> = last_chunk
-                    .iter_range(min_timestamp, last_chunk.last_timestamp())
-                    .into_iter()
-                    .collect();
-
-                let mut duplicates = AHashSet::new();
-                let duplicate_policy = self.duplicate_policy.unwrap_or(DuplicatePolicy::Last);
-                prev_chunk.merge_samples(
-                    &samples,
-                    min_timestamp,
-                    duplicate_policy,
-                    &mut duplicates,
-                )?;
-
-                // reuse last block
-                last_chunk.clear();
+            if let Some(deleted_count) = merge_by_capacity(
+                prev_chunk,
+                last_chunk,
+                min_timestamp,
+                duplicate_policy,
+            )? {
+                self.total_samples -= deleted_count;
                 last_chunk.add_sample(sample)?;
-
                 return Ok(());
             }
         }
@@ -224,7 +208,6 @@ impl TimeSeries {
         value: f64,
         dp_override: Option<DuplicatePolicy>,
     ) -> TsdbResult<usize> {
-
         let dp_policy = dp_override.unwrap_or(
             self.duplicate_policy.unwrap_or_default(), //.unwrap_or(/* TSGlobalConfig.duplicatePolicy),
         );
@@ -238,11 +221,12 @@ impl TimeSeries {
 
         if let Some(new_chunk) = new_chunk {
             self.chunks.push(new_chunk);
-            // todo: how to avoid this ?
+            // todo: how to avoid this ? Since chunks are currently stored inline this can cause a lot of
+            // moves
             self.chunks.sort_by_key(|chunk| chunk.first_timestamp());
         }
 
-        self.total_samples += size as u64;
+        self.total_samples += size;
         if timestamp == self.last_timestamp {
             self.last_value = value;
         }
@@ -348,7 +332,7 @@ impl TimeSeries {
             let _ = self.chunks.drain(0..count);
         }
 
-        self.total_samples -= deleted_count as u64;
+        self.total_samples -= deleted_count;
 
         Ok(())
     }
@@ -358,24 +342,8 @@ impl TimeSeries {
         // todo: tinyvec
         let mut indexes_to_delete = Vec::new();
 
-        let (mut index, _) = get_chunk_index(&self.chunks, start_ts);
+        let (index, _) = get_chunk_index(&self.chunks, start_ts);
         let chunks = &mut self.chunks[index..];
-
-        for chunk in chunks.iter_mut()
-            .take_while(|&block| !block.is_empty() && block.first_timestamp() <= end_ts) {
-
-            let is_only_chunk =
-                (chunk.num_samples() + deleted_samples) as u64 == self.total_samples;
-
-            if chunk.first_timestamp() >= start_ts && chunk.last_timestamp() <= end_ts {
-                // this chunk is completely covered by the requested range, so we can remove it
-                deleted_samples += chunk.num_samples();
-                indexes_to_delete.push(index);
-            } else {
-                deleted_samples += chunk.remove_range(start_ts, end_ts)?;
-            }
-            index += 1;
-        }
 
         // Todo: although many chunks may be deleted, only a max of 2 will be modified, so
         // we can try to merge it with the next chunk
@@ -391,7 +359,7 @@ impl TimeSeries {
             }
 
             let is_only_chunk =
-                (chunk.num_samples() + deleted_samples) as u64 == self.total_samples;
+                (chunk.num_samples() + deleted_samples) == self.total_samples;
 
             // Should we delete the entire chunk?
             // We assume at least one allocated chunk in the series
@@ -403,7 +371,7 @@ impl TimeSeries {
             }
         }
 
-        self.total_samples -= deleted_samples as u64;
+        self.total_samples -= deleted_samples;
 
         for idx in indexes_to_delete.iter().rev() {
             let _ = self.chunks.remove(*idx);
@@ -456,10 +424,10 @@ fn get_chunk_index(chunks: &Vec<TimeSeriesChunk>, timestamp: Timestamp) -> (usiz
     let first = slice[0].first_timestamp();
     let last = slice[len - 1].last_timestamp();
     if timestamp <= first {
-        return (0, false)
+        return (0, false);
     }
     if timestamp >= last {
-        return (slice.len() - 1, false)
+        return (slice.len() - 1, false);
     }
     return match chunks.binary_search_by(|probe| {
         if timestamp < probe.first_timestamp() {
@@ -623,8 +591,7 @@ mod tests {
 
         assert_eq!(ts.get_last_chunk().num_samples(), 1);
         let last_block = ts.get_last_chunk();
-        let samples = last_block
-            .get_samples(0, 1000).unwrap();
+        let samples = last_block.get_samples(0, 1000).unwrap();
 
         let data_point = samples.get(0).unwrap();
         assert_eq!(data_point.get_time(), 100);
@@ -643,7 +610,10 @@ mod tests {
 
         // All the entries will go to 'last', as we have pushed exactly BLOCK_SIZE_FOR_TIME_SERIES entries.
         assert_eq!(ts.chunks.len(), 2);
-        assert_eq!(ts.get_last_chunk().num_samples(), BLOCK_SIZE_FOR_TIME_SERIES);
+        assert_eq!(
+            ts.get_last_chunk().num_samples(),
+            BLOCK_SIZE_FOR_TIME_SERIES
+        );
 
         for i in 0..BLOCK_SIZE_FOR_TIME_SERIES {
             let last_block = ts.get_last_chunk();

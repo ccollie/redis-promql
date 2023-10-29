@@ -21,6 +21,8 @@ mod slice;
 pub(super) use chunk::*;
 pub(crate) use constants::*;
 pub(crate) use slice::*;
+use crate::common::types::Timestamp;
+use crate::error::{TsdbError, TsdbResult};
 
 
 #[non_exhaustive]
@@ -95,17 +97,59 @@ impl Display for DuplicatePolicy {
     }
 }
 
+impl DuplicatePolicy {
+    pub fn value_on_duplicate(
+        self,
+        ts: Timestamp,
+        old: f64,
+        new: f64,
+    ) -> TsdbResult<f64> {
+        use DuplicatePolicy::*;
+        let has_nan = old.is_nan() || new.is_nan();
+        if has_nan && self != Block {
+            // take the valid sample regardless of policy
+            let value = if new.is_nan() {
+                old
+            } else {
+                new
+            };
+            return Ok(value);
+        }
+        Ok(match self {
+            Block => {
+                // todo: format ts as iso-8601 or rfc3339
+                let msg = format!("{new} @ {ts}");
+                return Err(TsdbError::DuplicateSample(msg));
+            },
+            First => old,
+            Last => new,
+            Min => old.min(new),
+            Max => old.max(new),
+            Sum => old + new,
+        })
+    }
+}
+
+impl FromStr for DuplicatePolicy {
+    type Err = TsdbError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use DuplicatePolicy::*;
+
+        match s {
+            s if s.eq_ignore_ascii_case("block") => Ok(Block),
+            s if s.eq_ignore_ascii_case("first") => Ok(First),
+            s if s.eq_ignore_ascii_case("last") => Ok(Last),
+            s if s.eq_ignore_ascii_case("min") => Ok(Min),
+            s if s.eq_ignore_ascii_case("max") => Ok(Max),
+            s if s.eq_ignore_ascii_case("sum") => Ok(Sum),
+            _ => Err(TsdbError::General(format!("invalid duplicate policy: {s}"))),
+        }
+    }
+}
 impl From<&str> for DuplicatePolicy {
     fn from(s: &str) -> Self {
-        match s {
-            s if s.eq_ignore_ascii_case("block") => DuplicatePolicy::Block,
-            s if s.eq_ignore_ascii_case("first") => DuplicatePolicy::First,
-            s if s.eq_ignore_ascii_case("last") => DuplicatePolicy::Last,
-            s if s.eq_ignore_ascii_case("min") => DuplicatePolicy::Min,
-            s if s.eq_ignore_ascii_case("max") => DuplicatePolicy::Max,
-            s if s.eq_ignore_ascii_case("sum") => DuplicatePolicy::Sum,
-            _ => panic!("invalid duplicate policy: {}", s),
-        }
+        DuplicatePolicy::from_str(s).unwrap()
     }
 }
 

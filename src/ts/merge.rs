@@ -57,7 +57,7 @@ struct SeriesMergeState<'a> {
     b: MergeSource<'a>,
     dest_timestamps: &'a mut Vec<i64>,
     dest_values: &'a mut Vec<f64>,
-    duplicates: &'a AHashSet<i64>,
+    duplicates: &'a mut AHashSet<i64>,
 }
 
 impl<'a> SeriesMergeState<'a> {
@@ -66,7 +66,7 @@ impl<'a> SeriesMergeState<'a> {
         dest_values: &'a mut Vec<f64>,
         left: MergeSource<'a>,
         right: MergeSource<'a>,
-        duplicates: &'a AHashSet<i64>,
+        duplicates: &'a mut AHashSet<i64>,
     ) -> Self {
         Self {
             dest_timestamps,
@@ -77,7 +77,14 @@ impl<'a> SeriesMergeState<'a> {
         }
     }
 
-    fn extend(&mut self, slice: &SeriesSlice) {
+    fn take_from_a(&mut self, n: usize)  {
+        let slice = self.a.take(n);
+        self.dest_timestamps.extend_from_slice(slice.timestamps);
+        self.dest_values.extend_from_slice(slice.values);
+    }
+
+    fn take_from_b(&mut self, n: usize)  {
+        let slice = self.b.take(n);
         self.dest_timestamps.extend_from_slice(slice.timestamps);
         self.dest_values.extend_from_slice(slice.values);
     }
@@ -111,14 +118,12 @@ impl SeriesMerger {
 
 impl<'a> MergeOperation<SeriesMergeState<'a>> for SeriesMerger {
     fn from_a(&self, m: &mut SeriesMergeState<'a>, n: usize) -> bool {
-        let slice = m.a.take(n);
-        m.extend(&slice);
+        m.take_from_a(n);
         true
     }
 
     fn from_b(&self, m: &mut SeriesMergeState<'a>, n: usize) -> bool {
-        let slice = m.b.take(n);
-        m.extend(&slice);
+        m.take_from_b(n);
         true
     }
 

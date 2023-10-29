@@ -137,10 +137,10 @@ impl AggOp for AggRange {
         self.init = false;
     }
     fn current(&self) -> Option<Value> {
-        if !self.init {
-            return None;
+        return if !self.init {
+            None
         } else {
-            return Some(self.max - self.min);
+            Some(self.max - self.min)
         }
     }
 }

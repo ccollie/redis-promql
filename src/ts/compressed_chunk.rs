@@ -2,8 +2,7 @@ use crate::common::types::{Sample, Timestamp};
 use crate::error::{TsdbError, TsdbResult};
 use crate::ts::chunk::Chunk;
 use crate::ts::utils::{get_timestamp_index_bounds, trim_vec_data};
-use crate::ts::{DuplicatePolicy, DuplicateStatus, DEFAULT_CHUNK_SIZE_BYTES, I64_SIZE, F64_SIZE, USIZE_SIZE, VEC_BASE_SIZE, SeriesSlice};
-use ahash::AHashSet;
+use crate::ts::{DuplicatePolicy, DuplicateStatus, DEFAULT_CHUNK_SIZE_BYTES, I64_SIZE, F64_SIZE, USIZE_SIZE, VEC_BASE_SIZE};
 use metricsql_common::pool::{get_pooled_vec_f64, get_pooled_vec_i64};
 use metricsql_encoding::encoders::{
     float::decode as gorilla_decompress, qcompress::decode as quantile_decompress,
@@ -13,8 +12,8 @@ use metricsql_encoding::encoders::{
 };
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
+use std::str::FromStr;
 use crate::ts::duplicate_policy::handle_duplicate_sample;
-use crate::ts::merge::merge;
 
 type CompressorConfig = metricsql_encoding::encoders::qcompress::CompressorConfig;
 
@@ -72,6 +71,34 @@ impl TryFrom<u8> for ChunkEncoding {
 impl Default for ChunkEncoding {
     fn default() -> Self {
         ChunkEncoding::Quantile
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+enum TimestampEncoding {
+    Basic = 0,
+    Quantile = 1,
+    //Bitpacked
+}
+
+impl FromStr for TimestampEncoding {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            s if s.eq_ignore_ascii_case("basic") => Ok(TimestampEncoding::Basic),
+            s if s.eq_ignore_ascii_case("quantile") => Ok(TimestampEncoding::Quantile),
+            _ => Err("Invalid TimestampEncoding value".into()),
+        }
+    }
+}
+
+impl Display for TimestampEncoding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TimestampEncoding::Basic => write!(f, "basic"),
+            TimestampEncoding::Quantile => write!(f, "quantile"),
+        }
     }
 }
 
@@ -149,15 +176,6 @@ impl CompressedChunk {
         Ok(res)
     }
 
-    /// Determines if this block overlaps the provided time range.
-    pub fn overlaps(&self, start: Timestamp, end: Timestamp) -> bool {
-        self.min_time <= end && start <= self.max_time
-    }
-
-    pub fn contains_timestamp(&self, ts: Timestamp) -> bool {
-        ts >= self.min_time && ts <= self.max_time
-    }
-
     pub fn len(&self) -> usize {
         self.count
     }
@@ -179,7 +197,14 @@ impl CompressedChunk {
         self.last_value = f64::NAN; // todo - use option instead
     }
 
-    pub fn compress(&mut self, timestamps: &[Timestamp], values: &[f64]) -> TsdbResult<()> {
+    pub fn set_data(&mut self, timestamps: &[i64], values: &[f64]) -> TsdbResult<()> {
+        debug_assert_eq!(timestamps.len(), values.len());
+        self.compress(timestamps, values)?;
+        // todo: complain if size > max_size
+        Ok(())
+    }
+
+    pub(super) fn compress(&mut self, timestamps: &[Timestamp], values: &[f64]) -> TsdbResult<()> {
         if timestamps.is_empty() {
             return Ok(());
         }
@@ -242,17 +267,17 @@ impl CompressedChunk {
         Ok(())
     }
 
-    pub(crate) fn process_range<F, State>(
-        &mut self,
+    pub(crate) fn process_range<F, State, R>(
+        &self,
         start: Timestamp,
         end: Timestamp,
         state: &mut State,
         mut f: F,
-    ) -> TsdbResult<()>
+    ) -> TsdbResult<R>
     where
-        F: FnMut(&mut State, &[i64], &[f64]) -> TsdbResult<()>,
+        F: FnMut(&mut State, &[i64], &[f64]) -> TsdbResult<R>,
     {
-        let mut handle_empty = |state: &mut State| -> TsdbResult<()> {
+        let mut handle_empty = |state: &mut State| -> TsdbResult<R> {
             let mut timestamps = vec![];
             let mut values = vec![];
             return f(state, &mut timestamps, &mut values);
@@ -272,42 +297,6 @@ impl CompressedChunk {
 
         trim_vec_data(&mut timestamps, &mut values, start, end);
         f(state, &timestamps, &values)
-    }
-
-    // todo: move to trait ?
-    pub fn merge_samples<'a>(
-        &mut self,
-        samples: SeriesSlice<'a>,
-        min_timestamp: Timestamp,
-        duplicate_policy: DuplicatePolicy,
-        duplicates: &mut AHashSet<Timestamp>,
-    ) -> TsdbResult<usize> {
-        if samples.is_empty() {
-            return Ok(0);
-        }
-
-        let mut dest_timestamps = get_pooled_vec_i64(samples.len());
-        let mut dest_values = get_pooled_vec_f64(samples.len());
-
-        let mut src_timestamps = get_pooled_vec_i64(self.count);
-        let mut src_values = get_pooled_vec_f64(self.count);
-        self.decompress(&mut src_timestamps, &mut src_values)?;
-
-        let left = SeriesSlice::new(&src_timestamps, &src_values);
-
-        let res = merge(
-            &mut dest_timestamps,
-            &mut dest_values,
-            left,
-            samples,
-            min_timestamp,
-            duplicate_policy,
-            duplicates,
-        );
-
-        self.compress(dest_timestamps.as_slice(), dest_values.as_slice())?;
-
-        Ok(res)
     }
 
     fn data_size(&self) -> usize {

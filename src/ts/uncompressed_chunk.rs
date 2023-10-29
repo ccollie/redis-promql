@@ -2,12 +2,9 @@ use crate::common::types::{Sample, Timestamp, SAMPLE_SIZE};
 use crate::error::{TsdbError, TsdbResult};
 use crate::ts::chunk::Chunk;
 use crate::ts::utils::get_timestamp_index_bounds;
-use crate::ts::{DuplicatePolicy, DuplicateStatus, SeriesSlice};
-use ahash::AHashSet;
-use metricsql_common::pool::{get_pooled_vec_f64, get_pooled_vec_i64};
+use crate::ts::{DuplicatePolicy, DuplicateStatus};
 use serde::{Deserialize, Serialize};
 use crate::ts::duplicate_policy::handle_duplicate_sample;
-use crate::ts::merge::merge;
 
 // todo: move to constants
 pub const MAX_UNCOMPRESSED_SAMPLES: usize = 256;
@@ -51,37 +48,21 @@ impl UncompressedChunk {
         self.values.clear();
     }
 
-    pub fn overlaps(&self, start_time: i64, end_time: i64) -> bool {
-        let timestamps = &self.timestamps[0..];
-        if timestamps.is_empty() {
-            return false;
-        }
-        let first_time = timestamps[0];
-        first_time <= end_time && timestamps[timestamps.len() - 1] >= start_time
-    }
-
-    /// Get the data points in the specified range (both range_start_time and range_end_time inclusive).
-    pub fn get_samples_in_range(&self, start_time: i64, end_time: i64) -> Vec<Sample> {
-        let mut result = Vec::new();
-
-        for (time, val) in self.timestamps.iter().zip(self.values.iter()) {
-            let time = *time;
-            if time > end_time {
-                break;
-            }
-            if time >= start_time && time <= end_time {
-                result.push(Sample::new(time, *val));
-            }
-        }
-
-        result
+    pub fn set_data(&mut self, timestamps: &[i64], values: &[f64]) -> TsdbResult<()> {
+        debug_assert_eq!(timestamps.len(), values.len());
+        self.timestamps.clear();
+        self.timestamps.extend_from_slice(timestamps);
+        self.values.clear();
+        self.values.extend_from_slice(values);
+        // todo: complain if size > max_size
+        Ok(())
     }
 
     fn handle_insert(
         &mut self,
         sample: &mut Sample,
         policy: DuplicatePolicy,
-    ) -> Result<(), TsdbError> {
+    ) -> TsdbResult<()> {
         let timestamps = &self.timestamps[0..];
         let ts = sample.timestamp;
 
@@ -113,50 +94,16 @@ impl UncompressedChunk {
         Ok(())
     }
 
-    // todo: move to trait ?
-    pub fn merge_samples<'a>(
-        &mut self,
-        samples: SeriesSlice<'a>,
-        min_timestamp: Timestamp,
-        duplicate_policy: DuplicatePolicy,
-        duplicates: &mut AHashSet<Timestamp>,
-    ) -> TsdbResult<usize> {
-        if samples.is_empty() {
-            return Ok(0);
-        }
 
-        let mut dest_timestamps = get_pooled_vec_i64(samples.len());
-        let mut dest_values = get_pooled_vec_f64(samples.len());
-
-        let right = SeriesSlice::new(&self.timestamps, &self.values);
-        let res = merge(
-            &mut dest_timestamps,
-            &mut dest_values,
-            samples,
-            right,
-            min_timestamp,
-            duplicate_policy,
-            duplicates,
-        );
-
-        self.timestamps.clear();
-        self.timestamps.extend_from_slice(&dest_timestamps);
-        self.values.clear();
-        self.values.extend_from_slice(&dest_values);
-
-        Ok(res)
-    }
-
-
-    pub(crate) fn process_range<F, State>(
+    pub(crate) fn process_range<F, State, R>(
         &self,
         start: Timestamp,
         end: Timestamp,
         state: &mut State,
         mut f: F,
-    ) -> TsdbResult<()>
+    ) -> TsdbResult<R>
     where
-        F: FnMut(&mut State, &[i64], &[f64]) -> TsdbResult<()>,
+        F: FnMut(&mut State, &[i64], &[f64]) -> TsdbResult<R>,
     {
         if let Some((start_idx, end_idx)) = get_timestamp_index_bounds(&self.timestamps, start, end) {
             let timestamps = &self.timestamps[start_idx..end_idx];
@@ -231,10 +178,7 @@ impl Chunk for UncompressedChunk {
     }
 
     fn remove_range(&mut self, start_ts: Timestamp, end_ts: Timestamp) -> TsdbResult<usize> {
-        let start_idx = match self.timestamps.binary_search(&start_ts) {
-            Ok(idx) => idx,
-            Err(idx) => idx,
-        };
+        let start_idx = self.timestamps.binary_search(&start_ts).unwrap_or_else(|i| i);
 
         let end_idx = self
             .timestamps

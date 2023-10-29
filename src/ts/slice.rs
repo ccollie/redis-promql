@@ -8,7 +8,7 @@ pub struct SeriesSlice<'a> {
 }
 
 impl<'a> SeriesSlice<'a> {
-    pub fn new(timestamps: &[i64], values: &[f64]) -> Self {
+    pub fn new(timestamps: &'a [i64], values: &'a [f64]) -> Self {
         Self { timestamps, values }
     }
 
@@ -34,6 +34,11 @@ impl<'a> SeriesSlice<'a> {
     pub fn split_at_timestamp(&self, ts: Timestamp) -> (Self, Self) {
         let idx = get_timestamp_index(self.timestamps, ts).unwrap_or_else(|| self.timestamps.len());
         self.split_at(idx)
+    }
+
+    pub fn take(&self, n: usize) -> Self {
+        let (left, _) = self.split_at(n);
+        left
     }
 
     pub fn truncate(&mut self, n: usize) {
@@ -65,7 +70,7 @@ impl<'a> SeriesSlice<'a> {
     }
 }
 
-struct SeriesSliceIter<'a> {
+pub struct SeriesSliceIter<'a> {
     slice: &'a SeriesSlice<'a>,
     index: usize
 }
