@@ -1,10 +1,10 @@
 use crate::common::types::{PooledTimestampVec, PooledValuesVec, Timestamp};
 use crate::error::{TsdbError, TsdbResult};
-use crate::ts::compressed_chunk::CompressedChunk;
-use crate::ts::merge::merge;
-use crate::ts::uncompressed_chunk::UncompressedChunk;
-use crate::ts::utils::get_timestamp_index;
-use crate::ts::{DuplicatePolicy, Sample, SeriesSlice};
+use crate::storage::compressed_chunk::CompressedChunk;
+use crate::storage::merge::merge;
+use crate::storage::uncompressed_chunk::UncompressedChunk;
+use crate::storage::utils::get_timestamp_index;
+use crate::storage::{DuplicatePolicy, Sample, SeriesSlice};
 use ahash::AHashSet;
 use metricsql_common::pool::{get_pooled_vec_f64, get_pooled_vec_i64};
 use redis_module::{RedisError, RedisResult};
@@ -589,7 +589,7 @@ mod tests {
     use rand::Rng;
     use crate::error::TsdbError;
     use crate::tests::generators::create_rng;
-    use crate::ts::{Chunk, Sample, TimeSeriesChunk};
+    use crate::storage::{Chunk, Sample, TimeSeriesChunk};
 
     pub(crate) fn saturate_chunk(chunk: &mut TimeSeriesChunk) {
         let mut rng = create_rng(None).unwrap();

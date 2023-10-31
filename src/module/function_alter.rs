@@ -2,7 +2,7 @@ use redis_module::{Context, NotifyEvent, REDIS_OK, RedisResult, RedisString};
 use crate::globals::get_timeseries_index;
 use crate::module::commands::parse_create_options;
 use crate::module::get_timeseries_mut;
-use crate::ts::Label;
+use crate::storage::Label;
 
 pub fn alter(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let (parsed_key, options) = parse_create_options(args)?;

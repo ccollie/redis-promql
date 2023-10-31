@@ -209,7 +209,7 @@ impl DuplicatePolicy {
         }
         Ok(match self {
             Block => {
-                // todo: format ts as iso-8601 or rfc3339
+                // todo: format storage as iso-8601 or rfc3339
                 let msg = format!("{new} @ {ts}");
                 return Err(TsdbError::DuplicateSample(msg));
             }
@@ -296,5 +296,46 @@ impl TimeSeriesOptions {
 
     pub fn labels(&mut self, labels: AHashMap<String, String>) {
         self.labels = Some(labels);
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy, Default)]
+pub struct ValueFilter {
+    pub min: f64,
+    pub max: f64,
+}
+
+impl ValueFilter {
+    pub(crate) fn new(min: f64, max: f64) -> TsdbResult<Self> {
+        if min > max {
+            return Err(TsdbError::General("ERR invalid range".to_string()));
+        }
+        Ok(Self { min, max })
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub struct RangeFilter {
+    pub value: Option<ValueFilter>,
+    pub timestamps: Option<Vec<Timestamp>>,
+}
+
+impl RangeFilter {
+    pub fn new(value: Option<ValueFilter>, timestamps: Option<Vec<Timestamp>>) -> Self {
+        Self { value, timestamps }
+    }
+
+    pub fn filter(&self, timestamp: Timestamp, value: f64) -> bool {
+        if let Some(value_filter) = &self.value {
+            if value < value_filter.min || value > value_filter.max {
+                return false;
+            }
+        }
+        if let Some(timestamps) = &self.timestamps {
+            if !timestamps.contains(&timestamp) {
+                return false;
+            }
+        }
+        true
     }
 }

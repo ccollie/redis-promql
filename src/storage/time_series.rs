@@ -1,9 +1,9 @@
 use super::{Chunk, ChunkCompression, Label, merge_by_capacity, Sample, TimeSeriesChunk};
 use crate::common::types::{PooledTimestampVec, PooledValuesVec, Timestamp};
 use crate::error::{TsdbError, TsdbResult};
-use crate::ts::constants::{DEFAULT_CHUNK_SIZE_BYTES, SPLIT_FACTOR};
-use crate::ts::uncompressed_chunk::UncompressedChunk;
-use crate::ts::DuplicatePolicy;
+use crate::storage::constants::{DEFAULT_CHUNK_SIZE_BYTES, SPLIT_FACTOR};
+use crate::storage::uncompressed_chunk::UncompressedChunk;
+use crate::storage::DuplicatePolicy;
 use ahash::{AHashMap, AHashSet};
 use metricsql_common::pool::{get_pooled_vec_f64, get_pooled_vec_i64};
 use serde::{Deserialize, Serialize};
@@ -18,8 +18,8 @@ pub type Labels = AHashMap<String, String>;
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[derive(GetSize)]
 pub struct TimeSeries {
-    pub(crate) id: u64,
-
+    /// internal id used in indexing
+    pub id: u64,
     pub metric_name: String,
 
     pub labels: Vec<Label>,
@@ -539,39 +539,6 @@ impl<'a> SampleIterator<'a> {
         } else {
             0
         };
-        if let Some(filter) = &self.filter {
-            let timestamps = &self.timestamps[self.sample_index..];
-            let values = &self.values[self.sample_index..];
-
-            // trim the timestamps by the filter function while retaining a list of the
-            // indices that were removed
-            let mut indices_to_remove = AHashSet::new();
-            for (idx, (ts, v)) in timestamps.iter().zip(values.iter()).enumerate() {
-                let sample = Sample::new(*ts, *v);
-                if !filter(&sample) {
-                    indices_to_remove.insert(idx);
-                }
-            }
-
-            let mut idx = 0;
-            self.timestamps.retain(|_| {
-                let keep = indices_to_remove.contains(&idx);
-                idx += 1;
-                keep
-            });
-
-            idx = 0;
-            self.values.retain(|_| {
-                let keep = indices_to_remove.contains(&idx);
-                idx += 1;
-                keep
-            });
-
-            if self.timestamps.is_empty() {
-                // loop again
-                return self.next_chunk();
-            }
-        }
 
         self.start = chunk.last_timestamp();
         self.first_iter = false;
@@ -585,6 +552,28 @@ impl<'a> Iterator for SampleIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.sample_index >= self.timestamps.len() || self.first_iter {
+            if let Some(filter) = &self.filter {
+                loop {
+                    if !self.next_chunk() {
+                        return None;
+                    }
+                    let timestamps = &self.timestamps[self.sample_index..];
+                    let values = &self.values[self.sample_index..];
+
+                    for (ts, v) in timestamps.iter().zip(values.iter()) {
+                        let sample = Sample::new(*ts, *v);
+                        let pass = filter(&sample);
+                        self.sample_index += 1;
+                        if pass {
+                            return Some(sample);
+                        }
+                    }
+
+                    if self.sample_index < self.timestamps.len() {
+                        break;
+                    }
+                }
+            }
             if !self.next_chunk() {
                 return None;
             }
@@ -599,7 +588,7 @@ impl<'a> Iterator for SampleIterator<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ts::constants::BLOCK_SIZE_FOR_TIME_SERIES;
+    use crate::storage::constants::BLOCK_SIZE_FOR_TIME_SERIES;
 
     #[test]
     fn test_one_entry() {

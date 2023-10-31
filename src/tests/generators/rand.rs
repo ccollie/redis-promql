@@ -5,7 +5,7 @@ use rand::prelude::*;
 use rand_distr::StandardNormal;
 use std::ops::Range;
 use std::time::Duration;
-use crate::ts::SeriesData;
+use crate::storage::SeriesData;
 
 #[derive(Debug, Copy, Clone, Default)]
 pub enum RandAlgo {

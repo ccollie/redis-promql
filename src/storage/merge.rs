@@ -1,5 +1,5 @@
 use crate::common::types::{Timestamp};
-use crate::ts::{DuplicatePolicy, Sample, SeriesSlice};
+use crate::storage::{DuplicatePolicy, Sample, SeriesSlice};
 use ahash::AHashSet;
 use binary_merge::{MergeOperation, MergeState};
 use std::cmp::Ordering;

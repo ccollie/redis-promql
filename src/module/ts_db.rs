@@ -4,11 +4,13 @@ use redis_module::{
 use redis_module::RedisModuleTypeMethods;
 use redis_module::REDISMODULE_AUX_BEFORE_RDB;
 
-use crate::ts::time_series::TimeSeries;
+use crate::storage::time_series::TimeSeries;
 use redis_module::raw;
-use std::mem;
 use std::os::raw::{c_int, c_void};
 use std::ptr::null_mut;
+use crate::globals::get_timeseries_index;
+
+// see https://github.com/redis/redis/blob/unstable/tests/modules
 
 pub static REDIS_PROMQL_SERIES_VERSION: i32 = 1;
 pub static REDIS_PROMQL_SERIES_TYPE: RedisType = RedisType::new(
@@ -26,7 +28,7 @@ pub static REDIS_PROMQL_SERIES_TYPE: RedisType = RedisType::new(
         aux_save: None,
         aux_save_triggers: REDISMODULE_AUX_BEFORE_RDB as i32,
         free_effort: None,
-        unlink: None,
+        unlink: Some(unlink),
         copy: Some(copy),
         defrag: None,
         mem_usage2: None,
@@ -62,7 +64,7 @@ unsafe extern "C" fn rdb_load(rdb: *mut raw::RedisModuleIO, _encver: c_int) -> *
 
 unsafe extern "C" fn mem_usage(value: *const c_void) -> usize {
     let sm = unsafe { &*(value as *mut TimeSeries) };
-    mem::size_of_val(sm)
+    sm.memory_usage()
 }
 
 #[allow(unused)]
@@ -81,8 +83,19 @@ unsafe extern "C" fn copy(
     value: *const c_void,
 ) -> *mut c_void {
     let sm = &*(value as *mut TimeSeries);
-    let newSm = sm.clone();
-    Box::into_raw(Box::new(newSm)).cast::<c_void>()
+    let new_series = sm.clone();
+    let mut ts_index = get_timeseries_index();
+    ts_index.reindex_timeseries(&new_series);
+    Box::into_raw(Box::new(new_series)).cast::<c_void>()
+}
+
+unsafe extern "C" fn unlink(key: *mut raw::RedisModuleString, value: *const c_void) {
+    let series = &*(value as *mut TimeSeries);
+    if value.is_null() {
+        return;
+    }
+    let mut ts_index = get_timeseries_index();
+    ts_index.reindex_timeseries(series)
 }
 
 pub(crate) fn new_from_redis_string(c: RedisString) -> Result<TimeSeries, serde_json::Error> {

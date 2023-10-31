@@ -1,5 +1,5 @@
 use crate::error::TsdbResult;
-use crate::ts::{DuplicatePolicy, Sample};
+use crate::storage::{DuplicatePolicy, Sample};
 
 // Time series measurements.
 pub(crate) struct SeriesData {
@@ -14,11 +14,9 @@ impl SeriesData {
             values: Vec::with_capacity(n),
         }
     }
-
     pub fn new_with_data(timestamps: Vec<i64>, values: Vec<f64>) -> Self {
         Self { timestamps, values }
     }
-
     pub fn push(&mut self, ts: i64, value: f64, policy: Option<DuplicatePolicy>) -> TsdbResult<usize> {
         match self.timestamps.binary_search(&ts) {
             Ok(pos) => {
@@ -37,23 +35,18 @@ impl SeriesData {
     pub fn push_sample(&mut self, sample: &Sample, policy: Option<DuplicatePolicy>) -> TsdbResult<usize>{
         self.push(sample.timestamp, sample.value, policy)
     }
-
     pub fn len(&self) -> usize {
         self.timestamps.len()
     }
-
     pub fn is_empty(&self) -> bool {
         self.timestamps.is_empty()
     }
-
     pub fn first_timestamp(&self) -> i64 {
         self.timestamps[0]
     }
-
     pub fn last_timestamp(&self) -> i64 {
         self.timestamps[self.timestamps.len() - 1]
     }
-
     pub fn iter(&self) -> SeriesDataIter {
         SeriesDataIter::new(self)
     }
@@ -63,7 +56,6 @@ pub(crate) struct SeriesDataIter<'a> {
     series: &'a SeriesData,
     idx: usize,
 }
-
 impl<'a> SeriesDataIter<'a> {
     pub fn new(series: &'a SeriesData) -> Self {
         Self { series, idx: 0 }

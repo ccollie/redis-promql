@@ -13,7 +13,7 @@ mod index;
 mod provider;
 mod globals;
 mod config;
-mod ts;
+mod storage;
 mod aggregators;
 #[cfg(test)]
 mod tests;
@@ -44,7 +44,7 @@ fn on_event(_ctx: &RedisContext, _event_type: NotifyEvent, event: &str, key: &[u
         "rename_from" => {
             // RenameSeriesFrom(ctx, key);
         }
-        "ts.alter" => {
+        "storage.alter" => {
             remove_key_from_cache(key)
         }
         _ => {

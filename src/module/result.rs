@@ -1,11 +1,11 @@
 use crate::common::types::Timestamp;
-use crate::ts::time_series::TimeSeries;
+use crate::storage::time_series::TimeSeries;
 use metricsql_engine::{MetricName, QueryResult, Tag, METRIC_NAME_LABEL};
 use redis_module::redisvalue::RedisValueKey;
 use redis_module::RedisValue;
 use std::collections::HashMap;
 use std::fmt::Display;
-use crate::ts::Label;
+use crate::storage::Label;
 
 pub static META_KEY_LABEL: &str = "__meta:key__";
 

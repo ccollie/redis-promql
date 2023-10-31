@@ -1,6 +1,6 @@
 use crate::module::function_create::{create_timeseries};
 use crate::module::{get_timeseries_mut, REDIS_PROMQL_SERIES_TYPE};
-use crate::ts::{DuplicatePolicy, TimeSeriesOptions};
+use crate::storage::{DuplicatePolicy, TimeSeriesOptions};
 use redis_module::key::RedisKeyWritable;
 use redis_module::{Context, NextArg, RedisError, RedisResult, RedisString, RedisValue};
 use ahash::AHashMap;

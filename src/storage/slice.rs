@@ -1,6 +1,6 @@
 use crate::common::types::{Timestamp};
-use crate::ts::Sample;
-use crate::ts::utils::{get_timestamp_index, get_timestamp_index_bounds};
+use crate::storage::Sample;
+use crate::storage::utils::{get_timestamp_index, get_timestamp_index_bounds};
 
 #[derive(Debug, Clone)]
 pub struct SeriesSlice<'a> {
@@ -45,23 +45,18 @@ impl<'a> SeriesSlice<'a> {
         self.timestamps = &self.timestamps[..n];
         self.values = &self.values[..n];
     }
-
     pub fn len(&self) -> usize {
         self.timestamps.len()
     }
-
     pub fn is_empty(&self) -> bool {
         self.timestamps.is_empty()
     }
-
     pub fn last_timestamp(&self) -> Timestamp {
         self.timestamps[self.timestamps.len() - 1]
     }
-
     pub fn first_timestamp(&self) -> Timestamp {
         self.timestamps[0]
     }
-
     pub fn iter(&self) -> SeriesSliceIter {
         SeriesSliceIter {
             slice: self,
@@ -77,7 +72,6 @@ pub struct SeriesSliceIter<'a> {
 
 impl<'a> Iterator for SeriesSliceIter<'a> {
     type Item = Sample;
-
     fn next(&mut self) -> Option<Self::Item> {
         if self.index >= self.slice.len() {
             return None;

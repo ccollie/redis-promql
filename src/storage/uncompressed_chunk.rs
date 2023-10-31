@@ -1,8 +1,8 @@
 use crate::common::types::{Timestamp};
 use crate::error::{TsdbError, TsdbResult};
-use crate::ts::chunk::Chunk;
-use crate::ts::utils::get_timestamp_index_bounds;
-use crate::ts::{DuplicatePolicy, Sample, SAMPLE_SIZE};
+use crate::storage::chunk::Chunk;
+use crate::storage::utils::get_timestamp_index_bounds;
+use crate::storage::{DuplicatePolicy, Sample, SAMPLE_SIZE};
 use serde::{Deserialize, Serialize};
 use get_size::GetSize;
 
@@ -254,8 +254,8 @@ mod tests {
     use rand::Rng;
     use crate::error::TsdbError;
     use crate::tests::generators::create_rng;
-    use crate::ts::{Chunk, Sample};
-    use crate::ts::uncompressed_chunk::UncompressedChunk;
+    use crate::storage::{Chunk, Sample};
+    use crate::storage::uncompressed_chunk::UncompressedChunk;
 
     pub(crate) fn saturate_uncompressed_chunk(chunk: &mut UncompressedChunk) {
         let mut rng = create_rng(None).unwrap();

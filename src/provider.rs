@@ -1,4 +1,4 @@
-use crate::ts::time_series::TimeSeries;
+use crate::storage::time_series::TimeSeries;
 use metricsql_engine::provider::MetricDataProvider;
 use metricsql_engine::{
     Deadline, MetricName, QueryResult, QueryResults, RuntimeResult, SearchQuery,
@@ -9,7 +9,7 @@ use redis_module::Context;
 use crate::common::types::Timestamp;
 use crate::globals::get_timeseries_index;
 use crate::index::TimeSeriesIndex;
-use crate::ts::Label;
+use crate::storage::Label;
 
 pub struct TsdbDataProvider {}
 

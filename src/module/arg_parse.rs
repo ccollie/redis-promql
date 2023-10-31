@@ -9,7 +9,7 @@ use redis_module::{RedisError, RedisResult, RedisString};
 use crate::common::current_time_millis;
 use crate::common::types::Timestamp;
 use crate::error::{TsdbError, TsdbResult};
-use crate::ts::{MAX_CHUNK_SIZE, MAX_TIMESTAMP, MIN_CHUNK_SIZE};
+use crate::storage::{MAX_CHUNK_SIZE, MAX_TIMESTAMP, MIN_CHUNK_SIZE};
 
 
 #[derive(Clone, Debug, PartialEq, Copy)]

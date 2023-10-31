@@ -1,9 +1,9 @@
 use std::error::Error;
 use crate::common::types::{Timestamp};
 use crate::error::{TsdbError, TsdbResult};
-use crate::ts::chunk::Chunk;
-use crate::ts::utils::{get_timestamp_index_bounds, trim_vec_data};
-use crate::ts::{DuplicatePolicy, DEFAULT_CHUNK_SIZE_BYTES, I64_SIZE, F64_SIZE, USIZE_SIZE, VEC_BASE_SIZE, SeriesSlice, Sample};
+use crate::storage::chunk::Chunk;
+use crate::storage::utils::{get_timestamp_index_bounds, trim_vec_data};
+use crate::storage::{DuplicatePolicy, DEFAULT_CHUNK_SIZE_BYTES, I64_SIZE, F64_SIZE, VEC_BASE_SIZE, SeriesSlice, Sample};
 use metricsql_common::pool::{get_pooled_vec_f64, get_pooled_vec_i64};
 use metricsql_encoding::encoders::{
     float::decode as gorilla_decompress, qcompress::decode as quantile_decompress,
@@ -648,10 +648,10 @@ fn decompress_timestamps(src: &[u8], dst: &mut Vec<i64>) -> TsdbResult<()> {
 mod tests {
     use rand::Rng;
     use crate::error::TsdbError;
-    use crate::ts::chunk::Chunk;
-    use crate::ts::compressed_chunk::{compress_timestamps, CompressedChunk, CompressionOptimization, decompress_timestamps};
+    use crate::storage::chunk::Chunk;
+    use crate::storage::compressed_chunk::{compress_timestamps, CompressedChunk, CompressionOptimization, decompress_timestamps};
     use crate::tests::generators::{create_rng, GeneratorOptions, generate_series_data};
-    use crate::ts::{DuplicatePolicy, Sample, SeriesData};
+    use crate::storage::{DuplicatePolicy, Sample, SeriesData};
 
     fn decompress(chunk: &CompressedChunk) -> SeriesData {
         let mut timestamps = vec![];

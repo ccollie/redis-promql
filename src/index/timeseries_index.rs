@@ -9,8 +9,8 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use roaring::{MultiOps, RoaringTreemap};
 use crate::common::types::Timestamp;
 use crate::module::get_timeseries_mut;
-use crate::ts::Label;
-use crate::ts::time_series::{Labels, TimeSeries};
+use crate::storage::Label;
+use crate::storage::time_series::{Labels, TimeSeries};
 
 pub type RedisContext = Context;
 
@@ -19,6 +19,7 @@ pub type RedisContext = Context;
 pub type BitmapMap = BTreeMap<String, RoaringTreemap>;
 
 /// Index for quick access to timeseries by label, label value or metric name.
+/// TODO: do we need to have one per db ?
 pub struct TimeSeriesIndex {
     group_sequence: AtomicU64,
     /// Map from timeseries id to timeseries key.
@@ -156,8 +157,8 @@ impl TimeSeriesIndex {
         index_series_by_label_internal(&mut label_to_ts, &mut label_kv_to_ts, ts_id, label, value)
     }
 
-    pub(crate) fn index_series_by_labels(&mut self, ts_id: u64, labels: Labels) {
-        for (name, value) in labels.iter() {
+    pub(crate) fn index_series_by_labels(&mut self, ts_id: u64, labels: &Vec<Label>) {
+        for Label { name, value} in labels.iter() {
             self.index_series_by_label(ts_id, name, value)
         }
     }
