@@ -2,10 +2,10 @@ use redis_module::{Context, NextArg, NotifyEvent, REDIS_OK, RedisError, RedisRes
 use std::time::Duration;
 use ahash::AHashMap;
 use redis_module::key::RedisKeyWritable;
-use crate::common::{parse_chunk_size, parse_duration_arg};
+use crate::arg_parse::{parse_chunk_size, parse_duration_arg};
 use crate::globals::get_timeseries_index;
 use crate::module::{REDIS_PROMQL_SERIES_TYPE};
-use crate::ts::{DEFAULT_CHUNK_SIZE_BYTES, DuplicatePolicy, TimeSeriesOptions};
+use crate::ts::{DEFAULT_CHUNK_SIZE_BYTES, DuplicatePolicy, Label, TimeSeriesOptions};
 use crate::ts::time_series::TimeSeries;
 
 const CMD_ARG_RETENTION: &str = "RETENTION";
@@ -107,7 +107,12 @@ pub(crate) fn create_timeseries(
     ts.dedupe_interval = options.dedupe_interval;
     ts.duplicate_policy = options.duplicate_policy;
     if let Some(labels) = options.labels {
-        ts.labels = labels;
+        for (k, v) in labels.iter() {
+            ts.labels.push(Label {
+                name: k.to_string(),
+                value: v.to_string(),
+            });
+        }
     }
     let ts_index = get_timeseries_index();
     ts_index.index_time_series(&mut ts, key.to_string());

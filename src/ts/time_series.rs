@@ -1,5 +1,5 @@
-use super::{Chunk, ChunkCompression, merge_by_capacity, TimeSeriesChunk};
-use crate::common::types::{PooledTimestampVec, PooledValuesVec, Sample, Timestamp};
+use super::{Chunk, ChunkCompression, Label, merge_by_capacity, Sample, TimeSeriesChunk};
+use crate::common::types::{PooledTimestampVec, PooledValuesVec, Timestamp};
 use crate::error::{TsdbError, TsdbResult};
 use crate::ts::constants::{DEFAULT_CHUNK_SIZE_BYTES, SPLIT_FACTOR};
 use crate::ts::uncompressed_chunk::UncompressedChunk;
@@ -9,18 +9,20 @@ use metricsql_common::pool::{get_pooled_vec_f64, get_pooled_vec_i64};
 use serde::{Deserialize, Serialize};
 use std::collections::BinaryHeap;
 use std::time::Duration;
+use get_size::GetSize;
 
 pub type Labels = AHashMap<String, String>;
 
 /// Represents a time series. The time series consists of time series blocks, each containing BLOCK_SIZE_FOR_TIME_SERIES
 /// data points. All but the last block are compressed.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(GetSize)]
 pub struct TimeSeries {
     pub(crate) id: u64,
 
     pub metric_name: String,
 
-    pub labels: Labels,
+    pub labels: Vec<Label>,
     pub retention: Duration,
     pub dedupe_interval: Option<Duration>,
     pub duplicate_policy: Option<DuplicatePolicy>,
@@ -56,6 +58,17 @@ impl TimeSeries {
 
     pub fn is_empty(&self) -> bool {
         self.total_samples == 0
+    }
+
+    pub fn get_label_value(&self, name: &str) -> Option<&String> {
+        if let Some(label) = self.get_label(name) {
+            return Some(&label.value);
+        }
+        None
+    }
+
+    pub fn get_label(&self, name: &str) -> Option<&Label> {
+        self.labels.iter().find(|label| label.name == name)
     }
 
     pub fn add(
@@ -132,7 +145,7 @@ impl TimeSeries {
         let chunk_size = self.chunk_size_bytes;
         let compression = self.chunk_compression;
         let min_timestamp = self.get_min_timestamp();
-        let duplicate_policy = self.duplicate_policy.unwrap_or(DuplicatePolicy::Last);
+        let duplicate_policy = self.duplicate_policy.unwrap_or(DuplicatePolicy::KeepLast);
 
         // arrrgh! rust treats vecs as a single unit wrt borrowing, but the following iterator trick
         // seems to work
@@ -202,7 +215,7 @@ impl TimeSeries {
         self.chunks.first_mut().unwrap()
     }
 
-    pub fn upsert_sample(
+    pub(crate) fn upsert_sample(
         &mut self,
         timestamp: Timestamp,
         value: f64,
@@ -220,10 +233,13 @@ impl TimeSeries {
         };
 
         if let Some(new_chunk) = new_chunk {
-            self.chunks.push(new_chunk);
             // todo: how to avoid this ? Since chunks are currently stored inline this can cause a lot of
             // moves
-            self.chunks.sort_by_key(|chunk| chunk.first_timestamp());
+            let ts = new_chunk.first_timestamp();
+            let insert_at = self.chunks.binary_search_by(|chunk| {
+                chunk.first_timestamp().cmp(&ts)
+            }).unwrap_or_else(|i| i);
+            self.chunks.insert(insert_at, new_chunk);
         }
 
         self.total_samples += size;
@@ -394,12 +410,13 @@ impl TimeSeries {
         Ok(deleted_samples)
     }
 
-    pub fn size(&self) -> usize {
-        let mut size = 0;
-        for chunk in self.chunks.iter() {
-            size += chunk.size();
-        }
-        size
+    pub fn data_size(&self) -> usize {
+        self.chunks.iter().map(|x| x.size()).sum()
+    }
+
+    pub fn memory_usage(&self) -> usize {
+        std::mem::size_of::<Self>() +
+            self.get_heap_size()
     }
 
     fn get_min_timestamp(&self) -> Timestamp {

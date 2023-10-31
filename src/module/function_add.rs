@@ -4,7 +4,7 @@ use crate::ts::{DuplicatePolicy, TimeSeriesOptions};
 use redis_module::key::RedisKeyWritable;
 use redis_module::{Context, NextArg, RedisError, RedisResult, RedisString, RedisValue};
 use ahash::AHashMap;
-use crate::common::{parse_duration_arg, parse_number_with_unit, parse_timestamp};
+use crate::arg_parse::{parse_duration_arg, parse_number_with_unit, parse_timestamp};
 
 const CMD_ARG_RETENTION: &str = "RETENTION";
 const CMD_ARG_DUPLICATE_POLICY: &str = "DUPLICATE_POLICY";

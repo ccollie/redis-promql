@@ -1,5 +1,5 @@
 use redis_module::{Context, NextArg, REDIS_OK, RedisError, RedisResult, RedisString, RedisValue};
-use crate::common::parse_timestamp;
+use crate::arg_parse::parse_timestamp;
 use crate::module::get_timeseries_mut;
 
 pub(crate) fn madd(ctx: &Context, args: Vec<RedisString>) -> RedisResult {

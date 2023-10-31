@@ -1,4 +1,5 @@
-use crate::common::types::{Sample, Timestamp};
+use crate::common::types::{Timestamp};
+use crate::ts::Sample;
 use crate::ts::utils::{get_timestamp_index, get_timestamp_index_bounds};
 
 #[derive(Debug, Clone)]
@@ -11,7 +12,6 @@ impl<'a> SeriesSlice<'a> {
     pub fn new(timestamps: &'a [i64], values: &'a [f64]) -> Self {
         Self { timestamps, values }
     }
-
     pub fn trim(&mut self, start_ts: Timestamp, end_ts: Timestamp) {
         if let Some((start_idx, end_idx)) = get_timestamp_index_bounds(self.timestamps, start_ts, end_ts) {
             self.timestamps = &self.timestamps[start_idx..end_idx];

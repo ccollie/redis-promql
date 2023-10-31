@@ -3,7 +3,7 @@ use std::time::Duration;
 use std::vec::IntoIter;
 use redis_module::{Context, NextArg, RedisError, RedisResult, RedisString, RedisValue};
 use crate::aggregators::Aggregator;
-use crate::common::{parse_duration_arg, parse_integer_arg, parse_number_with_unit, parse_timestamp};
+use crate::arg_parse::{parse_duration_arg, parse_integer_arg, parse_number_with_unit, parse_timestamp};
 use crate::common::types::Timestamp;
 use crate::module::{get_timeseries_mut, parse_timestamp_arg};
 use crate::module::result::sample_to_result;

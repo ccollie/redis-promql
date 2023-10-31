@@ -9,12 +9,13 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use roaring::{MultiOps, RoaringTreemap};
 use crate::common::types::Timestamp;
 use crate::module::get_timeseries_mut;
+use crate::ts::Label;
 use crate::ts::time_series::{Labels, TimeSeries};
 
 pub type RedisContext = Context;
 
 // Note. Unfortunately we can't use ahash here because it's RandomState uses `allocator-api`,
-// which at the time of writing this is unstable. Maybee xxxhash-rust will be a good alternative.
+// which at the time of writing this is unstable. Maybe xxxhash-rust will be a good alternative.
 pub type BitmapMap = BTreeMap<String, RoaringTreemap>;
 
 /// Index for quick access to timeseries by label, label value or metric name.
@@ -87,13 +88,13 @@ impl TimeSeriesIndex {
             &ts.metric_name,
         );
 
-        for (label_name, label_value) in ts.labels.iter() {
+        for Label { name, value } in ts.labels.iter() {
             index_series_by_label_internal(
                 &mut label_to_ts,
                 &mut label_kv_to_ts,
                 ts.id,
-                label_name,
-                label_value,
+                &name,
+                &value,
             );
         }
     }
@@ -102,13 +103,13 @@ impl TimeSeriesIndex {
         let mut label_to_ts = self.label_to_ts.write().unwrap();
         let mut label_kv_to_ts = self.label_kv_to_ts.write().unwrap();
 
-        for (label_name, label_value) in ts.labels.iter() {
+        for label in ts.labels.iter() {
             index_series_by_label_internal(
                 &mut label_to_ts,
                 &mut label_kv_to_ts,
                 ts.id,
-                label_name,
-                label_value,
+                &label.name,
+                &label.value,
             );
         }
         // todo !!!!
@@ -120,23 +121,23 @@ impl TimeSeriesIndex {
         id_to_key_map.remove(&ts.id);
     }
 
-    pub(crate) fn remove_series_by_id(&self, id: u64, labels: &Labels) {
+    pub(crate) fn remove_series_by_id(&self, id: u64, labels: &Vec<Label>) {
         {
             let mut id_to_key_map = self.id_to_key.write().unwrap();
             id_to_key_map.remove(&id);
         }
         {
             let mut label_to_ts = self.label_to_ts.write().unwrap();
-            for (label_name, _) in labels.iter() {
-                if let Some(ts_by_label) = label_to_ts.get_mut(label_name) {
+            for Label { name, .. } in labels.iter() {
+                if let Some(ts_by_label) = label_to_ts.get_mut(name) {
                     ts_by_label.remove(id);
                 }
             }
         }
         {
             let mut label_kv_to_ts = self.label_kv_to_ts.write().unwrap();
-            for (label_name, label_value) in labels.iter() {
-                let key = format!("{}={}", label_name, label_value);
+            for Label { name, value} in labels.iter() {
+                let key = format!("{}={}", name, value);
                 if let Some(ts_by_label_value) = label_kv_to_ts.get_mut(&key) {
                     ts_by_label_value.remove(id);
                 }
@@ -249,7 +250,7 @@ impl TimeSeriesIndex {
         let mut result: BTreeSet<&'a String> = BTreeSet::new();
 
         for ts in series {
-            result.extend(ts.labels.keys());
+            result.extend(ts.labels.iter().map(|f| &f.name));
         }
 
         result

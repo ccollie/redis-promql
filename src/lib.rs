@@ -4,6 +4,8 @@ use redis_module_macros::{config_changed_event_handler};
 use redis_module::alloc::RedisAlloc;
 
 extern crate redis_module_macros;
+extern crate get_size;
+
 mod common;
 mod error;
 mod module;
@@ -13,6 +15,8 @@ mod globals;
 mod config;
 mod ts;
 mod aggregators;
+#[cfg(test)]
+mod tests;
 
 use module::*;
 use crate::globals::get_timeseries_index;

@@ -16,6 +16,8 @@ mod function_madd;
 mod function_add;
 mod function_alter;
 mod function_get;
+pub mod arg_parse;
+
 
 pub mod commands {
     pub(crate) use super::function_add::*;
