@@ -16,7 +16,7 @@ pub fn alter(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     series.dedupe_interval = options.dedupe_interval;
 
     if let Some(duplicate_policy) = options.duplicate_policy {
-        series.duplicate_policy = Some(duplicate_policy);
+        series.duplicate_policy = duplicate_policy;
     }
 
     if let Some(chunk_size) = options.chunk_size {

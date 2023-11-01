@@ -176,6 +176,9 @@ pub(crate) fn merge<'a>(
 }
 
 fn skip_samples_outside_retention(b: &mut MergeSource, retention_deadline: Timestamp) -> usize {
+    if b.data.is_empty() {
+        return 0;
+    }
     if b.data.first_timestamp() >= retention_deadline {
         // Fast path - the block contains only samples with timestamps bigger than retention_deadline.
         return 0;

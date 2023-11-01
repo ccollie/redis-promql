@@ -9,26 +9,41 @@ use get_size::GetSize;
 // todo: move to constants
 pub const MAX_UNCOMPRESSED_SAMPLES: usize = 256;
 
-#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[derive(GetSize)]
 pub struct UncompressedChunk {
     pub max_size: usize,
     pub timestamps: Vec<i64>,
     pub values: Vec<f64>,
+    max_elements: usize,
+}
+
+impl Default for UncompressedChunk {
+    fn default() -> Self {
+        Self {
+            max_size: MAX_UNCOMPRESSED_SAMPLES * SAMPLE_SIZE,
+            timestamps: Vec::with_capacity(MAX_UNCOMPRESSED_SAMPLES),
+            values: Vec::with_capacity(MAX_UNCOMPRESSED_SAMPLES),
+            max_elements: MAX_UNCOMPRESSED_SAMPLES,
+        }
+    }
 }
 
 impl UncompressedChunk {
     pub fn new(size: usize, timestamps: Vec<i64>, values: Vec<f64>) -> Self {
+        let max_elements = size / SAMPLE_SIZE;
         Self {
             timestamps,
             values,
             max_size: size,
+            max_elements,
         }
     }
 
     pub fn with_max_size(size: usize) -> Self {
         let mut res = Self::default();
         res.max_size = size;
+        res.max_elements = size / SAMPLE_SIZE;
         res
     }
 
@@ -41,7 +56,7 @@ impl UncompressedChunk {
     }
 
     pub fn is_full(&self) -> bool {
-        self.timestamps.len() * self.bytes_per_sample() >= self.max_size
+        self.len() >= self.max_elements
     }
 
     pub fn clear(&mut self) {

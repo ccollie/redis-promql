@@ -20,9 +20,7 @@ type CompressorConfig = metricsql_encoding::encoders::qcompress::CompressorConfi
 
 /// Rough estimate for when we have insufficient data to calculate
 const BASE_COMPRESSION_RATE: f64 = 0.35;
-
 const OVERFLOW_THRESHOLD: f64 = 0.2;
-
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -389,6 +387,9 @@ impl Chunk for CompressedChunk {
     }
     fn remove_range(&mut self, start_ts: Timestamp, end_ts: Timestamp) -> TsdbResult<usize> {
         if self.is_empty() {
+            return Ok(0);
+        }
+        if start_ts > self.max_time || end_ts < self.min_time {
             return Ok(0);
         }
         let mut timestamps = get_pooled_vec_i64(self.count);

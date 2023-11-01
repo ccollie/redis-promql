@@ -4,14 +4,12 @@ use crate::error::{TsdbError, TsdbResult};
 use crate::storage::constants::{DEFAULT_CHUNK_SIZE_BYTES, SPLIT_FACTOR};
 use crate::storage::uncompressed_chunk::UncompressedChunk;
 use crate::storage::DuplicatePolicy;
-use ahash::{AHashMap, AHashSet};
 use metricsql_common::pool::{get_pooled_vec_f64, get_pooled_vec_i64};
 use serde::{Deserialize, Serialize};
 use std::collections::BinaryHeap;
 use std::time::Duration;
 use get_size::GetSize;
 
-pub type Labels = AHashMap<String, String>;
 
 /// Represents a time series. The time series consists of time series blocks, each containing BLOCK_SIZE_FOR_TIME_SERIES
 /// data points. All but the last block are compressed.
@@ -25,7 +23,7 @@ pub struct TimeSeries {
     pub labels: Vec<Label>,
     pub retention: Duration,
     pub dedupe_interval: Option<Duration>,
-    pub duplicate_policy: Option<DuplicatePolicy>,
+    pub duplicate_policy: DuplicatePolicy,
     pub chunk_compression: ChunkCompression,
     pub chunk_size_bytes: usize,
     pub chunks: Vec<TimeSeriesChunk>,
@@ -42,9 +40,9 @@ impl TimeSeries {
         TimeSeries {
             id: 0,
             metric_name: "".to_string(),
-            labels: Default::default(),
+            labels: vec![],
             retention: Default::default(),
-            duplicate_policy: None,
+            duplicate_policy: DuplicatePolicy::KeepLast,
             chunk_compression: Default::default(),
             chunk_size_bytes: DEFAULT_CHUNK_SIZE_BYTES,
             dedupe_interval: Default::default(),
@@ -81,8 +79,8 @@ impl TimeSeries {
             return Err(TsdbError::SampleTooOld);
         }
 
-        let last_ts = self.last_timestamp;
         if !self.is_empty() {
+            let last_ts = self.last_timestamp;
             if let Some(dedup_interval) = self.dedupe_interval {
                 let millis = dedup_interval.as_millis() as i64;
                 if millis > 0 && (ts - last_ts) < millis {
@@ -106,19 +104,18 @@ impl TimeSeries {
             timestamp: time,
             value,
         };
-        if self.is_empty() {
-            let mut new_chunk = TimeSeriesChunk::Uncompressed(UncompressedChunk::with_max_size(
-                self.chunk_size_bytes,
-            ));
-            new_chunk.add_sample(&sample)?;
 
-            self.first_timestamp = time;
-            self.chunks.push(new_chunk);
-        } else {
-            // append sample. False means we've overflowed capacity
-            if !self.append(&sample)? {
+        let was_empty = self.is_empty();
+        let chunk = self.get_last_chunk();
+        match chunk.add_sample(&sample) {
+            Err(TsdbError::CapacityFull(_)) => {
                 self.add_chunk_with_sample(&sample)?;
-            }
+            },
+            Err(e) => return Err(e),
+            _ => {},
+        }
+        if was_empty {
+            self.first_timestamp = time;
         }
 
         self.last_value = value;
@@ -145,7 +142,7 @@ impl TimeSeries {
         let chunk_size = self.chunk_size_bytes;
         let compression = self.chunk_compression;
         let min_timestamp = self.get_min_timestamp();
-        let duplicate_policy = self.duplicate_policy.unwrap_or(DuplicatePolicy::KeepLast);
+        let duplicate_policy = self.duplicate_policy;
 
         // arrrgh! rust treats vecs as a single unit wrt borrowing, but the following iterator trick
         // seems to work
@@ -222,7 +219,7 @@ impl TimeSeries {
         dp_override: Option<DuplicatePolicy>,
     ) -> TsdbResult<usize> {
         let dp_policy = dp_override.unwrap_or(
-            self.duplicate_policy.unwrap_or_default(), //.unwrap_or(/* TSGlobalConfig.duplicatePolicy),
+            self.duplicate_policy
         );
 
         let (size, new_chunk) = {
@@ -233,6 +230,7 @@ impl TimeSeries {
         };
 
         if let Some(new_chunk) = new_chunk {
+            self.trim()?;
             // todo: how to avoid this ? Since chunks are currently stored inline this can cause a lot of
             // moves
             let ts = new_chunk.first_timestamp();
@@ -306,7 +304,11 @@ impl TimeSeries {
         Ok(())
     }
 
-    pub fn iter<'a>(
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item = Sample> + 'a {
+        SampleIterator::new(self, self.first_timestamp, self.last_timestamp)
+    }
+
+    pub fn iter_range<'a>(
         &'a self,
         start: Timestamp,
         end: Timestamp,
@@ -327,7 +329,7 @@ impl TimeSeries {
     }
 
     pub fn trim(&mut self) -> TsdbResult<()> {
-        if self.retention.is_zero() {
+        if self.retention.is_zero() || self.is_empty() {
             return Ok(());
         }
 
@@ -338,7 +340,7 @@ impl TimeSeries {
         for chunk in self
             .chunks
             .iter()
-            .take_while(|&block| block.first_timestamp() < min_timestamp)
+            .take_while(|&block| block.last_timestamp() <= min_timestamp)
         {
             count += 1;
             deleted_count += chunk.num_samples();
@@ -346,9 +348,16 @@ impl TimeSeries {
 
         if count > 0 {
             let _ = self.chunks.drain(0..count);
+            self.total_samples -= deleted_count;
         }
 
-        self.total_samples -= deleted_count;
+        // now deal with partials (cases where a chunk has only some expired items). There should be at most 1
+        if let Some(chunk) = self.chunks.first_mut() {
+            if chunk.first_timestamp() > min_timestamp {
+                let deleted = chunk.remove_range(0, min_timestamp)?;
+                self.total_samples -= deleted;
+            }
+        }
 
         Ok(())
     }
@@ -419,7 +428,7 @@ impl TimeSeries {
             self.get_heap_size()
     }
 
-    fn get_min_timestamp(&self) -> Timestamp {
+    pub(crate) fn get_min_timestamp(&self) -> Timestamp {
         if self.retention.is_zero() {
             return 0;
         }
@@ -552,28 +561,6 @@ impl<'a> Iterator for SampleIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.sample_index >= self.timestamps.len() || self.first_iter {
-            if let Some(filter) = &self.filter {
-                loop {
-                    if !self.next_chunk() {
-                        return None;
-                    }
-                    let timestamps = &self.timestamps[self.sample_index..];
-                    let values = &self.values[self.sample_index..];
-
-                    for (ts, v) in timestamps.iter().zip(values.iter()) {
-                        let sample = Sample::new(*ts, *v);
-                        let pass = filter(&sample);
-                        self.sample_index += 1;
-                        if pass {
-                            return Some(sample);
-                        }
-                    }
-
-                    if self.sample_index < self.timestamps.len() {
-                        break;
-                    }
-                }
-            }
             if !self.next_chunk() {
                 return None;
             }
@@ -589,6 +576,7 @@ impl<'a> Iterator for SampleIterator<'a> {
 mod tests {
     use super::*;
     use crate::storage::constants::BLOCK_SIZE_FOR_TIME_SERIES;
+    use crate::tests::generators::{generate_series_data, GeneratorOptions};
 
     #[test]
     fn test_one_entry() {
@@ -605,6 +593,28 @@ mod tests {
         assert_eq!(ts.total_samples, 1);
         assert_eq!(ts.first_timestamp, 100);
         assert_eq!(ts.last_timestamp, 100);
+    }
+
+    #[test]
+    fn test_1000_entries() {
+        let mut ts = TimeSeries::new();
+        let mut options = GeneratorOptions::default();
+        options.samples = 1000;
+        let data = generate_series_data(&options).unwrap();
+        for sample in data.iter() {
+            ts.add(sample.timestamp, sample.value, None).unwrap();
+        }
+
+        assert_eq!(ts.total_samples, 1000);
+        assert_eq!(ts.first_timestamp, data.first_timestamp());
+        assert_eq!(ts.last_timestamp, data.last_timestamp());
+
+        let mut i: usize = 0;
+        for sample in ts.iter() {
+            assert_eq!(sample.timestamp, data.timestamps[i]);
+            assert_eq!(sample.value, data.values[i]);
+            i += 1;
+        }
     }
 
     #[test]
@@ -628,5 +638,13 @@ mod tests {
             assert_eq!(data_point.timestamp, i as i64);
             assert_eq!(data_point.value, i as f64);
         }
+    }
+
+    #[test]
+    fn test_last_chunk_overflow() {
+        let mut series = TimeSeries::new();
+        let start_ts = 10000;
+        todo!();
+
     }
 }

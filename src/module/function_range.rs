@@ -93,14 +93,14 @@ impl RangeOptions {
     }
 
     pub fn set_value_range(&mut self, start: f64, end: f64) -> TsdbResult<()> {
-        let mut filter = self.filter.unwrap_or_default();
+        let mut filter = self.filter.clone().unwrap_or_default();
         filter.value = Some(ValueFilter::new(start, end)?);
         self.filter = Some(filter);
         Ok(())
     }
 
     pub fn set_valid_timestamps(&mut self, timestamps: Vec<Timestamp>) {
-        let mut filter = self.filter.unwrap_or_default();
+        let mut filter = self.filter.clone().unwrap_or_default();
         filter.timestamps = Some(timestamps);
         self.filter = Some(filter);
     }

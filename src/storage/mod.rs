@@ -18,12 +18,14 @@ pub mod time_series;
 mod uncompressed_chunk;
 mod utils;
 mod series_data;
+mod defrag;
 
 use crate::error::{TsdbError, TsdbResult};
 pub(super) use chunk::*;
 pub(crate) use constants::*;
 pub(crate) use slice::*;
 pub(crate) use series_data::*;
+pub(crate) use defrag::*;
 
 pub type Timestamp = metricsql_engine::prelude::Timestamp;
 
@@ -314,7 +316,7 @@ impl ValueFilter {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Default)]
 pub struct RangeFilter {
     pub value: Option<ValueFilter>,
     pub timestamps: Option<Vec<Timestamp>>,

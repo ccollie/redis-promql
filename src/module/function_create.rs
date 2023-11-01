@@ -105,7 +105,7 @@ pub(crate) fn create_timeseries(
     ts.chunk_size_bytes = options.chunk_size.unwrap_or(DEFAULT_CHUNK_SIZE_BYTES);
     ts.retention = options.retention.unwrap_or(Duration::from_millis(0u64));
     ts.dedupe_interval = options.dedupe_interval;
-    ts.duplicate_policy = options.duplicate_policy;
+    ts.duplicate_policy = options.duplicate_policy.unwrap_or(DuplicatePolicy::KeepLast);
     if let Some(labels) = options.labels {
         for (k, v) in labels.iter() {
             ts.labels.push(Label {

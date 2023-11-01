@@ -21,7 +21,7 @@ pub struct GeneratorOptions {
     /// Start time of the time series.
     pub start: Timestamp,
     /// End time of the time series.
-    pub end: Timestamp,
+    pub end: Option<Timestamp>,
     /// Interval between samples.
     pub interval: Option<Duration>,
     /// Range of values.
@@ -41,9 +41,19 @@ impl GeneratorOptions {
         }
         let mut res = GeneratorOptions::default();
         res.start = start;
-        res.end = end;
+        res.end = Some(end);
         res.samples = samples;
         Ok(res)
+    }
+
+    fn fixup(&mut self) {
+        if self.start >= self.end.unwrap() {
+            self.end = Some(self.start + 1);
+        }
+        if self.samples == 0 {
+            self.samples = 10;
+        }
+        self.start = self.start / 10 * 10;
     }
 }
 
@@ -51,17 +61,19 @@ const ONE_DAY_IN_SECS: u64 = 24 * 60 * 60;
 
 impl Default for GeneratorOptions {
     fn default() -> Self {
-        let now = current_time_millis();
+        let now = current_time_millis() / 10 * 10;
         let start = now - Duration::from_secs(ONE_DAY_IN_SECS).as_millis() as i64;
-        Self {
+        let mut res = Self {
             start,
-            end: now,
+            end: Some(now),
             interval: None,
             range: 0.0..1.0,
             samples: 100,
             seed: None,
             typ: RandAlgo::Rand,
-        }
+        };
+        res.fixup();
+        res
     }
 }
 
@@ -168,7 +180,13 @@ pub(crate) fn generate_series_data(options: &GeneratorOptions) -> Result<SeriesD
     let interval = if let Some(interval) = options.interval {
         interval.as_millis() as i64
     } else {
-        (options.end - options.start) / options.samples as i64
+        let end = if let Some(end) = options.end {
+            end
+        } else {
+            // todo: automatically choose based on number of samples
+            options.start + (options.samples * 1000 * 60) as i64
+        };
+        (end - options.start) / options.samples as i64
     };
 
     let mut generator = get_generator_impl(options.typ, options.seed, &options.range)?;

@@ -10,7 +10,7 @@ use roaring::{MultiOps, RoaringTreemap};
 use crate::common::types::Timestamp;
 use crate::module::get_timeseries_mut;
 use crate::storage::Label;
-use crate::storage::time_series::{Labels, TimeSeries};
+use crate::storage::time_series::TimeSeries;
 
 pub type RedisContext = Context;
 
