@@ -1,14 +1,15 @@
-use redis_module::{
-    native_types::RedisType, RedisString,
-};
 use redis_module::RedisModuleTypeMethods;
 use redis_module::REDISMODULE_AUX_BEFORE_RDB;
+use redis_module::{native_types::RedisType, RedisModuleDefragCtx, RedisModuleString, RedisString};
 
-use crate::ts::time_series::TimeSeries;
+use crate::globals::get_timeseries_index;
+use crate::storage::time_series::TimeSeries;
 use redis_module::raw;
-use std::mem;
 use std::os::raw::{c_int, c_void};
 use std::ptr::null_mut;
+use crate::storage::defrag_series;
+
+// see https://github.com/redis/redis/blob/unstable/tests/modules
 
 pub static REDIS_PROMQL_SERIES_VERSION: i32 = 1;
 pub static REDIS_PROMQL_SERIES_TYPE: RedisType = RedisType::new(
@@ -26,9 +27,9 @@ pub static REDIS_PROMQL_SERIES_TYPE: RedisType = RedisType::new(
         aux_save: None,
         aux_save_triggers: REDISMODULE_AUX_BEFORE_RDB as i32,
         free_effort: None,
-        unlink: None,
+        unlink: Some(unlink),
         copy: Some(copy),
-        defrag: None,
+        defrag: Some(defrag),
         mem_usage2: None,
         free_effort2: None,
         unlink2: None,
@@ -36,7 +37,6 @@ pub static REDIS_PROMQL_SERIES_TYPE: RedisType = RedisType::new(
         aux_save2: None,
     },
 );
-
 
 unsafe extern "C" fn rdb_save(rdb: *mut raw::RedisModuleIO, value: *mut c_void) {
     let v = &*value.cast::<TimeSeries>();
@@ -62,7 +62,7 @@ unsafe extern "C" fn rdb_load(rdb: *mut raw::RedisModuleIO, _encver: c_int) -> *
 
 unsafe extern "C" fn mem_usage(value: *const c_void) -> usize {
     let sm = unsafe { &*(value as *mut TimeSeries) };
-    mem::size_of_val(sm)
+    sm.memory_usage()
 }
 
 #[allow(unused)]
@@ -76,14 +76,47 @@ unsafe extern "C" fn free(value: *mut c_void) {
 
 #[allow(non_snake_case, unused)]
 unsafe extern "C" fn copy(
-    fromkey: *mut raw::RedisModuleString,
-    tokey: *mut raw::RedisModuleString,
+    fromkey: *mut RedisModuleString,
+    tokey: *mut RedisModuleString,
     value: *const c_void,
 ) -> *mut c_void {
     let sm = &*(value as *mut TimeSeries);
-    let newSm = sm.clone();
-    Box::into_raw(Box::new(newSm)).cast::<c_void>()
+    let mut new_series = sm.clone();
+    let mut ts_index = get_timeseries_index();
+    // ???? How to handle failure ??
+    match RedisString::from_ptr(tokey) {
+        Ok(key) => {
+            ts_index.index_time_series(&mut new_series, key.to_string())
+        },
+        Err(_) => {}
+    }
+    Box::into_raw(Box::new(new_series)).cast::<c_void>()
 }
+
+unsafe extern "C" fn unlink(_key: *mut RedisModuleString, value: *const c_void) {
+    let series = &*(value as *mut TimeSeries);
+    if value.is_null() {
+        return;
+    }
+    let ts_index = get_timeseries_index();
+    ts_index.remove_series(series)
+}
+
+unsafe extern "C" fn defrag(
+    _ctx: *mut RedisModuleDefragCtx,
+    _key: *mut RedisModuleString,
+    value: *mut *mut c_void,
+) -> c_int {
+    let series = &mut *(value as *mut TimeSeries);
+    if value.is_null() {
+        return 0;
+    }
+    match defrag_series(series) {
+        Ok(_) => 0,
+        Err(_) => 1,
+    }
+}
+
 
 pub(crate) fn new_from_redis_string(c: RedisString) -> Result<TimeSeries, serde_json::Error> {
     // let mut val = bincode::deserialize::<TimeSeries>(&c.to_string().as_bytes());

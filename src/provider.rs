@@ -1,5 +1,4 @@
-use crate::ts::time_series::TimeSeries;
-use crate::ts::Timestamp;
+use crate::storage::time_series::TimeSeries;
 use metricsql_engine::provider::MetricDataProvider;
 use metricsql_engine::{
     Deadline, MetricName, QueryResult, QueryResults, RuntimeResult, SearchQuery,
@@ -7,8 +6,10 @@ use metricsql_engine::{
 use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
 use redis_module::Context;
+use crate::common::types::Timestamp;
 use crate::globals::get_timeseries_index;
 use crate::index::TimeSeriesIndex;
+use crate::storage::Label;
 
 pub struct TsdbDataProvider {}
 
@@ -30,7 +31,7 @@ impl TsdbDataProvider {
             .map(|ts| {
                 let mut timestamps: Vec<Timestamp> = Vec::new();
                 let mut values: Vec<f64> = Vec::new();
-                let res = ts.get_range_raw(
+                let res = ts.select_raw(
                     search_query.start,
                     search_query.end,
                     &mut timestamps,
@@ -58,8 +59,8 @@ impl MetricDataProvider for TsdbDataProvider {
 
 fn to_metric_name(ts: &TimeSeries) -> MetricName {
     let mut mn = MetricName::new(&ts.metric_name);
-    for (k, v) in ts.labels.iter() {
-        mn.add_tag(k, v);
+    for Label { name, value } in ts.labels.iter() {
+        mn.add_tag(name, value);
     }
     mn
 }

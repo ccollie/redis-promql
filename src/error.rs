@@ -6,14 +6,11 @@ pub enum TsdbError {
   #[error("Invalid size. Expected {0}, Received {1}.")]
   InvalidSize(usize, usize),
 
-  #[error("Already at full capacity. Max capacity {0}.")]
+  #[error("Chunk at full capacity. Max capacity {0}.")]
   CapacityFull(usize),
 
   #[error("Time series block is empty - cannot be compressed.")]
   EmptyTimeSeriesBlock(),
-
-  #[error("Cannot decode time series. {0}")]
-  CannotDecodeTimeSeries(String),
 
   #[error("Invalid configuration. {0}")]
   InvalidConfiguration(String),
@@ -47,6 +44,21 @@ pub enum TsdbError {
 
   #[error("Invalid series selector. {0}")]
   InvalidSeriesSelector(String),
+
+  #[error("Sample timestamp exceeds retention period")]
+  SampleTooOld,
+
+  #[error("{0}")]
+  General(String)
 }
 
 pub type TsdbResult<T> = Result<T, TsdbError>;
+
+/*
+impl Into<RedisError> for TsdbError {
+  fn into(self) -> RedisError {
+    let msg = format!("TSDB: {}", self.to_string());
+    RedisError::String(msg)
+  }
+}
+ */
