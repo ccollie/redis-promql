@@ -6,12 +6,12 @@ use ahash::{AHashMap, AHashSet};
 use metricsql_engine::METRIC_NAME_LABEL;
 use serde::{Deserialize, Serialize};
 use crate::common::current_time_millis;
+use crate::common::types::Timestamp;
 
 use crate::rules::{Rule, RuleState, RuleStateEntry, RuleType};
 use crate::rules::alerts::{AlertsError, AlertsResult, Group, Metric, Querier, RuleConfig};
 use crate::rules::recording::stringify_labels;
 use crate::rules::types::{new_time_series, RawTimeSeries};
-use crate::ts::Timestamp;
 
 const ERR_DUPLICATE: &str =
     "result contains metrics with the same labelset after applying rule labels.";

@@ -32,7 +32,8 @@ fn test_graphite_match_template_match() {
                    "unexpected ok result for tpl={tpl}, s={s}; got {ok}; want {ok_expected}");
         if ok_expected {
             assert_eq!(matches, matches_expected,
-                "unexpected matches for tpl={tpl}, s={s}; got\n{}\nwant\n{}\ngraphiteMatchTemplate={gmt}");
+                "unexpected matches for tpl={tpl}, s={s}; got\n{:?}\nwant\n{:?}\ngraphiteMatchTemplate={gmt}",
+            matches, matches_expected);
         }
     }
 

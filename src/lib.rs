@@ -1,26 +1,28 @@
-use redis_module::{NotifyEvent, redis_module, Context as RedisContext};
-use redis_module_macros::{config_changed_event_handler};
 #[cfg(not(test))]
 use redis_module::alloc::RedisAlloc;
+use redis_module::{redis_module, Context as RedisContext, NotifyEvent};
+use redis_module_macros::config_changed_event_handler;
 
-extern crate redis_module_macros;
 extern crate get_size;
+extern crate redis_module_macros;
 
-mod common;
-mod error;
-mod module;
-mod index;
-mod provider;
-mod globals;
-mod config;
-mod storage;
 mod aggregators;
+mod common;
+mod config;
+mod error;
+mod globals;
+mod index;
+mod module;
+mod provider;
+mod relabel;
+mod rules;
+mod storage;
+
 #[cfg(test)]
 mod tests;
 
-use module::*;
 use crate::globals::get_timeseries_index;
-
+use module::*;
 pub const REDIS_PROMQL_VERSION: i32 = 1;
 pub const MODULE_NAME: &str = "redis_promql";
 pub const MODULE_TYPE: &str = "RedisMetricsqlTimeseries";
@@ -44,9 +46,7 @@ fn on_event(_ctx: &RedisContext, _event_type: NotifyEvent, event: &str, key: &[u
         "rename_from" => {
             // RenameSeriesFrom(ctx, key);
         }
-        "storage.alter" => {
-            remove_key_from_cache(key)
-        }
+        "storage.alter" => remove_key_from_cache(key),
         _ => {
             // ctx.log_warning(&format!("Unknown event: {}", event));
         }

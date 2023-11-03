@@ -22,7 +22,7 @@ pub fn add(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 
     let mut options = TimeSeriesOptions::default();
 
-    let series = get_series_mut(ctx, &key, false)?;
+    let series = get_timeseries_mut(ctx, &key, false)?;
     if let Some(series) = series {
         args.done()?;
         series.add(timestamp, value, None)?;

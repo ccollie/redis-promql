@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod test {
     use regex::Regex;
-    use crate::common::types::Label;
     use crate::rules::relabel::{DebugStep, labels_to_string, ParsedRelabelConfig, sanitize_metric_name};
     use crate::rules::relabel::relabel::{fill_label_references, finalize_labels};
     use crate::rules::relabel::relabel_config::{parse_relabel_config, parse_relabel_configs_data, ParsedConfigs, RelabelAction, RelabelConfig};
     use crate::rules::relabel::utils::new_labels_from_string;
+    use crate::storage::Label;
 
     #[test]
     fn test_sanitize_metric_name() {
@@ -72,11 +72,11 @@ mod test {
         let mut labels = new_labels_from_string(metric);
         let dss = pcs.apply_debug(&mut labels);
         assert_eq!(dss, dss_expected,
-            "unexpected result; got\n{:?}\nwant\n{}", dss, dss_expected);
+            "unexpected result; got\n{:?}\nwant\n{:?}", dss, dss_expected);
     }
 
     #[test]
-    fn test_parsed_relabel_configs_apply_debug() {
+    fn parsed_relabel_configs_apply_debug() {
 
 // empty relabel config
         check_apply_debug("", "foo", vec![]);
@@ -991,8 +991,8 @@ action: replace
     fn test_regex_match_string_success() {
         fn f(pattern: &str, s: &str) {
             let prc = new_test_regex_relabel_config(pattern);
-            if !prc.regex.MatchString(s) {
-                panic!("unexpected MatchString(%{s}) result; got false; want true")
+            if !prc.regex.match_string(s) {
+                panic!("unexpected match_string(%{s}) result; got false; want true")
             }
         }
 
@@ -1013,8 +1013,8 @@ action: replace
     fn test_regexp_match_string_failure() {
         fn f(pattern: &str, s: &str) {
             let prc = new_test_regex_relabel_config(pattern);
-            if prc.regex.MatchString(s) {
-                format!("unexpected MatchString({}) result; got true; want false", s)
+            if prc.regex.match_string(s) {
+                format!("unexpected match_string({}) result; got true; want false", s)
             }
         }
 
@@ -1059,11 +1059,11 @@ action: replace
             }
 
             assert_eq!(result.len(), result_expected.len(),
-                       "unexpected number of results; got\n{}\nwant\n{}", result, result_expected);
+                       "unexpected number of results; got\n{}\nwant\n{}", result.len(), result_expected.len());
 
-            for i in 0..result.len() {
-                assert_eq!(result[i], result_expected[i], "unexpected result[%d]; got\n{}\nwant\n{}", i, result[i], result_expected[i])
-            }
+            result.iter().zip(result_expected.iter()).for_each(|(r, e)| {
+                assert_eq!(r, e, "unexpected result; got\n{}\nwant\n{}", r, e)
+            });
         }
 
         fn drops_one_of_series() {

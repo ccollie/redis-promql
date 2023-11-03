@@ -3,9 +3,9 @@ use std::fmt::Display;
 use std::time::Duration;
 use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
-use crate::common::types::Label;
+use crate::common::types::Timestamp;
 use crate::rules::alerts::{AlertsResult, DataSourceType};
-use crate::ts::Timestamp;
+use crate::storage::Label;
 
 /// Querier trait wraps Query and query_range methods
 pub trait Querier {

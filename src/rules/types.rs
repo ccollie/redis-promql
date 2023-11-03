@@ -1,24 +1,18 @@
 use ahash::{AHashMap, AHashSet};
 use serde::{Deserialize, Serialize};
-use crate::common::types::{Label, Sample};
-
+use crate::storage::{Label, SeriesData};
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RawTimeSeries {
     pub key: String,
-    pub samples: Vec<Sample>,
+    pub data: SeriesData,
     pub labels: Vec<Label>,
 }
 
 pub fn new_time_series(key: String, values: &[f64], timestamps: &[i64], labels: AHashMap<String, String>) -> RawTimeSeries {
-    let samples = values
-        .iter()
-        .zip(timestamps.iter())
-        .map(|(value, timestamp)| Sample {
-            value: *value,
-            timestamp: *timestamp,
-        })
-        .collect();
+    let mut data = SeriesData::new(values.len());
+    data.values = values.to_vec();
+    data.timestamps = timestamps.to_vec();
 
     let tags = labels
         .into_iter()
@@ -27,7 +21,7 @@ pub fn new_time_series(key: String, values: &[f64], timestamps: &[i64], labels: 
 
     RawTimeSeries {
         key,
-        samples,
+        data,
         labels: tags,
     }
 }

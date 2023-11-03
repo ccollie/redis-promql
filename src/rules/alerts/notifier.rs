@@ -4,13 +4,13 @@ use redis_module::Context;
 
 use crate::error::TsdbResult;
 use crate::rules::alerts::Alert;
-use crate::ts::Labels;
+use crate::storage::Label;
 
 /// Notifier is a common interface for alert manager provider
 pub trait Notifier {
     /// Send sends the given list of alerts.
     /// Returns an error if fails to send the alerts.
-    fn send(&self, ctx: &Context, alerts: &[Alert], notifier_headers: Labels) -> TsdbResult<()>;
+    fn send(&self, ctx: &Context, alerts: &[Alert], notifier_headers: &[Label]) -> TsdbResult<()>;
     /// Addr returns address where alerts are sent.
     fn addr(&self) -> String;
 }

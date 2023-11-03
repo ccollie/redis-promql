@@ -1,11 +1,12 @@
 use crate::common::regex_util::{remove_start_end_anchors, simplify, PromRegex};
-use crate::common::types::Label;
 use crate::common::FastStringTransformer;
 use crate::rules::relabel::relabel::ParsedRelabelConfig;
+use crate::rules::relabel::RelabelAction::{LabelDrop, LabelKeep, LabelMap, LabelMapAll};
 use crate::rules::relabel::{
     labels_to_string, new_graphite_label_rules, DebugStep, GraphiteLabelRule,
     GraphiteMatchTemplate, IfExpression,
 };
+use crate::storage::Label;
 use lazy_static::lazy_static;
 use metricsql_engine::METRIC_NAME_LABEL;
 use regex::Regex;
@@ -15,27 +16,29 @@ use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
 
-#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum RelabelAction {
-    Graphite,
-    #[default]
-    Replace,
-    ReplaceAll,
-    KeepIfEqual,
-    DropIfEqual,
-    KeepEqual,
-    DropEqual,
-    Keep,
     Drop,
-    HashMod,
-    KeepMetrics,
+    DropEqual,
+    DropIfContains,
+    DropIfEqual,
     DropMetrics,
-    Uppercase,
+    Graphite,
+    HashMod,
+    Keep,
+    KeepEqual,
+    KeepIfContains,
+    KeepIfEqual,
+    KeepMetrics,
     Lowercase,
     LabelMap,
     LabelMapAll,
     LabelDrop,
     LabelKeep,
+    #[default]
+    Replace,
+    ReplaceAll,
+    Uppercase,
 }
 
 impl Display for RelabelAction {
@@ -51,15 +54,17 @@ impl Display for RelabelAction {
             DropEqual => write!(f, "dropequal"),
             Keep => write!(f, "keep"),
             Drop => write!(f, "drop"),
+            DropIfContains => write!(f, "drop_if_contains"),
+            DropMetrics => write!(f, "drop_metrics"),
             HashMod => write!(f, "hashmod"),
             KeepMetrics => write!(f, "keep_metrics"),
-            DropMetrics => write!(f, "drop_metrics"),
             Uppercase => write!(f, "uppercase"),
             Lowercase => write!(f, "lowercase"),
             LabelMap => write!(f, "labelmap"),
             LabelMapAll => write!(f, "labelmap_all"),
             LabelDrop => write!(f, "labeldrop"),
             LabelKeep => write!(f, "labelkeep"),
+            KeepIfContains => write!(f, "keep_if_contains"),
         }
     }
 }
@@ -73,20 +78,22 @@ impl FromStr for RelabelAction {
             "replace" => Ok(Replace),
             "replace_all" => Ok(ReplaceAll),
             "keep_if_equal" => Ok(KeepIfEqual),
-            "drop_if_equal" => Ok(DropIfEqual),
-            "keepequal" => Ok(KeepEqual),
-            "dropequal" => Ok(DropEqual),
-            "keep" => Ok(Keep),
             "drop" => Ok(Drop),
+            "drop_equal" | "dropequal" => Ok(DropEqual),
+            "drop_if_equal" => Ok(DropIfEqual),
+            "drop_if_contains" => Ok(DropIfContains),
+            "drop_metrics" => Ok(DropMetrics),
+            "keep_equal" | "keepequal" => Ok(KeepEqual),
+            "keep" => Ok(Keep),
             "hashmod" => Ok(HashMod),
             "keep_metrics" => Ok(KeepMetrics),
-            "drop_metrics" => Ok(DropMetrics),
-            "uppercase" => Ok(Uppercase),
+            "keep_if_contains" => Ok(KeepIfContains),
             "lowercase" => Ok(Lowercase),
             "labelmap" => Ok(LabelMap),
             "labelmap_all" => Ok(LabelMapAll),
             "labeldrop" => Ok(LabelDrop),
             "labelkeep" => Ok(LabelKeep),
+            "uppercase" => Ok(Uppercase),
             _ => Err(format!("unknown action: {}", s)),
         }
     }
@@ -107,21 +114,21 @@ pub(crate) struct RelabelConfig {
     pub modulus: u64,
     pub replacement: String,
 
-    // match is used together with Labels for `action: graphite`. For example:
-    // - action: graphite
-    //   match: 'foo.*.*.bar'
-    //   labels:
-    //     job: '$1'
-    //     instance: '${2}:8080'
+    /// match is used together with Labels for `action: graphite`. For example:
+    /// - action: graphite
+    ///   match: 'foo.*.*.bar'
+    ///   labels:
+    ///     job: '$1'
+    ///     instance: '${2}:8080'
     #[serde(rename = "match")]
     pub r#match: String,
 
-    // Labels is used together with match for `action: graphite`. For example:
-    // - action: graphite
-    //   match: 'foo.*.*.bar'
-    //   labels:
-    //     job: '$1'
-    //     instance: '${2}:8080'
+    /// Labels is used together with match for `action: graphite`. For example:
+    /// - action: graphite
+    ///   match: 'foo.*.*.bar'
+    ///   labels:
+    ///     job: '$1'
+    ///     instance: '${2}:8080'
     pub labels: HashMap<String, String>,
 }
 
@@ -231,8 +238,22 @@ pub fn parse_relabel_configs(rcs: Vec<RelabelConfig>) -> Result<ParsedConfigs, S
 }
 
 lazy_static! {
-    pub static ref defaultOriginalRegexForRelabelConfig: Regex = Regex::new(".*");
-    pub static ref defaultRegexForRelabelConfig: Regex = Regex::new("^(.*)$");
+    pub static ref DEFAULT_ORIGINAL_REGEX_FOR_RELABEL_CONFIG: Regex = Regex::new(".*");
+    pub static ref DEFAULT_REGEX_FOR_RELABEL_CONFIG: Regex = Regex::new("^(.*)$");
+}
+
+fn validate_labels(
+    action: RelabelAction,
+    source_labels: &Vec<String>,
+    target_label: &str,
+) -> Result<(), String> {
+    if source_labels.is_empty() {
+        return Err(format!("missing `source_labels` for `action={action}`"));
+    }
+    if target_label.is_empty() {
+        return Err(format!("missing `target_label` for `action={action}`"));
+    }
+    Ok(())
 }
 
 pub fn parse_relabel_config(rc: RelabelConfig) -> Result<ParsedRelabelConfig, String> {
@@ -274,8 +295,8 @@ pub fn parse_relabel_config(rc: RelabelConfig) -> Result<ParsedRelabelConfig, St
             (regex_anchored, regex_original_compiled, prom_regex)
         } else {
             (
-                defaultRegexForRelabelConfig.clone(),
-                defaultOriginalRegexForRelabelConfig.clone(),
+                DEFAULT_REGEX_FOR_RELABEL_CONFIG.clone(),
+                DEFAULT_ORIGINAL_REGEX_FOR_RELABEL_CONFIG.clone(),
                 PromRegex::new(".*").unwrap(),
             )
         };
@@ -321,56 +342,15 @@ pub fn parse_relabel_config(rc: RelabelConfig) -> Result<ParsedRelabelConfig, St
                 return Err(format!("missing `target_label` for `action=replace`"));
             }
         }
-        ReplaceAll => {
-            if source_labels.is_empty() {
-                return Err(format!("missing `source_labels` for `action=replace_all`"));
-            }
-            if target_label.is_empty() {
-                return Err(format!("missing `target_label` for `action=replace_all`"));
-            }
-        }
-        KeepIfEqual => {
-            if source_labels.len() < 2 {
-                return Err(format!("`source_labels` must contain at least two entries for `action=keep_if_equal`; got {:?}", source_labels));
-            }
-            if !target_label.is_empty() {
-                return Err(format!(
-                    "`target_label` cannot be used for `action=keep_if_equal`"
-                ));
-            }
+        ReplaceAll => validate_labels(rc.action, &source_labels, &target_label)?,
+        DropIfContains | DropIfEqual | KeepIfContains | KeepIfEqual | LabelMap | LabelMapAll
+        | LabelDrop | LabelKeep => {
+            validate_labels(rc.action, &source_labels, &target_label)?;
             if rc.regex.is_some() {
                 return Err(format!("`regex` cannot be used for `action=keep_if_equal`"));
             }
         }
-        DropIfEqual => {
-            if source_labels.len() < 2 {
-                return Err(format!("`source_labels` must contain at least two entries for `action=drop_if_equal`; got {:?}", source_labels));
-            }
-            if !target_label.is_empty() {
-                return Err(format!(
-                    "`target_label` cannot be used for `action=drop_if_equal`"
-                ));
-            }
-            if rc.regex.is_some() {
-                return Err(format!("`regex` cannot be used for `action=drop_if_equal`"));
-            }
-        }
-        KeepEqual => {
-            if target_label.is_empty() {
-                return Err(format!("missing `target_label` for `action=keepequal`"));
-            }
-            if rc.regex.is_some() {
-                return Err(format!("`regex` cannot be used for `action=keepequal`"));
-            }
-        }
-        DropEqual => {
-            if target_label.is_empty() {
-                return Err(format!("missing `target_label` for `action=dropequal`"));
-            }
-            if rc.regex.is_some() {
-                return Err(format!("`regex` cannot be used for `action=dropequal`"));
-            }
-        }
+        KeepEqual | DropEqual => validate_labels(rc.action, &source_labels, &target_label)?,
         Keep => {
             if source_labels.is_empty() && rc.if_expr.is_none() {
                 return Err(format!("missing `source_labels` for `action=keep`"));
@@ -382,12 +362,7 @@ pub fn parse_relabel_config(rc: RelabelConfig) -> Result<ParsedRelabelConfig, St
             }
         }
         HashMod => {
-            if source_labels.is_empty() {
-                return Err(format!("missing `source_labels` for `action=hashmod`"));
-            }
-            if target_label.is_empty() {
-                return Err(format!("missing `target_label` for `action=hashmod`"));
-            }
+            validate_labels(rc.action, &source_labels, &target_label)?;
             if modulus < 1 {
                 return Err(format!(
                     "unexpected `modulus` for `action=hashmod`: {modulus}; must be greater than 0"
@@ -425,26 +400,7 @@ pub fn parse_relabel_config(rc: RelabelConfig) -> Result<ParsedRelabelConfig, St
             action = Drop;
         }
         Uppercase | Lowercase => {
-            if source_labels.is_empty() {
-                return Err(format!("missing `source_labels` for `action=uppercase`"));
-            }
-            if target_label.is_empty() {
-                return Err(format!("missing `target_label` for `action=uppercase`"));
-            }
-        }
-        LabelMap | LabelMapAll | LabelDrop | LabelKeep => {
-            if source_labels.is_empty() {
-                return Err(format!("missing `source_labels` for `action=labelmap`"));
-            }
-            if target_label.is_empty() {
-                return Err(format!("missing `target_label` for `action=labelmap`"));
-            }
-            if rc.regex.is_some() {
-                return Err(format!("`regex` cannot be used for `action=labelmap`"));
-            }
-        }
-        _ => {
-            return Err(format!("unknown `action` {action}"));
+            validate_labels(rc.action, &source_labels, &target_label)?;
         }
     }
     if action != Graphite {
@@ -491,7 +447,7 @@ pub fn parse_relabel_config(rc: RelabelConfig) -> Result<ParsedRelabelConfig, St
 fn is_default_regex(expr: &str) -> bool {
     match simplify(expr) {
         Ok((prefix, suffix)) => prefix == "" && suffix == ".*",
-        _ => false
+        _ => false,
     }
 }
 

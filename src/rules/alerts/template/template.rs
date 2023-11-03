@@ -23,7 +23,6 @@ use regex::Regex;
 use url::Url;
 use crate::common;
 use crate::common::humanize::humanize_bytes;
-use crate::ts::Labels;
 use htmlescape::encode_minimal;
 
 pub type FuncMap = HashMap<String, Func>;

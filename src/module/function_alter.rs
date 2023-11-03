@@ -7,7 +7,7 @@ use crate::storage::Label;
 pub fn alter(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let (parsed_key, options) = parse_create_options(args)?;
 
-    let mut series = get_series_mut(ctx, &parsed_key, true)?.unwrap();
+    let mut series = get_timeseries_mut(ctx, &parsed_key, true)?.unwrap();
 
     if let Some(retention) = options.retention {
         series.retention = retention;

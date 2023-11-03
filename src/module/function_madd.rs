@@ -18,13 +18,13 @@ pub(crate) fn madd(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 
     let sample_count = arg_count / 3;
 
-    if let Some(series) = get_series_mut(ctx, &key, true)? {
+    if let Some(series) = get_timeseries_mut(ctx, &key, true)? {
         let policy = series.duplicate_policy;
 
         let mut values: Vec<RedisValue> = Vec::with_capacity(sample_count);
 
         while let Some(arg) = args.next() {
-            let res = get_series_mut(ctx, &arg, true);
+            let res = get_timeseries_mut(ctx, &arg, true);
             if res.is_err() {
                 values.push(RedisValue::SimpleStringStatic("ERR TSDB: the key is not a timeseries") );
             } else {

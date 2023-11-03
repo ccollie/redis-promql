@@ -4,7 +4,7 @@ use std::ops::Deref;
 use serde::{Deserialize, Serialize};
 
 use crate::common::regex_util::PromRegex;
-use crate::common::types::Label;
+use crate::storage::Label;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LabelFilterOp {

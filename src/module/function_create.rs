@@ -7,6 +7,7 @@ use crate::globals::get_timeseries_index;
 use crate::module::{REDIS_PROMQL_SERIES_TYPE};
 use crate::storage::{DuplicatePolicy, TimeSeriesOptions};
 use crate::storage::time_series::TimeSeries;
+use redis_module::NotifyEvent;
 
 const CMD_ARG_RETENTION: &str = "RETENTION";
 const CMD_ARG_DUPLICATE_POLICY: &str = "DUPLICATE_POLICY";

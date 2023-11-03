@@ -1,12 +1,15 @@
 use crate::common::current_time_millis;
 use crate::common::hash::hash_labels_without_metric_name;
-use crate::common::types::Label;
 use crate::rules::alerts::datasource::datasource::Querier;
 use crate::rules::alerts::template::QueryFn;
-use crate::rules::alerts::{exec_template, Alert, AlertState, AlertTplData, AlertsError, AlertsResult, Group, QueryResult, RuleConfig, ALERT_FOR_STATE_METRIC_NAME, ALERT_GROUP_NAME_LABEL, ALERT_METRIC_NAME, ALERT_NAME_LABEL, ALERT_STATE_LABEL, DatasourceMetric};
+use crate::rules::alerts::{
+    exec_template, Alert, AlertState, AlertTplData, AlertsError, AlertsResult, Group, QueryResult,
+    RuleConfig, ALERT_FOR_STATE_METRIC_NAME, ALERT_GROUP_NAME_LABEL, ALERT_METRIC_NAME, ALERT_NAME_LABEL,
+    ALERT_STATE_LABEL, DatasourceMetric
+};
 use crate::rules::types::{new_time_series, RawTimeSeries};
 use crate::rules::{EvalContext, Rule, RuleState, RuleStateEntry, RuleType};
-use crate::ts::Timestamp;
+use crate::storage::{Label, Timestamp};
 use ahash::AHashMap;
 use metricsql_engine::METRIC_NAME_LABEL;
 use scopeguard::defer;
@@ -247,7 +250,6 @@ impl AlertingRule {
 
     /// alertsToSend walks through the current alerts of AlertingRule
     /// and returns only those which should be sent to notifier.
-    /// Isn't concurrent safe.
     pub fn alerts_to_send(
         &self,
         ts: Timestamp,

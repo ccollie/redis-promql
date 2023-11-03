@@ -1,17 +1,19 @@
+use ahash::AHashMap;
 use std::fmt::Display;
 use std::str::FromStr;
 use std::time::Duration;
-use ahash::AHashMap;
 
+use crate::common::types::Timestamp;
 use gtmpl::{Context, Template};
 use gtmpl_derive::Gtmpl;
 use serde::{Deserialize, Serialize};
-use crate::common::types::Label;
 
+use crate::rules::alerts::template::{
+    clone_template, funcs_with_query, get_template, get_with_funcs, QueryFn,
+};
 use crate::rules::alerts::{AlertsError, AlertsResult, ErrorGroup};
-use crate::rules::alerts::template::{clone_template, funcs_with_query, get_template, get_with_funcs, QueryFn};
 use crate::rules::relabel::ParsedRelabelConfig;
-use crate::ts::Timestamp;
+use crate::storage::Label;
 
 /// AlertState is the state of an alert.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -89,8 +91,7 @@ pub struct Alert {
 }
 
 /// alert_tpl_data is used to execute templating
-#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
-#[derive(Gtmpl)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Gtmpl)]
 pub struct AlertTplData {
     pub labels: AHashMap<String, String>,
     pub value: f64,
@@ -111,18 +112,23 @@ const TPL_HEADERS: String = [
     "{{ $groupID := .group_id }}",
     "{{ $activeAt := .active_id }}",
     "{{ $for := .for }}",
-].join("");
-
+]
+.join("");
 
 impl Alert {
     /// exec_template executes the Alert template for given map of annotations.
     /// Every alert could have a different provider, so function requires a queryFunction
     /// as an argument.
-    pub fn exec_template(&mut self, q: QueryFn, labels: &AHashMap<String, String>, annotations: &AHashMap<String, String>) -> AlertsResult<AHashMap<String, String>> {
+    pub fn exec_template(
+        &mut self,
+        q: QueryFn,
+        labels: &AHashMap<String, String>,
+        annotations: &AHashMap<String, String>,
+    ) -> AlertsResult<AHashMap<String, String>> {
         let tpl_data = AlertTplData {
             value: self.value,
-            labels: labels.clone(), // ??? why not use ref ?
-            expr: self.expr.clone(),  // todo(perf) why not use ref ?
+            labels: labels.clone(),  // ??? why not use ref ?
+            expr: self.expr.clone(), // todo(perf) why not use ref ?
             alert_id: self.id,
             active_at: self.active_at,
             r#for: self.r#for.clone(),
@@ -130,7 +136,6 @@ impl Alert {
         };
         exec_template(q, annotations, &tpl_data)
     }
-
 
     pub fn to_prom_labels(&self, relabel_cfg: Option<ParsedRelabelConfig>) -> Vec<Label> {
         let mut labels = Vec::with_capacity(self.labels.len());
@@ -149,28 +154,39 @@ impl Alert {
 }
 
 /// exec_template executes the given template for given annotations map.
-pub fn exec_template(q: QueryFn, annotations: &AHashMap<String, String>, tpl_data: &AlertTplData) -> AlertsResult<AHashMap<String, String>> {
+pub fn exec_template(
+    q: QueryFn,
+    annotations: &AHashMap<String, String>,
+    tpl_data: &AlertTplData,
+) -> AlertsResult<AHashMap<String, String>> {
     let tmpl = get_with_funcs(funcs_with_query(q))?;
     return template_annotations(annotations, tpl_data, &tmpl);
 }
-
 
 /// validate annotations for possible template error, uses empty data for template population
 pub(crate) fn validate_templates(annotations: &AHashMap<String, String>) -> AlertsResult<()> {
     let tmpl = get_template();
     let labels = AHashMap::new();
-    let _ = template_annotations(annotations, &AlertTplData {
-        labels,
-        value: 1f64,
-        expr: "up = 0".to_string(),
-        alert_id: 0,
-        group_id: 1,
-        active_at: 0,
-        r#for: Default::default(),
-    }, &tmpl);
+    let _ = template_annotations(
+        annotations,
+        &AlertTplData {
+            labels,
+            value: 1f64,
+            expr: "up = 0".to_string(),
+            alert_id: 0,
+            group_id: 1,
+            active_at: 0,
+            r#for: Default::default(),
+        },
+        &tmpl,
+    );
 }
 
-fn template_annotations(annotations: &AHashMap<String, String>, template_data: &AlertTplData, tmpl: &Template) -> AlertsResult<AHashMap<String, String>> {
+fn template_annotations(
+    annotations: &AHashMap<String, String>,
+    template_data: &AlertTplData,
+    tmpl: &Template,
+) -> AlertsResult<AHashMap<String, String>> {
     let mut builder = String::with_capacity(256);
     let mut r = AHashMap::with_capacity(annotations.len());
     let mut err_group = Vec::with_capacity(annotations.len());
@@ -202,14 +218,12 @@ fn template_annotations(annotations: &AHashMap<String, String>, template_data: &
 
 fn template_annotation(text: &str, data: &AlertTplData, tmpl: &Template) -> AlertsResult<String> {
     let mut tpl = clone_template(tmpl); // ??????
-    tpl.parse(text)
-        .map_err(|err| {
-            return AlertsError::TemplateParseError(format!("{:?}", err));
-        })?;
+    tpl.parse(text).map_err(|err| {
+        return AlertsError::TemplateParseError(format!("{:?}", err));
+    })?;
 
     let context = Context::from(data);
-    tpl.render(&context)
-        .map_err(|err| {
-            AlertsError::Generic(format!("error evaluating annotation template: {}", err))
-        })
+    tpl.render(&context).map_err(|err| {
+        AlertsError::Generic(format!("error evaluating annotation template: {}", err))
+    })
 }

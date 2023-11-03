@@ -10,9 +10,9 @@ use xxhash_rust::xxh3::xxh3_64;
 use crate::common::FastStringTransformer;
 
 use crate::common::regex_util::PromRegex;
-use crate::common::types::Label;
-use crate::rules::relabel::{defaultRegexForRelabelConfig, GraphiteLabelRule, GraphiteMatchTemplate, IfExpression};
+use crate::rules::relabel::{DEFAULT_REGEX_FOR_RELABEL_CONFIG, GraphiteLabelRule, GraphiteMatchTemplate, IfExpression};
 use crate::rules::relabel::relabel_config::{RelabelAction};
+use crate::storage::Label;
 
 /// DebugStep contains debug information about a single relabeling rule step
 #[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
@@ -59,6 +59,38 @@ pub struct ParsedRelabelConfig {
 }
 
 impl ParsedRelabelConfig {
+    pub fn new(
+        action: RelabelAction,
+        rule_original: &str,
+        target_label: &str,
+        separator: &str,
+        replacement: &str,
+        if_expr: Option<IfExpression>
+    ) -> Self {
+        let mut prc = ParsedRelabelConfig {
+            rule_original: rule_original.to_string(),
+            source_labels,
+            separator: separator.to_string(),
+            target_label: target_label.to_string(),
+            regex_anchored,
+            modulus,
+            action,
+            r#if: if_expr.clone(),
+            graphite_match_template,
+            graphite_label_rules,
+            regex: prom_regex,
+            regex_original: regex_original_compiled,
+            string_replacer: Default::default(),
+            has_capture_group_in_target_label: target_label.contains("$"),
+            has_capture_group_in_replacement: replacement.contains("$"),
+            has_label_reference_in_replacement: replacement.contains("{{"),
+            replacement: replacement.to_string(),
+            submatch_replacer: Default::default(),
+        };
+        prc.string_replacer = FastStringTransformer::new(prc.replace_full_string_slow);
+        prc.submatch_replacer = FastStringTransformer::new(prc.replace_string_submatches_slow);
+    }
+
     pub fn apply_debug(&mut self, labels: &[Label], _labels_offset: usize) -> (Vec<Label>, DebugStep) {
         self.apply_internal(labels, 0, true)
     }
@@ -79,24 +111,217 @@ impl ParsedRelabelConfig {
             return;
         }
         match &self.action {
+            Drop => self.handle_drop(labels, labels_offset),
+            DropEqual => self.drop_equal(labels, labels_offset),
+            DropIfContains => self.drop_if_contains(labels, labels_offset),
+            DropIfEqual => self.drop_if_equal(labels, labels_offset),
+            Graphite => self.graphite(labels, labels_offset),
+            HashMod => self.hashmod(labels, labels_offset),
+            Keep => self.keep(labels, labels_offset),
+            KeepEqual => self.keep_equal(labels, labels_offset),
+            KeepIfContains => self.keep_if_contains(labels, labels_offset),
+            KeepIfEqual => self.keep_if_equal(labels, labels_offset),
+            Lowercase => self.lowercase(labels, labels_offset),
+            LabelMap => self.label_map(labels, labels_offset),
+            LabelDrop => self.label_drop(labels, labels_offset),
+            LabelMapAll => self.label_map_all(labels, labels_offset),
+            LabelKeep => self.label_keep(labels, labels_offset),
+            Uppercase => self.uppercase(labels, labels_offset),
             Replace => handle_replace(self, labels, labels_offset),
-            ReplaceAll => handle_replace_all(self, labels, labels_offset),
-            KeepIfEqual => handle_keep_if_equal(self, labels, labels_offset),
-            DropIfEqual => handle_drop_if_equal(self, labels, labels_offset),
-            KeepEqual => handle_keep_equal(self, labels, labels_offset),
-            DropEqual => handle_drop_equal(self, labels, labels_offset),
-            Keep => handle_keep(self, labels, labels_offset),
-            Drop => handle_drop(self, labels, labels_offset),
-            HashMod => handle_hashmod(self, labels, labels_offset),
-            LabelMap => handle_label_map(self, labels, labels_offset),
-            LabelMapAll => handle_label_map_all(self, labels, labels_offset),
-            LabelDrop => handle_label_drop(self, labels, labels_offset),
-            LabelKeep => handle_label_keep(self, labels, labels_offset),
-            Uppercase => handle_uppercase(self, labels, labels_offset),
-            Lowercase => handle_lowercase(self, labels, labels_offset),
-            Graphite => handle_graphite(self, labels, labels_offset),
+            ReplaceAll => self.replace_all(labels, labels_offset),
             _ => panic!("BUG: unknown action={}", &self.action),
         }
+    }
+
+    /// Drop the entry if `source_labels` joined with `separator` matches `regex`
+    fn handle_drop(&self, labels: &mut Vec<Label>, labels_offset: usize) {
+        if self.regex_anchored == *DEFAULT_REGEX_FOR_RELABEL_CONFIG {
+            // Fast path for the case with `if` and without explicitly set `regex`:
+            //
+            // - action: drop
+            //   if: 'some{label=~"filters"}'
+            //
+            return;
+        }
+
+        let buf = concat_label_values(&labels, &self.source_labels, &self.separator);
+        let drop = self.regex.match_string(&buf);
+        if drop {
+            labels.truncate(labels_offset);
+        }
+    }
+
+    fn drop_equal(&self, labels: &mut Vec<Label>, labels_offset: usize) {
+        // Drop the entry if `source_labels` joined with `separator` matches `target_label`
+        let buf = concat_label_values(&labels, &self.source_labels, &self.separator);
+        let target_value = get_label_value(&labels[labels_offset..], &self.target_label);
+        let drop = buf == target_value;
+        if !drop {
+            return;
+        }
+        labels.truncate(labels_offset);
+    }
+
+    fn drop_if_contains(&self, labels: &mut Vec<Label>, labels_offset: usize) {
+        // Drop the entry if target_label contains all the label values listed in source_labels.
+        // For example, the following relabeling rule would drop the entry if __meta_consul_tags
+        // contains values of __meta_required_tag1 and __meta_required_tag2:
+        //
+        //   - action: drop_if_contains
+        //     target_label: __meta_consul_tags
+        //     source_labels: [__meta_required_tag1, __meta_required_tag2]
+        //
+        if contains_all_label_values(labels, &self.target_label, &self.source_labels) {
+            labels.truncate(labels_offset);
+        }
+    }
+
+    /// Drop the entry if all the label values in source_labels are equal.
+    /// For example:
+    ///
+    ///   - source_labels: [foo, bar]
+    ///     action: drop_if_equal
+    ///
+    /// Would drop the entry if `foo` value equals `bar` value
+    fn drop_if_equal(&self, labels: &mut Vec<Label>, labels_offset: usize) {
+        if are_equal_label_values(labels, &self.source_labels) {
+            labels.truncate(labels_offset);
+        }
+    }
+
+    fn graphite(&self, labels: &mut Vec<Label>, labels_offset: usize) {
+        let metric_name = get_label_value(&labels, METRIC_NAME_LABEL);
+        if let Some(gmt) = &self.graphite_match_template {
+            // todo: use pool
+            let mut matches: Vec<String> = Vec::with_capacity(4);
+            if !gmt.is_match(&mut matches, metric_name) {
+                // Fast path - name mismatch
+                return;
+            }
+            // Slow path - extract labels from graphite metric name
+            for gl in self.graphite_label_rules.iter() {
+                let value_str = gl.grt.expand(&matches);
+                set_label_value(labels, labels_offset, &gl.target_label, value_str)
+            }
+        } else {
+            return
+        }
+    }
+
+    /// Store the hashmod of `source_labels` joined with `separator` at `target_label`
+    fn hashmod(&self, labels: &mut Vec<Label>, labels_offset: usize) {
+        let buf = concat_label_values(&labels, &self.source_labels, &self.separator);
+        let hash_mod = xxh3_64(&buf.as_bytes()) % self.modulus;
+        let value_str = hash_mod.to_string();
+        set_label_value(labels, labels_offset, &self.target_label, value_str)
+    }
+
+    fn keep(&self, labels: &mut Vec<Label>, labels_offset: usize) {
+        // Keep the entry if `source_labels` joined with `separator` matches `regex`
+        if self.regex_anchored == *DEFAULT_REGEX_FOR_RELABEL_CONFIG {
+            // Fast path for the case with `if` and without explicitly set `regex`:
+            //
+            // - action: keep
+            //   if: 'some{label=~"filters"}'
+            //
+            return;
+        }
+        let buf = concat_label_values(&labels, &self.source_labels, &self.separator);
+        let keep = self.regex.match_string(&buf);
+        if !keep {
+            labels.truncate(labels_offset);
+        }
+    }
+
+    /// keep the entry if `source_labels` joined with `separator` matches `target_label`
+    fn keep_equal(&self, labels: &mut Vec<Label>, labels_offset: usize) {
+        let buf = concat_label_values(&labels, &self.source_labels, &self.separator);
+        let target_value = get_label_value(&labels[labels_offset..], &self.target_label);
+        let keep = buf == target_value;
+        if keep {
+            return;
+        }
+        labels.truncate(labels_offset);
+    }
+
+    fn keep_if_contains(&self, labels: &mut Vec<Label>, labels_offset: usize) {
+        // Keep the entry if target_label contains all the label values listed in source_labels.
+        // For example, the following relabeling rule would leave the entry if __meta_consul_tags
+        // contains values of __meta_required_tag1 and __meta_required_tag2:
+        //
+        //   - action: keep_if_contains
+        //     target_label: __meta_consul_tags
+        //     source_labels: [__meta_required_tag1, __meta_required_tag2]
+        //
+        if contains_all_label_values(labels, &self.target_label, &self.source_labels) {
+            return
+        }
+        labels.truncate(labels_offset);
+    }
+
+    fn keep_if_equal(&self, labels: &mut Vec<Label>, labels_offset: usize) {
+        // Keep the entry if all the label values in source_labels are equal.
+        // For example:
+        //
+        //   - source_labels: [foo, bar]
+        //     action: keep_if_equal
+        //
+        // Would leave the entry if `foo` value equals `bar` value
+        if !are_equal_label_values(labels, &self.source_labels) {
+            labels.truncate(labels_offset);
+        }
+    }
+
+    fn label_drop(&self, labels: &mut Vec<Label>, _labels_offset: usize) {
+        // Drop all the labels matching `regex`
+        labels.retain(|label| !self.regex.match_string(&label.name))
+    }
+
+    fn label_keep(&self, labels: &mut Vec<Label>, _labels_offset: usize) {
+        // Keep all the labels matching `regex`
+        labels.retain(|label| self.regex.match_string(&label.name))
+    }
+
+    fn label_map(&self, labels: &mut Vec<Label>, labels_offset: usize) {
+        // Copy `source_labels` to `target_label`
+        // Replace label names with the `replacement` if they match `regex`
+        for label in labels.iter() {
+            let label_name = self.replace_full_string_fast(&label.name);
+            if label_name != label.name {
+                let value_str = label.value.clone();
+                set_label_value(labels, labels_offset, &label_name, value_str)
+            }
+        }
+    }
+
+    /// replace all the occurrences of `regex` at label names with `replacement`
+    fn label_map_all(&self, labels: &mut Vec<Label>, _labels_offset: usize) {
+        for label in labels.iter_mut() {
+            label.name = self.replace_string_submatches_fast(&label.name)
+        }
+    }
+
+    fn lowercase(&self, labels: &mut Vec<Label>, labels_offset: usize) {
+        let buf = concat_label_values(&labels, &self.source_labels, &self.separator);
+        let value_str = buf.to_uppercase();
+        set_label_value(labels, labels_offset, &self.target_label, value_str)
+    }
+
+    /// Replace all the occurrences of `regex` at `source_labels` joined with `separator` with the `replacement`
+    /// and store the result at `target_label`
+    /// todo: use buffer pool
+    fn replace_all(&self, labels: &mut Vec<Label>, label_offset: usize) {
+        let buf = concat_label_values(labels, &self.source_labels, &self.separator);
+        let value_str = self.replace_string_submatches_fast(&buf);
+        if value_str != buf {
+            set_label_value(labels, label_offset, &self.target_label, value_str)
+        }
+    }
+
+    fn uppercase(&self, labels: &mut Vec<Label>, labels_offset: usize) {
+        let buf = concat_label_values(&labels, &self.source_labels, &self.separator);
+        let value_str = buf.to_uppercase();
+        set_label_value(labels, labels_offset, &self.target_label, value_str)
     }
 
     /// replaces s with the replacement if s matches '^regex$'.
@@ -126,13 +351,13 @@ impl ParsedRelabelConfig {
             //
             let re_str = self.regex_original.to_string();
             if re_str.starts_with(prefix) {
-                let suffix = s[prefix.len()..];
-                let re_suffix = re_str[prefix.len()..];
+                let suffix = &s[prefix.len()..];
+                let re_suffix = &re_str[prefix.len()..];
                 if re_suffix == "(.*)" {
-                    return suffix;
+                    return suffix.to_string();
                 } else if re_suffix == "(.+)" {
                     if !suffix.is_empty() {
-                        return suffix;
+                        return suffix.to_string();
                     }
                     return s.to_string();
                 }
@@ -187,26 +412,6 @@ impl Display for ParsedRelabelConfig {
     }
 }
 
-
-fn handle_graphite(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, labels_offset: usize) {
-    let metric_name = get_label_value(&labels, METRIC_NAME_LABEL);
-    if let Some(gmt) = &prc.graphite_match_template {
-        // todo: use pool
-        let mut matches: Vec<String> = Vec::with_capacity(4);
-        if !gmt.is_match(&mut matches, metric_name) {
-            // Fast path - name mismatch
-            return;
-        }
-        // Slow path - extract labels from graphite metric name
-        for gl in prc.graphite_label_rules.iter() {
-            let value_str = gl.grt.expand(&matches);
-            set_label_value(labels, labels_offset, &gl.target_label, value_str)
-        }
-    } else {
-        return
-    }
-}
-
 fn handle_replace(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, labels_offset: usize) {
     // Store `replacement` at `target_label` if the `regex` matches `source_labels` joined with `separator`
     let mut replacement = if prc.has_label_reference_in_replacement {
@@ -219,7 +424,7 @@ fn handle_replace(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, labels_off
     };
 
     let buf = concat_label_values(labels, &prc.source_labels, &prc.separator);
-    if prc.regex_anchored == *defaultRegexForRelabelConfig && !prc.has_capture_group_in_target_label {
+    if prc.regex_anchored == *DEFAULT_REGEX_FOR_RELABEL_CONFIG && !prc.has_capture_group_in_target_label {
         if replacement == "$1" {
             // Fast path for the rule that copies source label values to destination:
             // - source_labels: [...]
@@ -258,148 +463,6 @@ fn handle_replace(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, labels_off
     set_label_value(labels, labels_offset, name_str, value_str)
 }
 
-/// Replace all the occurrences of `regex` at `source_labels` joined with `separator` with the `replacement`
-/// and store the result at `target_label`
-/// todo: use buffer pool
-fn handle_replace_all(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, label_offset: usize) {
-    let buf = concat_label_values(labels, &prc.source_labels, &prc.separator);
-    let value_str = prc.replace_string_submatches_fast(&buf);
-    if value_str != buf {
-        set_label_value(labels, label_offset, &prc.target_label, value_str)
-    }
-}
-
-fn handle_keep_if_equal(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, labels_offset: usize) {
-    // Keep the entry if all the label values in source_labels are equal.
-    // For example:
-    //
-    //   - source_labels: [foo, bar]
-    //     action: keep_if_equal
-    //
-    // Would leave the entry if `foo` value equals `bar` value
-    if !are_equal_label_values(labels, &prc.source_labels) {
-        labels.truncate(labels_offset);
-    }
-}
-
-/// Drop the entry if all the label values in source_labels are equal.
-/// For example:
-///
-///   - source_labels: [foo, bar]
-///     action: drop_if_equal
-///
-/// Would drop the entry if `foo` value equals `bar` value
-fn handle_drop_if_equal(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, labels_offset: usize) {
-    if are_equal_label_values(labels, &prc.source_labels) {
-        labels.truncate(labels_offset);
-    }
-}
-
-/// keep the entry if `source_labels` joined with `separator` matches `target_label`
-fn handle_keep_equal(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, labels_offset: usize) {
-    let buf = concat_label_values(&labels, &prc.source_labels, &prc.separator);
-    let target_value = get_label_value(&labels[labels_offset..], &prc.target_label);
-    let keep = buf == target_value;
-    if keep {
-        return;
-    }
-    labels.truncate(labels_offset);
-}
-
-fn handle_drop_equal(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, labels_offset: usize) {
-    // Drop the entry if `source_labels` joined with `separator` matches `target_label`
-    let buf = concat_label_values(&labels, &prc.source_labels, &prc.separator);
-    let target_value = get_label_value(&labels[labels_offset..], &prc.target_label);
-    let drop = buf == target_value;
-    if !drop {
-        return;
-    }
-    labels.truncate(labels_offset);
-}
-
-fn handle_keep(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, labels_offset: usize) {
-    // Keep the entry if `source_labels` joined with `separator` matches `regex`
-    if prc.regex_anchored == *defaultRegexForRelabelConfig {
-        // Fast path for the case with `if` and without explicitly set `regex`:
-        //
-        // - action: keep
-        //   if: 'some{label=~"filters"}'
-        //
-        return;
-    }
-    let buf = concat_label_values(&labels, &prc.source_labels, &prc.separator);
-    let keep = prc.regex.match_string(&buf);
-    if !keep {
-        labels.truncate(labels_offset);
-    }
-}
-
-/// Drop the entry if `source_labels` joined with `separator` matches `regex`
-fn handle_drop(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, labels_offset: usize) {
-    if prc.regex_anchored == *defaultRegexForRelabelConfig {
-        // Fast path for the case with `if` and without explicitly set `regex`:
-        //
-        // - action: drop
-        //   if: 'some{label=~"filters"}'
-        //
-        return;
-    }
-
-    let buf = concat_label_values(&labels, &prc.source_labels, &prc.separator);
-    let drop = prc.regex.match_string(&buf);
-    if drop {
-        labels.truncate(labels_offset);
-    }
-}
-
-/// Store the hashmod of `source_labels` joined with `separator` at `target_label`
-fn handle_hashmod(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, labels_offset: usize) {
-    let buf = concat_label_values(&labels, &prc.source_labels, &prc.separator);
-    let hash_mod = xxh3_64(&buf.as_bytes()) % prc.modulus;
-    let value_str = hash_mod.to_string();
-    set_label_value(labels, labels_offset, &prc.target_label, value_str)
-}
-
-fn handle_label_map(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, labels_offset: usize) {
-    // Copy `source_labels` to `target_label`
-    // Replace label names with the `replacement` if they match `regex`
-    for label in labels.iter() {
-        let label_name = prc.replace_full_string_fast(&label.name);
-        if label_name != label.name {
-            let value_str = label.value.clone();
-            set_label_value(labels, labels_offset, &label_name, value_str)
-        }
-    }
-}
-
-/// replace all the occurrences of `regex` at label names with `replacement`
-fn handle_label_map_all(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, _labels_offset: usize) {
-    for label in labels.iter_mut() {
-        label.name = prc.replace_string_submatches_fast(&label.name)
-    }
-}
-
-fn handle_label_drop(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, _labels_offset: usize) {
-    // Drop all the labels matching `regex`
-    labels.retain(|label| !prc.regex.match_string(&label.name))
-}
-
-fn handle_label_keep(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, _labels_offset: usize) {
-    // Keep all the labels matching `regex`
-    labels.retain(|label| prc.regex.match_string(&label.name))
-}
-
-fn handle_uppercase(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, labels_offset: usize) {
-    let buf = concat_label_values(&labels, &prc.source_labels, &prc.separator);
-    let value_str = buf.to_uppercase();
-    set_label_value(labels, labels_offset, &prc.target_label, value_str)
-}
-
-fn handle_lowercase(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, labels_offset: usize) {
-    let buf = concat_label_values(&labels, &prc.source_labels, &prc.separator);
-    let value_str = buf.to_uppercase();
-    set_label_value(labels, labels_offset, &prc.target_label, value_str)
-}
 
 fn remove_empty_labels(labels: &[Label], labels_offset: usize) -> Vec<Label> {
     let src = &labels[labels_offset..];
@@ -410,7 +473,6 @@ fn remove_empty_labels(labels: &[Label], labels_offset: usize) -> Vec<Label> {
 pub(super) fn finalize_labels(dst: &mut Vec<Label>) {
     dst.retain(|label| !label.name.starts_with("__") || label.name == METRIC_NAME_LABEL);
 }
-
 
 fn are_equal_label_values(labels: &[Label], label_names: &[String]) -> bool {
     if label_names.len() < 2 {
@@ -566,6 +628,17 @@ pub fn is_valid_label_name(name: &str) -> bool {
     !re.is_match(name)
 }
 
+fn contains_all_label_values(labels: &[Label], target_label: &str, source_labels: &[String]) -> bool {
+    let target_label_value = get_label_value(labels, target_label);
+    for sourceLabel in source_labels.iter() {
+        let v = get_label_value(labels, sourceLabel);
+        if !target_label_value.contains(v) {
+            return false
+        }
+    }
+    true
+}
+
 static LABEL_NAME_SANITIZER: OnceLock<FastStringTransformer> = OnceLock::new();
 
 fn get_metric_name_sanitizer() -> &'static FastStringTransformer {
@@ -576,7 +649,6 @@ fn get_metric_name_sanitizer() -> &'static FastStringTransformer {
         })
     })
 }
-
 
 fn label_name_sanitizer() -> &'static FastStringTransformer {
     LABEL_NAME_SANITIZER.get_or_init(|| {

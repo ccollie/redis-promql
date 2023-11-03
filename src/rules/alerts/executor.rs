@@ -4,19 +4,20 @@ use std::time::Duration;
 use ahash::{AHashMap, AHashSet};
 use metricsql_engine::TimestampTrait;
 use crate::common::constants::STALE_NAN;
-use crate::common::types::{Label, Timestamp};
+use crate::common::types::Timestamp;
 use crate::config::get_global_settings;
 use crate::rules::alerts::{AlertingRule, AlertsError, AlertsResult, Notifier, WriteQueue};
 use crate::rules::{new_time_series, RawTimeSeries, Rule, RuleType};
 use crate::rules::relabel::labels_to_string;
+use crate::storage::Label;
 
 pub type PreviouslySentSeries = HashMap<u64, HashMap<String, Vec<Label>>>;
 
 pub struct Executor {
     eval_ts: Timestamp,
-    pub(crate) notifiers: fn() -> Vec<Box<dyn Notifier>>,
-    pub(crate) notifier_headers: AHashMap<String, String>,
-    pub(crate) rw: Arc<WriteQueue>,
+    pub notifiers: fn() -> Vec<Box<dyn Notifier>>,
+    pub notifier_headers: AHashMap<String, String>,
+    pub rw: Arc<WriteQueue>,
 
     /// previously_sent_series stores series sent to RW on previous iteration
     /// HashMap<RuleID, HashMap<ruleLabels, Vec<Label>>

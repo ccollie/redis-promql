@@ -5,6 +5,7 @@ use std::ops::Add;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
+use std::vec;
 use ahash::AHashMap;
 
 use enquote::enquote;
@@ -13,14 +14,13 @@ use metricsql_parser::common::METRIC_NAME;
 use serde::{Deserialize, Serialize};
 use xxhash_rust::xxh3::Xxh3;
 use crate::common::current_time_millis;
-use crate::common::types::Label;
 use crate::config::get_global_settings;
 
 use crate::rules::{EvalContext, Rule, RuleType};
 use crate::rules::alerts::{AlertingRule, AlertsError, AlertsResult, DataSourceType, GroupConfig, Notifier, RecordingRule, WriteQueue};
 use crate::rules::alerts::datasource::datasource::{QuerierBuilder, QuerierParams};
 use crate::rules::alerts::executor::Executor;
-use crate::ts::{Labels, Timestamp};
+use crate::storage::{Label, Timestamp};
 
 /// Group is an entity for grouping rules
 #[derive(Debug, Clone, Hash, PartialEq, Serialize, Deserialize)]
@@ -35,9 +35,9 @@ pub struct Group {
     pub eval_offset: Duration,
     pub limit: usize,
     pub last_evaluation: Timestamp,
-    pub labels: Labels,
+    pub labels: Vec<Label>,
     pub params: AHashMap<String, String>,
-    pub headers: Labels,
+    pub headers: Vec<Label>,
     pub notifier_headers: AHashMap<String, String>,
     pub metrics: GroupMetrics,
     #[serde(skip)]
@@ -62,7 +62,7 @@ pub struct GroupMetrics {
 }
 
 impl Group {
-    pub fn from_config(cfg: GroupConfig, default_interval: Duration, labels: Labels) -> Group {
+    pub fn from_config(cfg: GroupConfig, default_interval: Duration, labels: Vec<Label>) -> Group {
         let mut cfg = cfg;
         let mut g = Group {
             source_type: cfg.datasource_type,
@@ -76,7 +76,7 @@ impl Group {
             concurrency: cfg.concurrency.min(1),
             checksum: cfg.checksum,
             params: cfg.params.unwrap_or_default().clone(),
-            headers: Labels::new(),
+            headers: vec![],
             notifier_headers: Default::default(),
             labels: cfg.labels.into(),
             last_evaluation: 0,
@@ -102,7 +102,7 @@ impl Group {
         g.metrics = new_group_metrics(&g);
 
         for r in cfg.rules.iter_mut() {
-            let mut extra_labels: Labels = Default::default();
+            let mut extra_labels: Vec<Label> = Default::default();
             let name = r.name();
             // apply external labels
             if !labels.is_empty() {
@@ -300,7 +300,7 @@ impl Group {
         }
 
         // ensure that staleness is tracked for existing rules only
-        e.purge_stale_series(g.rules);
+        e.purge_stale_series(self.rules);
         e.notifier_headers = self.notifier_headers.clone();
 
         let mut missed = (self.last_evaluation - eval_ts) / self.interval - 1;
@@ -313,7 +313,7 @@ impl Group {
             self.metrics.iteration_missed.fetch_add(missed, Ordering::Relaxed);
         }
         let eval_ts = eval_ts.add((missed + 1) * self.interval);
-        self.eval(ctx, eval_ts)
+        self.eval(eval_ts)
     }
 
     pub(super) fn resolve_duration(&self) -> Duration {
@@ -356,19 +356,17 @@ fn new_group_metrics(g: &Group) -> GroupMetrics {
 
 // merges group rule labels into result map
 // set2 has priority over set1.
-pub(crate) fn merge_labels(group_name: &str, rule_name: &str, set1: &Labels, set2: &Labels) -> Labels {
-    let mut r: Labels = Default::default();
-    for (k, v) in set1.iter() {
-        r.insert(k.clone(), v.clone());
-    }
-    for (k, v) in set2.iter() {
-        let prev_v = r.get(k);
+pub(crate) fn merge_labels(group_name: &str, rule_name: &str, set1: &Vec<Label>, set2: &Vec<Label>) -> Vec<Label> {
+    let mut r: Vec<Label> = set1.clone();
+
+    for label in set2.iter() {
+        let prev_v = r.iter().find(|x| x.name == label.name);
         if prev_v.is_some() {
             logger.Infof("label {k}={prev_v} for rule {}.{} overwritten with external label {k}={v}",
                          group_name,
                          rule_name)
         }
-        r.insert(k.clone(), v.clone());
+        r.push(label.clone());
     }
     return r;
 }

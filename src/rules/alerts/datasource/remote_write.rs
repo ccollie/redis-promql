@@ -4,10 +4,11 @@ use std::sync::RwLock;
 use std::time::Duration;
 use redis_module::{ContextGuard, RedisString, ThreadSafeContext};
 use crate::index::RedisContext;
-use crate::module::{create_and_store_series, get_series_mut, series_exists};
+use crate::module::commands::create_series_ex;
+use crate::module::get_timeseries_mut;
 use crate::rules::alerts::{AlertsError, AlertsResult};
-use crate::ts::time_series::TimeSeries;
-use crate::ts::TimeSeriesOptions;
+use crate::storage::time_series::TimeSeries;
+use crate::storage::TimeSeriesOptions;
 
 /// a queue for writing timeseries back to redis.
 pub struct WriteQueue {
@@ -26,7 +27,7 @@ pub struct WriteQueueConfig {
     addr: String,
     /// concurrency defines number of readers that concurrently read from the queue and flush data
     concurrency: usize,
-    /// max_batch_size defines max number of timeseries to be flushed at once
+    /// max_batch_size defines max number of series to be flushed at once
     max_batch_size: usize,
     /// max_queue_size defines max length of input queue populated by push method.
     /// push will be rejected once queue is full.
@@ -135,10 +136,10 @@ impl WriteQueue {
     }
 
     fn create_series<'a>(&self, ctx: &'a RedisContext, key: &RedisString) -> AlertsResult<&'a mut TimeSeries> {
-        let mut options = TimeSeriesOptions::default();
-        create_and_store_series(ctx, key, options)
+        let options = TimeSeriesOptions::default();
+        create_series_ex(ctx, key, options)
             .map_err(|e| AlertsError::Generic(format!("failed to create series: {:?}", e)))?;
-        let series = get_series_mut(ctx, key, true)
+        let series = get_timeseries_mut(ctx, key, true)
             .map_err(|e| AlertsError::Generic(format!("failed to get series: {:?}", e)))?
             .unwrap();
         Ok(series)

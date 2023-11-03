@@ -14,11 +14,10 @@ replayRulesDelay = flag.Duration("replay.rulesDelay", time.Second,
 "Keep it equal or bigger than -remoteWrite.flushInterval.")
 )
 **/
-
 pub struct ReplayOptions {
     /// The time filter to select time series with timestamp equal or higher than provided value.
     pub from: Timestamp,
-    /// The time filter to select timeseries with timestamp equal or lower than provided value.
+    /// The time filter to select time series with timestamp equal or lower than provided value.
     pub to: Timestamp,
     /// Delay between rules evaluation within the group. Could be important if there are chained rules inside the group
     /// and processing need to wait for previous rule results to be persisted by remote storage before evaluating the next rule.

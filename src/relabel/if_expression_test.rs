@@ -1,5 +1,3 @@
-use metricsql_engine::parse_metric_selector;
-
 #[cfg(test)]
 mod test {
 	use metricsql_engine::parse_metric_selector;

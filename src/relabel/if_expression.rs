@@ -1,5 +1,4 @@
 use crate::common::regex_util::PromRegex;
-use crate::common::types::Label;
 use crate::rules::alerts::{AlertsError, AlertsResult};
 use crate::rules::relabel::label_filter::to_canonical_label_name;
 use crate::rules::relabel::{LabelFilter, LabelFilterOp, LabelMatchers};
@@ -7,6 +6,7 @@ use metricsql_parser::ast::Expr;
 use metricsql_parser::prelude::MetricExpr;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
+use crate::storage::Label;
 
 /// IfExpression represents PromQL-like label filters such as `metric_name{filters...}`.
 ///

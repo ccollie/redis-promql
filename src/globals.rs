@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use metricsql_engine::prelude::{Context as QueryContext};
 use rayon::ThreadPool;
 use redis_module::RedisGILGuard;

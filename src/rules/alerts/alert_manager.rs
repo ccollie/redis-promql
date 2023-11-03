@@ -42,10 +42,10 @@ impl Manager {
                 if rr_present && ar_present {
                     continue
                 }
-                if r.record != "" {
+                if !r.record.is_empty() {
                     rr_present = true
                 }
-                if r.alert != "" {
+                if !r.alert.is_empty() {
                     ar_present = true
                 }
             }
@@ -67,6 +67,7 @@ impl Manager {
         let mut to_update = vec![];
 
         m.groupsMu.Lock();
+        let to_delete = vec![];
         for (_, og) in self.groups {
             if let Some(ng) = groups_registry.get(og.ID()) {
                 // old group is not present in new list,
@@ -75,7 +76,7 @@ impl Manager {
                 continue
             }
             delete(groups_registry, ng.ID())
-            if og.checksum != ng.Checksum {
+            if og.checksum != ng.checksum {
                 to_update.push(UpdateItem{old: og, new: ng})
             }
         }
