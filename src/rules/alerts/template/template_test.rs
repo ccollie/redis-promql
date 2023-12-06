@@ -1,14 +1,15 @@
 use gtmpl::{Template, Value};
 use crate::rules::alerts::template::{template_funcs, TextTemplate};
 
-// seeee also https://github.com/prometheus/prometheus/blob/main/template/template_test.go
+// see also https://github.com/prometheus/prometheus/blob/main/template/template_test.go
+// https://github.com/VictoriaMetrics/VictoriaMetrics/blob/master/app/vmalert/templates/template_test.go
 #[test]
 fn test_template_funcs() {
     let funcs = template_funcs();
     fn f(func_name: &str, s: &str, result_expected: &str) {
         let funcs = template_funcs();
         let flocal = funcs.get(func_name).unwrap();
-        let result = fLocal(vec![s].into());
+        let result = (flocal)(vec![s].into()).unwrap();
         assert_eq!(result, result_expected,
                    "unexpected result for {func_name}({s}); got\n{result}\nwant\n{result_expected}");
     }
@@ -40,10 +41,7 @@ fn test_template_funcs() {
 	fn formatting(func_name: &str, p: impl Into<Value>, result_expected: &str) {
 		let funcs = template_funcs();
 		let flocal = funcs.get(func_name).unwrap();
-		let result = fLocal(p).unwrap();
-		if err != None {
-			t.Fatalf("unexpected error for %s(%f): %s", func_name, p, err)
-		}
+		let result = (flocal)(p).unwrap();
 		assert_eq!(result, result_expected,
 				   "unexpected result for {func_name}({p}); got\n{result}\nwant\n{result_expected}");
 	}
@@ -76,13 +74,17 @@ fn test_template_funcs() {
 	formatting("humanizeTimestamp", 1679055557, "2023-03-17 12:19:17 +0000 UTC")
 }
 
-fn mk_template(current: Some(&str), replacement: Some(&str)) -> TextTemplate {
+fn mk_template(current: Option<&str>, replacement: Option<&str>) -> TextTemplate {
 	let mut tmpl = TextTemplate::default();
 	if let Some(current) = current {
-		tmpl.current = textTpl.Must(newTemplate().Parse(current))
+		let mut tmp = Template::default();
+		tmp.parse(current).unwrap();
+		tmpl.current = tmp;
 	}
 	if let Some(replacement) = replacement {
-		tmpl.replacement = textTpl.Must(newTemplate().Parse(val))
+		let mut tmp = Template::default();
+		tmp.parse(replacement).unwrap();
+		tmpl.replacement = tmp
 	}
 	return tmpl
 }
@@ -99,7 +101,7 @@ fn equal_templates(tmpls: &[Template]) -> bool {
 				}
 				continue
 			}
-			if len(tmpl.Templates()) != len(cmp.Templates()) {
+			if tmpls.len() != len(cmp.Templates()) {
 				return false
 			}
 			for t in tmpl.templates() {
@@ -117,7 +119,7 @@ fn equal_templates(tmpls: &[Template]) -> bool {
 }
 
 struct LoadTestCase<'a> {
-	name:            &'a str,
+	name: &'a str,
 	initial_template: TextTemplate,
 	path_patterns: Vec<&'a str>,
 	overwrite: bool,
@@ -255,28 +257,26 @@ fn test_templates_load() {
 		),
 	];
 
-	for tc in testCases {
-		t.Run(tc.name, func() {
-			masterTmpl = tc.initialTemplate;
-			err := Load(tc.pathPatterns, tc.overwrite);
-			if tc.expErr == "" && err != None {
-				t.Error("happened error that wasn't expected: %w", err)
-			}
-			if tc.expErr != "" && err == None {
-				t.Error("%+w", err);
-				t.Error("expected error that didn't happened")
-			}
-			if err != None && !strings.Contains(err.Error(), tc.expErr) {
-				t.Error("%+w", err)
-				t.Error("expected string doesn't exist in error message")
-			}
-			if !equal_templates(masterTmpl.replacement, tc.expectedTemplate.replacement) {
-				t.Fatalf("replacement template is not as expected")
-			}
-			if !equal_templates(masterTmpl.current, tc.expectedTemplate.current) {
-				t.Fatalf("current template is not as expected")
-			}
-		})
+	for tc in test_cases {
+		let master_tmpl = tc.initial_template;
+		err := Load(tc.path_patterns, tc.overwrite);
+		if tc.exp_err == "" && err != None {
+			t.Error("happened error that wasn't expected: %w", err)
+		}
+		if tc.exp_err != "" && err == None {
+			t.Error("%+w", err);
+			t.Error("expected error that didn't happened")
+		}
+		if err != None && !strings.Contains(err.Error(), tc.exp_err) {
+			t.Error("%+w", err);
+			t.Error("expected string doesn't exist in error message")
+		}
+		if !equal_templates(&[master_tmpl.replacement, tc.expected_template.replacement]) {
+			panic!("replacement template is not as expected")
+		}
+		if !equal_templates(&[master_tmpl.current, tc.expected_template.current]) {
+			panic!("current template is not as expected")
+		}
 	}
 }
 
@@ -352,16 +352,14 @@ fn test_templates_reload() {
 		)
 	];
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func() {
-			masterTmpl = tc.initialTemplate
-			Reload()
-			if !equal_templates(masterTmpl.replacement, tc.expectedTemplate.replacement) {
-				panic!("replacement template is not as expected")
-			}
-			if !equal_templates(masterTmpl.current, tc.expectedTemplate.current) {
-				panic!("current template is not as expected")
-			}
-		})
+	for tc in test_cases {
+		let master_tmpl = tc.initial_template;
+		Reload()
+		if !equal_templates(master_tmpl.replacement, tc.expectedTemplate.replacement) {
+			panic!("replacement template is not as expected")
+		}
+		if !equal_templates(master_tmpl.current, tc.expectedTemplate.current) {
+			panic!("current template is not as expected")
+		}
 	}
 }

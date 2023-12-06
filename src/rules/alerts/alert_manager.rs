@@ -24,15 +24,15 @@ impl Manager {
     fn start_group(&mut self, ctx: &Context, g: &Group, restore: bool) -> AlertsResult<()> {
         let id = g.ID();
         if restore {
-            g.start(ctx, self.notifiers, self.rw, m.rr)
+            g.start(ctx, self.notifiers, Arc::clone(&self.rw), m.rr)
         } else {
-            g.start(ctx, self.notifiers, self.rw, nil)
+            g.start(ctx, self.notifiers, Arc::clone(&self.rw), nil)
         }
         self.groups.insert(id, g);
         Ok(())
     }
 
-    fn update(&self, ctx: &Context, groups_cfg: &[GroupConfig], restore: bool) -> AlertsResult<()> {
+    fn update(&mut self, ctx: &Context, groups_cfg: &[GroupConfig], restore: bool) -> AlertsResult<()> {
         let mut rr_present = false;
         let mut ar_present = false;
 
@@ -49,14 +49,14 @@ impl Manager {
                     ar_present = true
                 }
             }
-            let ng = Group::new(cfg, self.querierBuilder, *evaluationInterval, &self.labels);
+            let ng = Group::new(cfg, &self.querier_builder, *evaluationInterval, &self.labels);
             groups_registry.insert(ng.ID(), ng)
         }
 
         if rr_present && m.rw == nil {
             return fmt.Errorf("config contains recording rules but `-remoteWrite.url` isn't set")
         }
-        if ar_present && m.notifiers == nil {
+        if ar_present && self.notifiers == nil {
             return fmt.Errorf("config contains alerting rules but neither `-notifier.url` nor `-notifier.config` nor `-notifier.blackhole` aren't set")
         }
         struct UpdateItem<'a> {
@@ -75,7 +75,7 @@ impl Manager {
                 self.remove(og.ID());
                 continue
             }
-            delete(groups_registry, ng.ID())
+            groups_registry.remove(ng.ID());
             if og.checksum != ng.checksum {
                 to_update.push(UpdateItem{old: og, new: ng})
             }

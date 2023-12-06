@@ -1,8 +1,7 @@
 use crate::common::regex_util::{remove_start_end_anchors, simplify, PromRegex};
-use crate::common::FastStringTransformer;
-use crate::rules::relabel::relabel::ParsedRelabelConfig;
-use crate::rules::relabel::RelabelAction::{LabelDrop, LabelKeep, LabelMap, LabelMapAll};
-use crate::rules::relabel::{
+use crate::relabel::relabel::ParsedRelabelConfig;
+use crate::relabel::RelabelAction::{LabelDrop, LabelKeep, LabelMap, LabelMapAll};
+use crate::relabel::{
     labels_to_string, new_graphite_label_rules, DebugStep, GraphiteLabelRule,
     GraphiteMatchTemplate, IfExpression,
 };
@@ -15,6 +14,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
+
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum RelabelAction {
@@ -108,6 +108,7 @@ pub(crate) struct RelabelConfig {
     pub if_expr: Option<IfExpression>,
     pub action: RelabelAction,
     pub source_labels: Vec<String>,
+    #[serde(defauult=";")]
     pub separator: String,
     pub target_label: String,
     pub regex: Option<Regex>,
@@ -300,6 +301,8 @@ pub fn parse_relabel_config(rc: RelabelConfig) -> Result<ParsedRelabelConfig, St
                 PromRegex::new(".*").unwrap(),
             )
         };
+
+
     let modulus = rc.modulus;
     let mut replacement = if !rc.replacement.is_empty() {
         rc.replacement.clone()
@@ -347,7 +350,7 @@ pub fn parse_relabel_config(rc: RelabelConfig) -> Result<ParsedRelabelConfig, St
         | LabelDrop | LabelKeep => {
             validate_labels(rc.action, &source_labels, &target_label)?;
             if rc.regex.is_some() {
-                return Err(format!("`regex` cannot be used for `action=keep_if_equal`"));
+                return Err(format!("`regex` cannot be used for `action={}`", rc.action));
             }
         }
         KeepEqual | DropEqual => validate_labels(rc.action, &source_labels, &target_label)?,
@@ -432,15 +435,11 @@ pub fn parse_relabel_config(rc: RelabelConfig) -> Result<ParsedRelabelConfig, St
         graphite_label_rules,
         regex: prom_regex,
         regex_original: regex_original_compiled,
-        string_replacer: Default::default(),
         has_capture_group_in_target_label: target_label.contains("$"),
         has_capture_group_in_replacement: replacement.contains("$"),
         has_label_reference_in_replacement: replacement.contains("{{"),
         replacement,
-        submatch_replacer: Default::default(),
     };
-    prc.string_replacer = FastStringTransformer::new(prc.replace_full_string_slow);
-    prc.submatch_replacer = FastStringTransformer::new(prc.replace_string_submatches_slow);
     Ok(prc)
 }
 

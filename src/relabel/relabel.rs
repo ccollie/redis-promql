@@ -1,6 +1,7 @@
 use std::fmt;
 use std::fmt::Display;
 use std::sync::OnceLock;
+use dynamic_lru_cache::DynamicCache;
 
 use enquote::enquote;
 use metricsql_engine::METRIC_NAME_LABEL;
@@ -10,8 +11,9 @@ use xxhash_rust::xxh3::xxh3_64;
 use crate::common::FastStringTransformer;
 
 use crate::common::regex_util::PromRegex;
-use crate::rules::relabel::{DEFAULT_REGEX_FOR_RELABEL_CONFIG, GraphiteLabelRule, GraphiteMatchTemplate, IfExpression};
-use crate::rules::relabel::relabel_config::{RelabelAction};
+use crate::relabel::{DEFAULT_REGEX_FOR_RELABEL_CONFIG, GraphiteLabelRule, GraphiteMatchTemplate, IfExpression};
+use crate::relabel::relabel_config::{RelabelAction};
+use crate::relabel::utils::{are_equal_label_values, concat_label_values, contains_all_label_values, get_label_value, set_label_value};
 use crate::storage::Label;
 
 /// DebugStep contains debug information about a single relabeling rule step
@@ -26,7 +28,6 @@ pub struct DebugStep {
     /// Out contains the output labels after the execution of the rule step
     pub(crate) out: String,
 }
-
 
 /// ParsedRelabelConfig contains parsed `relabel_config`.
 ///
@@ -52,10 +53,10 @@ pub struct ParsedRelabelConfig {
     pub has_capture_group_in_replacement: bool,
     pub has_label_reference_in_replacement: bool,
 
-    pub string_replacer: FastStringTransformer,
-    pub submatch_replacer: FastStringTransformer,
     pub graphite_match_template: Option<GraphiteMatchTemplate>,
     pub graphite_label_rules: Vec<GraphiteLabelRule>,
+    string_replacer_cache: DynamicCache<String, String>, // todo: AHash/gxhash
+    submatch_cache: DynamicCache<String, String>,
 }
 
 impl ParsedRelabelConfig {
@@ -80,15 +81,14 @@ impl ParsedRelabelConfig {
             graphite_label_rules,
             regex: prom_regex,
             regex_original: regex_original_compiled,
-            string_replacer: Default::default(),
+            submatch_cache: Default::default(),
             has_capture_group_in_target_label: target_label.contains("$"),
             has_capture_group_in_replacement: replacement.contains("$"),
             has_label_reference_in_replacement: replacement.contains("{{"),
             replacement: replacement.to_string(),
-            submatch_replacer: Default::default(),
+            string_replacer_cache: Default::default(),
         };
-        prc.string_replacer = FastStringTransformer::new(prc.replace_full_string_slow);
-        prc.submatch_replacer = FastStringTransformer::new(prc.replace_string_submatches_slow);
+        prc
     }
 
     pub fn apply_debug(&mut self, labels: &[Label], _labels_offset: usize) -> (Vec<Label>, DebugStep) {
@@ -105,7 +105,6 @@ impl ParsedRelabelConfig {
             if self.action == Keep {
                 // Drop the target on `if` mismatch for `action: keep`
                 labels.truncate(labels_offset);
-                return;
             }
             // Do not apply prc actions on `if` mismatch.
             return;
@@ -368,7 +367,16 @@ impl ParsedRelabelConfig {
             return s.to_string();
         }
         // Slow path - handle the rest of cases.
-        return self.string_replacer.transform(s);
+        return self.replace_string(s);
+    }
+
+    fn replace_string(&self, val: &str) -> String {
+        // how to avoid this alloc ?
+        let key = val.to_string();
+        let res = self.string_replacer_cache.get_or_insert(&key, || {
+            self.replace_full_string_slow(val)
+        });
+        res.into()
     }
 
     /// replaces s with the replacement if s matches '^regex$'.
@@ -379,6 +387,15 @@ impl ParsedRelabelConfig {
         self.expand_capture_groups(&self.replacement, s)
     }
 
+    fn replace_submatches(&self, val: &str) -> String {
+        // how to avoid this alloc ?
+        let key = val.to_string();
+        let res = self.submatch_cache.get_or_insert(&key, || {
+            self.replace_string_submatches_slow(val)
+        });
+        res.into()
+    }
+
     /// replaces all the regex matches with the replacement in s.
     pub(crate) fn replace_string_submatches_fast(&self, s: &str) -> String {
         let (prefix, complete) = self.regex_original.LiteralPrefix();
@@ -387,7 +404,7 @@ impl ParsedRelabelConfig {
             return s.to_string();
         }
         // Slow path - replace all the regex matches in s with the replacement.
-        self.submatch_replacer.transform(s)
+        self.replace_submatches(s)
     }
 
     /// replaces all the regex matches with the replacement in s.
@@ -447,7 +464,7 @@ fn handle_replace(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, labels_off
     }
     let value_str = if replacement == prc.replacement {
         // Fast path - the replacement wasn't modified, so it is safe calling stringReplacer.Transform.
-        prc.string_replacer.transform(source_str)
+        prc.replace_string(source_str)
     } else {
         // Slow path - the replacement has been modified, so the valueStr must be calculated
         // from scratch based on the new replacement value.
@@ -470,77 +487,8 @@ fn remove_empty_labels(labels: &[Label], labels_offset: usize) -> Vec<Label> {
 }
 
 /// removes labels with "__" in the beginning (except "__name__").
-pub(super) fn finalize_labels(dst: &mut Vec<Label>) {
+pub(crate) fn finalize_labels(dst: &mut Vec<Label>) {
     dst.retain(|label| !label.name.starts_with("__") || label.name == METRIC_NAME_LABEL);
-}
-
-fn are_equal_label_values(labels: &[Label], label_names: &[String]) -> bool {
-    if label_names.len() < 2 {
-        // logger.Panicf("BUG: expecting at least 2 label_names; got {}", label_names.len());
-        return false;
-    }
-    let label_value = get_label_value(labels, &label_names[0]);
-    for labelName in &label_names[1..] {
-        let v = get_label_value(labels, labelName);
-        if v != label_value {
-            return false;
-        }
-    }
-    return true;
-}
-
-fn concat_label_values(labels: &[Label], label_names: &[String], separator: &str) -> String {
-    if label_names.is_empty() {
-        return "".to_string();
-    }
-    let mut need_truncate = false;
-    let mut dst = String::with_capacity(64); // todo: get from pool
-    for label_name in label_names.iter() {
-        if let Some(label) = labels.iter().find(|lbl| lbl.name == label_name) {
-            dst.push_str(&label.value);
-            dst.push_str(separator);
-            need_truncate = true;
-        }
-    }
-    if need_truncate {
-        dst.truncate(dst.len() - separator.len());
-    }
-    dst
-}
-
-fn set_label_value(labels: &mut Vec<Label>, labels_offset: usize, name: &str, value: String) {
-    let mut sub = &labels[labels_offset..];
-    for label in sub.iter_mut() {
-        if label.name == name {
-            label.value = value;
-            return;
-        }
-    }
-    labels.push(Label {
-        name: name.to_string(),
-        value,
-    })
-}
-
-static EMPTY_STRING: &str = "";
-
-fn get_label_value<'a>(labels: &'a [Label], name: &str) -> &'a str {
-    for label in labels.iter() {
-        if label.name == name {
-            return &label.value;
-        }
-    }
-    return &EMPTY_STRING;
-}
-
-/// returns label with the given name from labels.
-fn get_label_by_name<'a>(labels: &'a mut [Label], name: &str) -> Option<&'a mut Label> {
-    for label in labels.iter_mut() {
-        if &label.name == name {
-            return Some(label);
-        }
-    }
-    return None;
 }
 
 
@@ -579,7 +527,7 @@ pub fn labels_to_string(labels: &[Label]) -> String {
     b
 }
 
-pub(super) fn fill_label_references(dst: &mut String, replacement: &str, labels: &[Label]) {
+pub(crate) fn fill_label_references(dst: &mut String, replacement: &str, labels: &[Label]) {
     let mut s = replacement;
     while !s.is_empty() {
         if let Some(n) = s.find("{{") {
@@ -626,17 +574,6 @@ pub fn is_valid_metric_name(name: &str) -> bool {
 pub fn is_valid_label_name(name: &str) -> bool {
     let re = unsupported_label_name_chars_regex();
     !re.is_match(name)
-}
-
-fn contains_all_label_values(labels: &[Label], target_label: &str, source_labels: &[String]) -> bool {
-    let target_label_value = get_label_value(labels, target_label);
-    for sourceLabel in source_labels.iter() {
-        let v = get_label_value(labels, sourceLabel);
-        if !target_label_value.contains(v) {
-            return false
-        }
-    }
-    true
 }
 
 static LABEL_NAME_SANITIZER: OnceLock<FastStringTransformer> = OnceLock::new();

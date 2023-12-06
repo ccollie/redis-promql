@@ -1,4 +1,4 @@
-use crate::rules::relabel::{GraphiteMatchTemplate, GraphiteReplaceTemplate};
+use crate::relabel::{GraphiteMatchTemplate, GraphiteReplaceTemplate};
 
 #[test]
 fn test_graphite_template_match_expand() {

@@ -4,7 +4,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use redis_module::{Context as RedisContext};
 use serde::{Deserialize, Serialize};
-use crate::common::types::{AToAny, Timestamp};
+use crate::common::types::{Timestamp};
 use crate::rules::alerts::{AlertingRule, AlertsError, AlertsResult, Querier, RecordingRule};
 use crate::rules::types::RawTimeSeries;
 
@@ -71,7 +71,7 @@ impl<'a> EvalContext<'a> {
 
 /// Rule represents alerting or recording_rule rule that has unique id, can be executed
 /// and updated with other Rule.
-pub trait Rule: Debug + AToAny {
+pub trait Rule: Debug {
     /// id returns unique id that may be used for identifying this Rule among others.
     fn id(&self) -> u64;
     fn rule_type(&self) -> RuleType;

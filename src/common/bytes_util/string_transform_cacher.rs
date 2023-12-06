@@ -84,7 +84,7 @@ impl<R: Clone> StringTransformCache<R> {
         inner.map.insert(s.to_string(), e);
 
         if need_cleanup(&mut inner.last_cleanup_time, ct) {
-            // Perform a global cleanup for fsm.m by removing items, which weren't accessed during the last 5 minutes.
+            // Perform a global cleanup for fsm.m by removing items which weren't accessed during the last 5 minutes.
             let deadline = (ct as u64 - CACHE_EXPIRE_DURATION.as_millis() as u64) as Timestamp;
             inner.map.retain(|_k, v| v.last_access_time >= deadline);
         }

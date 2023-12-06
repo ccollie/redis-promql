@@ -1,16 +1,16 @@
 use dynamic_lru_cache::DynamicCache;
 use regex::Regex;
 use crate::common::regex_util::PromRegex;
-use crate::relabel::actions::regex_parse::parse_regex;
+use crate::relabel::regex_parse::parse_regex;
 
 pub(crate) struct StringReplacer {
     pub(crate) regex: PromRegex,
     pub(crate) replacement: String,
-    cache: DynamicCache<String, String>, // todo: AHash/gxhash
-    regex_original: Regex,
-    regex_anchored: Regex,
+    pub(crate) regex_original: Regex,
+    pub(crate) regex_anchored: Regex,
     has_capture_group_in_replacement: bool,
     has_label_reference_in_replacement: bool,
+    cache: DynamicCache<String, String>, // todo: AHash/gxhash
 }
 
 
@@ -31,10 +31,14 @@ impl StringReplacer {
         })
     }
 
+    pub fn is_match(&self, s: &str) -> bool {
+        self.regex.match_string(s)
+    }
+
     /// replaces s with the replacement if s matches '^regex$'.
     ///
     /// s is returned as is if it doesn't match '^regex$'.
-    pub(crate) fn replace_full_string_fast(&self, s: &str) -> String {
+    pub(crate) fn replace_fast(&self, s: &str) -> String {
         // todo: use a COW here
         let (prefix, complete) = self.regex_original.LiteralPrefix();
         let replacement = &self.replacement;
@@ -82,7 +86,7 @@ impl StringReplacer {
         // how to avoid this alloc ?
         let key = val.to_string();
         let res = self.cache.get_or_insert(&key, || {
-            self.replace_full_string_slow(val)
+            self.replace_slow(val)
         });
         res.into()
     }
@@ -90,12 +94,12 @@ impl StringReplacer {
     /// replaces s with the replacement if s matches '^regex$'.
     ///
     /// s is returned as is if it doesn't match '^regex$'.
-    pub fn replace_full_string_slow(&self, s: &str) -> String {
+    pub fn replace_slow(&self, s: &str) -> String {
         // Slow path - regexp processing
         self.expand_capture_groups(&self.replacement, s)
     }
 
-    fn expand_capture_groups(&self, template: &str, source: &str) -> String {
+    pub fn expand_capture_groups(&self, template: &str, source: &str) -> String {
         if let Some(captures) = self.regex_anchored.captures(source) {
             let mut s = String::with_capacity(template.len() + 16);
             captures.expand(template, &mut s);

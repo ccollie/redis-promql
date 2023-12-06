@@ -70,7 +70,7 @@ pub(crate) fn get_match_func_for_or_suffixes(or_values: Vec<String>) -> StringMa
     if or_values.len() == 1 {
         let mut or_values = or_values;
         let v = or_values.remove(0);
-        StringMatchHandler::Literal(v)
+        StringMatchHandler::literal(v)
     } else {
         // aho-corasick ?
         StringMatchHandler::Alternates(or_values)
@@ -374,12 +374,12 @@ pub(crate) fn get_optimized_re_match_func(
     expr: &str,
 ) -> (StringMatchHandler, String, usize) {
     if expr == ".*" {
-        return (StringMatchHandler::DotStar, "".to_string(), FULL_MATCH_COST);
+        return (StringMatchHandler::dot_star(), "".to_string(), FULL_MATCH_COST);
     }
     if expr == ".+" {
         // '.+'
         return (
-            StringMatchHandler::DotPlus,
+            StringMatchHandler::dot_plus(),
             "".to_string(),
             FULL_MATCH_COST,
         );
@@ -412,12 +412,12 @@ fn get_optimized_re_match_func_ext(
 ) -> Option<(StringMatchHandler, String, usize)> {
     if is_dot_star(sre) {
         // '.*'
-        return Some((StringMatchHandler::DotStar, "".to_string(), FULL_MATCH_COST));
+        return Some((StringMatchHandler::dot_star(), "".to_string(), FULL_MATCH_COST));
     }
     if is_dot_star(sre) {
         // '.+'
         return Some((
-            StringMatchHandler::DotPlus,
+            StringMatchHandler::dot_plus(),
             "".to_string(),
             FULL_MATCH_COST,
         ));
@@ -434,7 +434,7 @@ fn get_optimized_re_match_func_ext(
             }
             let s = literal_to_string(&sre);
             // Literal match
-            return Some((StringMatchHandler::literal(s.clone()), s, LITERAL_MATCH_COST));
+            return Some((StringMatchHandler::literal(&s), s, LITERAL_MATCH_COST));
         }
         HirKind::Concat(subs) => {
             if subs.len() == 2 {
@@ -464,7 +464,7 @@ fn get_optimized_re_match_func_ext(
                     if is_dot_star(first) {
                         // '.*suffix'
                         return Some((
-                            StringMatchHandler::suffix(suffix.clone(), true),
+                            StringMatchHandler::suffix(&suffix, true),
                             suffix,
                             SUFFIX_MATCH_COST,
                         ));
@@ -472,7 +472,7 @@ fn get_optimized_re_match_func_ext(
                     if is_dot_plus(first) {
                         // '.+suffix'
                         return Some((
-                            StringMatchHandler::suffix(suffix.clone(), false),
+                            StringMatchHandler::suffix(&suffix, false),
                             suffix,
                             SUFFIX_MATCH_COST,
                         ));
@@ -578,25 +578,25 @@ fn literal_to_string(sre: &Hir) -> String {
 
 pub(super) fn get_prefix_matcher(prefix: &str) -> StringMatchHandler {
     if prefix == ".*" {
-        return StringMatchHandler::DotStar;
+        return StringMatchHandler::dot_star();
     }
     if prefix == ".+" {
-        return StringMatchHandler::DotPlus;
+        return StringMatchHandler::dot_plus();
     }
-    StringMatchHandler::starts_with(prefix.to_string())
+    StringMatchHandler::starts_with(prefix)
 }
 
 pub(super) fn get_suffix_matcher(suffix: &str) -> Result<StringMatchHandler, RegexError> {
     if !suffix.is_empty() {
         if suffix == ".*" {
-            return Ok(StringMatchHandler::DotStar);
+            return Ok(StringMatchHandler::dot_star());
         }
         if suffix == ".+" {
-            return Ok(StringMatchHandler::DotPlus);
+            return Ok(StringMatchHandler::dot_plus());
         }
         if escape_regex(suffix) == suffix {
             // Fast path - pr contains only literal prefix such as 'foo'
-            return Ok(StringMatchHandler::Literal(suffix.to_string()));
+            return Ok(StringMatchHandler::literal(suffix));
         }
         let or_values = get_or_values(suffix);
         if !or_values.is_empty() {

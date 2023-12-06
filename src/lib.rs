@@ -14,18 +14,19 @@ mod globals;
 mod index;
 mod module;
 mod provider;
-mod relabel;
 mod rules;
 mod storage;
 
 #[cfg(test)]
 mod tests;
+pub mod relabel;
+
 
 use crate::globals::get_timeseries_index;
 use module::*;
 pub const REDIS_PROMQL_VERSION: i32 = 1;
 pub const MODULE_NAME: &str = "redis_promql";
-pub const MODULE_TYPE: &str = "RedisMetricsqlTimeseries";
+pub const MODULE_TYPE: &str = "RedisMetricsQLTimeseries";
 
 #[config_changed_event_handler]
 fn config_changed_event_handler(ctx: &RedisContext, changed_configs: &[&str]) {

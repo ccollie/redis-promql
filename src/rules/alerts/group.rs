@@ -10,7 +10,7 @@ use ahash::AHashMap;
 
 use enquote::enquote;
 use metricsql_engine::TimestampTrait;
-use metricsql_parser::common::METRIC_NAME;
+use metricsql_parser::prelude::METRIC_NAME;
 use serde::{Deserialize, Serialize};
 use xxhash_rust::xxh3::Xxh3;
 use crate::common::current_time_millis;
@@ -273,7 +273,7 @@ impl Group {
         for err in errs {
             if err != nil {
                 let msg = format!("group {}: {:?}", self.name, err);
-                ctx.log_warning(&msg);
+                tracing::warn!("{}", msg);
             }
         }
         self.last_evaluation = start
@@ -295,7 +295,7 @@ impl Group {
             self.first_run.store(false, Ordering::Acquire);
             if let Err(err) = self.restore(ctx, qb, eval_ts, settings.look_back) {
                 let msg = format!("error while restoring ruleState for group {}: {:?}", &self.name, err);
-                ctx.log_warning(&msg);
+                tracing::warn!("{}", msg);
             }
         }
 
@@ -328,7 +328,7 @@ impl Group {
             // calculate the min timestamp on the evaluationInterval
             let interval_start = timestamp.truncate(self.interval);
             let ts = interval_start.add(offset);
-            if timestamp.Before(ts) {
+            if timestamp < ts {
                 // if passed timestamp is before the expected evaluation offset,
                 // then we should adjust it to the previous evaluation round.
                 // E.g. request with evaluationInterval=1h and evaluationOffset=30m
@@ -362,9 +362,9 @@ pub(crate) fn merge_labels(group_name: &str, rule_name: &str, set1: &Vec<Label>,
     for label in set2.iter() {
         let prev_v = r.iter().find(|x| x.name == label.name);
         if prev_v.is_some() {
-            logger.Infof("label {k}={prev_v} for rule {}.{} overwritten with external label {k}={v}",
-                         group_name,
-                         rule_name)
+            tracing::info!("label {k}={prev_v} for rule {}.{} overwritten with external label {k}={v}",
+                  group_name,
+                  rule_name);
         }
         r.push(label.clone());
     }

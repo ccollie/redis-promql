@@ -24,6 +24,7 @@ use url::Url;
 use crate::common;
 use crate::common::humanize::humanize_bytes;
 use htmlescape::encode_minimal;
+use metricsql_parser::label::Labels;
 
 pub type FuncMap = HashMap<String, Func>;
 

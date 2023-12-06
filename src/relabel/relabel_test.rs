@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod test {
     use regex::Regex;
-    use crate::rules::relabel::{DebugStep, labels_to_string, ParsedRelabelConfig, sanitize_metric_name};
-    use crate::rules::relabel::relabel::{fill_label_references, finalize_labels};
-    use crate::rules::relabel::relabel_config::{parse_relabel_config, parse_relabel_configs_data, ParsedConfigs, RelabelAction, RelabelConfig};
-    use crate::rules::relabel::utils::new_labels_from_string;
+    use crate::relabel::{DebugStep, labels_to_string, ParsedRelabelConfig, sanitize_metric_name};
+    use crate::relabel::relabel::{fill_label_references, finalize_labels};
+    use crate::relabel::relabel_config::{parse_relabel_config, parse_relabel_configs_data, ParsedConfigs, RelabelAction, RelabelConfig};
+    use crate::relabel::utils::new_labels_from_string;
     use crate::storage::Label;
 
     #[test]

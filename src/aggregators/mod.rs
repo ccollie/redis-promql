@@ -3,8 +3,6 @@
 // License: Apache License 2.0
 
 use redis_module::{RedisError, RedisString};
-use serde::{Deserializer, Serializer};
-use serde::ser::SerializeSeq;
 
 type Time = i64;
 type Value = f64;

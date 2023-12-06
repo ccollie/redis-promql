@@ -7,6 +7,7 @@ use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 use std::sync::{Arc, OnceLock};
 use crate::common::bytes_util::FastRegexMatcher;
+use crate::common::METRIC_NAME_LABEL;
 use crate::common::regex_util::match_handlers::StringMatchHandler;
 
 /// TagFilters represents filters used for filtering tags.
@@ -36,9 +37,9 @@ impl TagFilters {
         self.0.sort_by(|a, b| a.partial_cmp(b).unwrap());
     }
 
-    /// Add adds the given tag filter to tfs.
+    /// Adds the given tag filter.
     ///
-    /// MetricGroup must be encoded with nil key.
+    /// metric_group must be encoded with nil key.
     pub fn add(
         &mut self,
         key: &str,
@@ -52,9 +53,8 @@ impl TagFilters {
         let mut value_ = value;
         // Verify whether tag filter is empty.
         if value.is_empty() {
-            // Substitute an empty tag value with the negative match
-            // of `.+` regexp in order to filter out all the values with
-            // the given tag.
+            // Substitute an empty tag value with the negative match of `.+` regexp in order to
+            // filter out all the values with the given tag.
             is_negative = !is_negative;
             is_regexp = true;
             value_ = ".+";
@@ -74,7 +74,7 @@ impl TagFilters {
             .map_err(|err| format!("cannot parse tag filter: {}", err))?;
 
         if tf.is_negative && tf.is_empty_match {
-            // We have {key!~"|foo"} tag filter, which matches non=empty key values.
+            // We have {key!~"|foo"} tag filter, which matches non-empty key values.
             // So add {key=~".+"} tag filter in order to enforce this.
             // See https://github.com/VictoriaMetrics/VictoriaMetrics/issues/546 for details.
             let tf_new = TagFilter::new(key, ".+", false, true)
@@ -175,9 +175,9 @@ impl TagFilter {
                 tf.is_regexp = false;
                 tf.is_literal = true;
                 tf.prefix_match = if tf.is_negative {
-                    StringMatchHandler::literal_mismatch(prefix.clone())
+                    StringMatchHandler::literal_mismatch(prefix)
                 } else {
-                    StringMatchHandler::literal(prefix.clone())
+                    StringMatchHandler::literal(prefix)
                 };
             }
         }
@@ -274,7 +274,7 @@ impl Display for TagFilter {
         };
 
         if self.key.len() == 0 {
-            return write!(f, "__name__{op}{value}");
+            return write!(f, "{METRIC_NAME_LABEL}{op}{value}");
         }
         write!(f, "{}{}{}", self.key, op, value)
     }

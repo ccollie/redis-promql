@@ -20,6 +20,12 @@ pub struct PromRegex {
     suffix_matcher: StringMatchHandler,
 }
 
+impl Default for PromRegex {
+    fn default() -> Self {
+        Self::new(".*").unwrap()
+    }
+}
+
 impl PromRegex {
     pub fn new(expr: &str) -> Result<PromRegex, RegexError> {
         let (prefix, suffix) = simplify(expr)?;
@@ -36,16 +42,11 @@ impl PromRegex {
     /// The pr is automatically anchored to the beginning and to the end
     /// of the matching string with '^' and '$'.
     pub fn match_string(&self, s: &str) -> bool {
-        let good = self.prefix_matcher.matches(s);
-        if !good {
-            return false
+        if self.prefix_matcher.matches(s) {
+            if let Some(suffix) = s.strip_prefix(&self.prefix) {
+                return self.suffix_matcher.matches(suffix);
+            }
         }
-        let suffix = s.strip_prefix(&self.prefix);
-        if suffix.is_none() {
-            // Fast path - s has another prefix than pr.
-            return false;
-        }
-        let s = suffix.unwrap();
-        self.suffix_matcher.matches(s)
+        false
     }
 }

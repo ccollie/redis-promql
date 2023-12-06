@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod test {
 	use metricsql_engine::parse_metric_selector;
-	use crate::rules::relabel::IfExpression;
-	use crate::rules::relabel::utils::new_labels_from_string;
+	use crate::relabel::IfExpression;
+	use crate::relabel::utils::new_labels_from_string;
 
 	#[test]
 	fn test_if_expression_parse_failure() {

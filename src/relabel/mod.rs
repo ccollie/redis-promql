@@ -9,6 +9,10 @@ mod graphite_test;
 mod if_expression_test;
 mod relabel_test;
 mod utils;
+mod actions;
+mod submatch_replacer;
+mod string_replacer;
+mod regex_parse;
 
 pub use if_expression::IfExpression;
 pub use label_filter::*;

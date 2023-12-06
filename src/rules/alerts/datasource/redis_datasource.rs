@@ -6,7 +6,7 @@ use crate::globals::get_query_context;
 use crate::rules::alerts::{
     AlertsError, AlertsResult, DataSourceType, Querier, QuerierBuilder, QuerierParams, QueryResult,
 };
-use crate::ts::Timestamp;
+use crate::storage::Timestamp;
 use metricsql_engine::execution::query::{
     query as engine_query, query_range as engine_query_range,
 };

@@ -3,7 +3,7 @@ use std::fmt::Display;
 use std::time::Duration;
 use chrono::DateTime;
 use metricsql_engine::{parse_metric_selector, TimestampTrait};
-use metricsql_parser::common::Matchers;
+use metricsql_parser::prelude::Matchers;
 use metricsql_parser::parser::{parse_duration_value, parse_number};
 use redis_module::{RedisError, RedisResult, RedisString};
 use crate::common::current_time_millis;

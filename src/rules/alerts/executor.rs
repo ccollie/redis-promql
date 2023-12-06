@@ -109,7 +109,7 @@ impl Executor {
             let alerting_rule = rule.as_any().downcast_ref::<AlertingRule>().unwrap();
             return self.send_notifications(alerting_rule, ts, resolve_duration, settings.resend_delay);
         }
-        return err_gr.Err();
+        Ok(())
     }
 
     fn push_to_rw(&mut self, rule: &impl Rule, tss: &[RawTimeSeries]) -> AlertsResult<()> {

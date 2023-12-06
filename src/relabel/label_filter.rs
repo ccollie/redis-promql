@@ -115,7 +115,7 @@ impl LabelFilter {
     }
 }
 
-pub(super) fn to_canonical_label_name(label_name: &str) -> &str {
+pub(crate) fn to_canonical_label_name(label_name: &str) -> &str {
     if label_name == "__name__" {
         return "";
     }

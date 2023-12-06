@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use crate::relabel::actions::Action;
+use crate::relabel::IfExpression;
 use crate::relabel::utils::are_equal_label_values;
 use crate::storage::Label;
 
@@ -12,13 +13,26 @@ use crate::storage::Label;
 /// Would drop the entry if `foo` value equals `bar` value
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DropIfEqualAction {
+    pub if_expr: Option<IfExpression>,
     pub source_labels: Vec<String>,
 }
 
+impl DropIfEqualAction {
+    pub fn new(source_labels: Vec<String>, if_expression: Option<IfExpression>) -> Self {
+        Self {
+            if_expr: if_expression,
+            source_labels,
+        }
+    }
+}
 impl Action for DropIfEqualAction {
     fn apply(&self, labels: &mut Vec<Label>, labels_offset: usize) {
         if are_equal_label_values(labels, &self.source_labels) {
             labels.truncate(labels_offset);
         }
+    }
+
+    fn filter(&self, labels: &[Label]) -> bool {
+        self.if_expr.is_some_and(|if_expr| if_expr.is_match(labels))
     }
 }

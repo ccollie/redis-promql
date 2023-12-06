@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fmt::Display;
 use std::time::Duration;
 use ahash::AHashMap;
 use serde::{Deserialize, Serialize};

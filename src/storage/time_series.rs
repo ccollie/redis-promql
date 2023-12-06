@@ -1,4 +1,4 @@
-use super::{Chunk, ChunkCompression, Encoding, Label, merge_by_capacity, Sample, TimeSeriesChunk, TimeSeriesOptions, validate_chunk_size};
+use super::{Chunk, ChunkCompression, Label, merge_by_capacity, Sample, TimeSeriesChunk, TimeSeriesOptions, validate_chunk_size};
 use crate::common::types::{PooledTimestampVec, PooledValuesVec, Timestamp};
 use crate::error::{TsdbError, TsdbResult};
 use crate::storage::constants::{DEFAULT_CHUNK_SIZE_BYTES, SPLIT_FACTOR};

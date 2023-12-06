@@ -20,7 +20,6 @@ mod utils;
 mod series_data;
 mod defrag;
 
-use get_size::GetSize;
 use crate::error::{TsdbError, TsdbResult};
 pub(super) use chunk::*;
 pub(crate) use constants::*;

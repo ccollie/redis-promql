@@ -1,7 +1,7 @@
 use crate::common::regex_util::PromRegex;
 use crate::rules::alerts::{AlertsError, AlertsResult};
-use crate::rules::relabel::label_filter::to_canonical_label_name;
-use crate::rules::relabel::{LabelFilter, LabelFilterOp, LabelMatchers};
+use crate::relabel::label_filter::to_canonical_label_name;
+use crate::relabel::{LabelFilter, LabelFilterOp, LabelMatchers};
 use metricsql_parser::ast::Expr;
 use metricsql_parser::prelude::MetricExpr;
 use serde::{Deserialize, Serialize};
@@ -19,13 +19,10 @@ use crate::storage::Label;
 /// if:
 /// - 'foo{bar="baz"}'
 /// - '{x=~"y"}'
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct IfExpression(pub Vec<IfExpressionMatcher>);
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IfExpression(pub(crate) Vec<IfExpressionMatcher>);
 
 impl IfExpression {
-    pub fn default() -> Self {
-        IfExpression(vec![])
-    }
     pub fn new(ies: Vec<IfExpressionMatcher>) -> Self {
         IfExpression(ies)
     }
@@ -66,7 +63,7 @@ type BaseLabelFilter = metricsql_parser::prelude::LabelFilter;
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct IfExpressionMatcher {
     s: String,
-    lfss: Vec<LabelMatchers>,
+    matchers_list: Vec<LabelMatchers>,
 }
 
 impl IfExpressionMatcher {
@@ -77,10 +74,10 @@ impl IfExpressionMatcher {
 
         match expr {
             Expr::MetricExpression(me) => {
-                let lfss = metric_expr_to_label_filterss(&me)?;
+                let matchers_list = metric_expr_to_label_filter_list(&me)?;
                 let ie = IfExpressionMatcher {
                     s: s.to_string(),
-                    lfss,
+                    matchers_list,
                 };
                 Ok(ie)
             }
@@ -92,7 +89,7 @@ impl IfExpressionMatcher {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.lfss.is_empty()
+        self.matchers_list.is_empty()
     }
 
     /// Match returns true if ie matches the given labels.
@@ -100,7 +97,7 @@ impl IfExpressionMatcher {
         if self.is_empty() {
             return true;
         }
-        self.lfss.iter().any(|lfs| match_label_filters(lfs, labels))
+        self.matchers_list.iter().any(|lfs| match_label_filters(lfs, labels))
     }
 }
 
@@ -119,7 +116,7 @@ fn match_label_filters(lfs: &[LabelFilter], labels: &[Label]) -> bool {
     return true;
 }
 
-fn metric_expr_to_label_filterss(me: &MetricExpr) -> AlertsResult<Vec<LabelMatchers>> {
+fn metric_expr_to_label_filter_list(me: &MetricExpr) -> AlertsResult<Vec<LabelMatchers>> {
     let mut lfss_new: Vec<LabelMatchers> = Vec::with_capacity(me.label_filters.len());
     for lfs in me.label_filters.iter() {
         let mut lfs_new: Vec<LabelFilter> = Vec::with_capacity(lfs.len());

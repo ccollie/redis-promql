@@ -1,8 +1,8 @@
 use crate::rules::alerts::{AlertsError, AlertsResult, Querier};
 use crate::rules::types::{new_time_series, RawTimeSeries};
 use crate::rules::{Rule, RuleStateEntry, RuleType};
-use crate::ts::{Labels, Timestamp};
-use metricsql_engine::METRIC_NAME_LABEL;
+use crate::storage::{Timestamp};
+use metricsql_engine::{Labels, METRIC_NAME_LABEL};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU64;

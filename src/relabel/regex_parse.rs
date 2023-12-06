@@ -3,7 +3,7 @@ use regex::Regex;
 use crate::common::regex_util::{PromRegex, remove_start_end_anchors, simplify};
 use crate::relabel::{DEFAULT_ORIGINAL_REGEX_FOR_RELABEL_CONFIG, DEFAULT_REGEX_FOR_RELABEL_CONFIG};
 
-pub(super) fn parse_regex(regex: Option<Regex>, strip_anchors: bool) -> Result<(Regex, Regex, PromRegex), String> {
+pub(in crate::relabel) fn parse_regex(regex: Option<Regex>, strip_anchors: bool) -> Result<(Regex, Regex, PromRegex), String> {
     let reg_str = regex.as_str();
     let (regex_anchored, regex_original_compiled, prom_regex) =
         if !is_empty_regex(&regex) && !is_default_regex(&reg_str) {
