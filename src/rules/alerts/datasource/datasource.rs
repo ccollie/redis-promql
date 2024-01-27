@@ -6,7 +6,7 @@ use crate::common::types::Timestamp;
 use crate::rules::alerts::{AlertsResult, DataSourceType};
 use crate::storage::Label;
 
-/// Querier trait wraps Query and query_range methods
+/// Querier trait wraps query and query_range methods
 pub trait Querier {
     /// query executes instant request with the given query at the given ts.
     /// It returns list of Metric in response
@@ -23,8 +23,7 @@ pub struct QueryResult {
     /// Data contains list of received Metric
     pub(crate) data: Vec<Metric>,
     /// SeriesFetched contains amount of time series processed by provider during query evaluation.
-    /// If nil, then this feature is not supported by the provider.
-    /// SeriesFetched is supported by VictoriaMetrics since v1.90.
+    /// If 0, then this feature is not supported by the provider.
     pub(crate) series_fetched: usize
 }
 
@@ -54,7 +53,7 @@ pub struct Metric {
     pub(crate) values: Vec<f64>
 }
 
-// teemporary. Please remove
+// temporary. Please remove
 pub type DatasourceMetric = Metric;
 
 static EMPTY_STRING: &str = "";

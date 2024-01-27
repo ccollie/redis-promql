@@ -31,7 +31,7 @@ impl ReplaceAction {
                if_expression: Option<IfExpression>
     ) -> Result<Self, String> {
         if source_labels.is_empty() {
-            return Err(format!("missing `source_labels` for `action=replace`"));
+            return Err("missing `source_labels` for `action=replace`".to_string());
         }
 
         let (regex_anchored, _, regex_prom) = parse_regex(regex, true)?;

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::default::Default;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
@@ -74,7 +73,7 @@ impl RecordingRule {
     }
 
     fn to_time_series(&self, m: &Metric) -> RawTimeSeries {
-        let mut labels = HashMap::with_capacity(m.labels.len() + 1);
+        let mut labels =AHashMap::with_capacity(m.labels.len() + 1);
         for label in m.labels.iter() {
             labels.insert(label.name.clone(), label.value.clone())
         }
@@ -83,7 +82,7 @@ impl RecordingRule {
         for (k, v) in self.labels {
             labels.insert(k.clone(), v.clone())
         }
-        return new_time_series(&m.values, &m.timestamps, labels);
+        return new_time_series(m.key, &m.values, &m.timestamps, labels);
     }
 
     fn run_query(&self, ts: Timestamp) -> AlertsResult<Vec<Metric>> {

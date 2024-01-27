@@ -25,10 +25,10 @@ impl ReplaceAllAction {
                if_expression: Option<IfExpression>
     ) -> Result<Self, String> {
         if source_labels.is_empty() {
-            return Err(format!("missing `source_labels` for `action=replace_all`"));
+            return Err("missing `source_labels` for `action=replace_all`".to_string());
         }
 
-        let regex = regex.ok_or_else(|| format!("missing `regex` for `action=replace_all`"))?;
+        let regex = regex.ok_or_else(|| "missing `regex` for `action=replace_all`".to_string())?;
         let submatch_replacer = SubmatchReplacer::new(regex.clone(), replacement.clone())?;
         Ok(Self {
             source_labels,

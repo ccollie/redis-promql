@@ -1,6 +1,6 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::RwLock;
+use std::sync::{RwLock, RwLockWriteGuard};
 use std::time::Duration;
 use redis_module::{ContextGuard, RedisString, ThreadSafeContext};
 use crate::index::RedisContext;
@@ -82,9 +82,9 @@ impl WriteQueue {
         self.closed.load(Ordering::SeqCst)
     }
 
-    /// push adds timeseries into queue for writing into remote storage.
-    /// Push returns and error if client is stopped or if queue is full.
-    pub fn push(&self, s: Vec<TimeSeries>) -> Result<(), String> {
+    fn add_internal<F>(&self, f: F) -> Result<(), String>
+    where F: FnOnce(&mut RwLockWriteGuard<Vec<TimeSeries>>) -> Result<(), String>
+    {
         if self.is_closed() {
             return Err("client is closed".to_string())
         }
@@ -93,8 +93,24 @@ impl WriteQueue {
             self.flush()?;
             // Err()
         }
-        writer.extend(s.into_iter());
+        f(&mut writer)?;
         Ok(())
+    }
+
+    pub fn add(&self, ts: TimeSeries) -> Result<(), String> {
+        self.add_internal(|writer| {
+            writer.push(ts);
+            Ok(())
+        })
+    }
+
+    /// push adds timeseries into queue for writing into remote storage.
+    /// Push returns and error if client is stopped or if queue is full.
+    pub fn push(&self, s: Vec<TimeSeries>) -> Result<(), String> {
+        self.add_internal(|writer| {
+            writer.extend(s.into_iter());
+            Ok(())
+        })
     }
 
     /// Close stops the client and waits for all goroutines to exit.

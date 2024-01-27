@@ -93,7 +93,7 @@ fn get_generator_impl(
 }
 
 // Generates time series data from the given type.
-pub(crate) fn generate_series_data(options: &GeneratorOptions) -> Result<SeriesData, String> {
+pub fn generate_series_data(options: &GeneratorOptions) -> Result<SeriesData, String> {
     let mut ts = SeriesData::new(options.samples);
 
     let interval = if let Some(interval) = options.interval {

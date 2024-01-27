@@ -12,7 +12,7 @@ use crate::rules::alerts::template::{
     clone_template, funcs_with_query, get_template, get_with_funcs, QueryFn,
 };
 use crate::rules::alerts::{AlertsError, AlertsResult, ErrorGroup};
-use crate::rules::relabel::ParsedRelabelConfig;
+use crate::relabel::ParsedRelabelConfig;
 use crate::storage::Label;
 
 /// AlertState is the state of an alert.

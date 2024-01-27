@@ -55,8 +55,8 @@ pub struct ParsedRelabelConfig {
 
     pub graphite_match_template: Option<GraphiteMatchTemplate>,
     pub graphite_label_rules: Vec<GraphiteLabelRule>,
-    string_replacer_cache: DynamicCache<String, String>, // todo: AHash/gxhash
-    submatch_cache: DynamicCache<String, String>,
+    pub(crate) string_replacer_cache: DynamicCache<String, String>, // todo: AHash/gxhash
+    pub(crate) submatch_cache: DynamicCache<String, String>,
 }
 
 impl ParsedRelabelConfig {
@@ -74,12 +74,12 @@ impl ParsedRelabelConfig {
             separator: separator.to_string(),
             target_label: target_label.to_string(),
             regex_anchored,
-            modulus,
+            modulus: 0,
             action,
             r#if: if_expr.clone(),
             graphite_match_template,
-            graphite_label_rules,
-            regex: prom_regex,
+            graphite_label_rules: vec![],
+            regex: PromRegex::default(),
             regex_original: regex_original_compiled,
             submatch_cache: Default::default(),
             has_capture_group_in_target_label: target_label.contains("$"),

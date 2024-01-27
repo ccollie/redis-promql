@@ -1,6 +1,5 @@
 use crate::common::regex_util::{remove_start_end_anchors, simplify, PromRegex};
 use crate::relabel::relabel::ParsedRelabelConfig;
-use crate::relabel::RelabelAction::{LabelDrop, LabelKeep, LabelMap, LabelMapAll};
 use crate::relabel::{
     labels_to_string, new_graphite_label_rules, DebugStep, GraphiteLabelRule,
     GraphiteMatchTemplate, IfExpression,
@@ -14,6 +13,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
+use dynamic_lru_cache::DynamicCache;
 
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -322,27 +322,27 @@ pub fn parse_relabel_config(rc: RelabelConfig) -> Result<ParsedRelabelConfig, St
     match rc.action {
         Graphite => {
             if graphite_match_template.is_none() {
-                return Err(format!("missing `match` for `action=graphite`; see https://docs.victoriametrics.com/vmagent.html#graphite-relabeling"));
+                return Err("missing `match` for `action=graphite`; see https://docs.victoriametrics.com/vmagent.html#graphite-relabeling".to_string());
             }
             if graphite_label_rules.is_empty() {
-                return Err(format!("missing `labels` for `action=graphite`; see https://docs.victoriametrics.com/vmagent.html#graphite-relabeling"));
+                return Err("missing `labels` for `action=graphite`; see https://docs.victoriametrics.com/vmagent.html#graphite-relabeling".to_string());
             }
             if !rc.source_labels.is_empty() {
-                return Err(format!("`source_labels` cannot be used with `action=graphite`; see https://docs.victoriametrics.com/vmagent.html#graphite-relabeling"));
+                return Err("`source_labels` cannot be used with `action=graphite`; see https://docs.victoriametrics.com/vmagent.html#graphite-relabeling".to_string());
             }
             if !rc.target_label.is_empty() {
-                return Err(format!("`target_label` cannot be used with `action=graphite`; see https://docs.victoriametrics.com/vmagent.html#graphite-relabeling"));
+                return Err("`target_label` cannot be used with `action=graphite`; see https://docs.victoriametrics.com/vmagent.html#graphite-relabeling".to_string());
             }
             if !rc.replacement.is_empty() {
-                return Err(format!("`replacement` cannot be used with `action=graphite`; see https://docs.victoriametrics.com/vmagent.html#graphite-relabeling"));
+                return Err("`replacement` cannot be used with `action=graphite`; see https://docs.victoriametrics.com/vmagent.html#graphite-relabeling".to_string());
             }
             if rc.regex.is_some() {
-                return Err(format!("`regex` cannot be used for `action=graphite`; see https://docs.victoriametrics.com/vmagent.html#graphite-relabeling"));
+                return Err("`regex` cannot be used for `action=graphite`; see https://docs.victoriametrics.com/vmagent.html#graphite-relabeling".to_string());
             }
         }
         Replace => {
             if target_label.is_empty() {
-                return Err(format!("missing `target_label` for `action=replace`"));
+                return Err("missing `target_label` for `action=replace`".to_string());
             }
         }
         ReplaceAll => validate_labels(rc.action, &source_labels, &target_label)?,
@@ -356,12 +356,12 @@ pub fn parse_relabel_config(rc: RelabelConfig) -> Result<ParsedRelabelConfig, St
         KeepEqual | DropEqual => validate_labels(rc.action, &source_labels, &target_label)?,
         Keep => {
             if source_labels.is_empty() && rc.if_expr.is_none() {
-                return Err(format!("missing `source_labels` for `action=keep`"));
+                return Err("missing `source_labels` for `action=keep`".to_string());
             }
         }
         Drop => {
             if source_labels.is_empty() && rc.if_expr.is_none() {
-                return Err(format!("missing `source_labels` for `action=drop`"));
+                return Err("missing `source_labels` for `action=drop`".to_string());
             }
         }
         HashMod => {
@@ -374,9 +374,7 @@ pub fn parse_relabel_config(rc: RelabelConfig) -> Result<ParsedRelabelConfig, St
         }
         KeepMetrics => {
             if is_empty_regex(&rc.regex) && rc.if_expr.is_none() {
-                return Err(format!(
-                    "`regex` must be non-empty for `action=keep_metrics`"
-                ));
+                return Err("`regex` must be non-empty for `action=keep_metrics`".to_string());
             }
             if source_labels.len() > 0 {
                 return Err(format!(
@@ -389,9 +387,7 @@ pub fn parse_relabel_config(rc: RelabelConfig) -> Result<ParsedRelabelConfig, St
         }
         DropMetrics => {
             if is_empty_regex(&rc.regex) && rc.if_expr.is_none() {
-                return Err(format!(
-                    "`regex` must be non-empty for `action=drop_metrics`"
-                ));
+                return Err("`regex` must be non-empty for `action=drop_metrics`".to_string());
             }
             if source_labels.len() > 0 {
                 return Err(format!(
@@ -422,7 +418,7 @@ pub fn parse_relabel_config(rc: RelabelConfig) -> Result<ParsedRelabelConfig, St
         }
     };
 
-    let mut prc = ParsedRelabelConfig {
+    let prc = ParsedRelabelConfig {
         rule_original: rule_original.to_string(),
         source_labels,
         separator: separator.to_string(),
@@ -433,12 +429,14 @@ pub fn parse_relabel_config(rc: RelabelConfig) -> Result<ParsedRelabelConfig, St
         r#if: rc.if_expr.clone(),
         graphite_match_template,
         graphite_label_rules,
+        string_replacer_cache: DynamicCache::new(64), // todo: pass in config ?
         regex: prom_regex,
         regex_original: regex_original_compiled,
         has_capture_group_in_target_label: target_label.contains("$"),
         has_capture_group_in_replacement: replacement.contains("$"),
         has_label_reference_in_replacement: replacement.contains("{{"),
         replacement,
+        submatch_cache: DynamicCache::new(64),
     };
     Ok(prc)
 }

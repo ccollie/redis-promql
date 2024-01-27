@@ -18,13 +18,13 @@ pub struct HashModAction {
 impl HashModAction {
     pub fn new(source_labels: Vec<String>, target_label: String, separator: String, modulus: u64, if_expression: Option<IfExpression>) -> Result<Self, String> {
         if source_labels.is_empty() {
-            return Err(format!("missing `source_labels` for `action=hashmod`"));
+            return Err("missing `source_labels` for `action=hashmod`".to_string());
         }
         if target_label.is_empty() {
-            return Err(format!("missing `target_label` for `action=hashmod`"));
+            return Err("missing `target_label` for `action=hashmod`".to_string());
         }
         if modulus == 0 {
-            return Err(format!("`modulus` must be greater than 0 for `action=hashmod`"));
+            return Err("`modulus` must be greater than 0 for `action=hashmod`".to_string());
         }
         Ok(Self { source_labels, target_label, separator, modulus, if_expr: if_expression })
     }

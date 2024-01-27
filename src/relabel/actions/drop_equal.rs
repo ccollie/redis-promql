@@ -15,7 +15,7 @@ pub struct DropEqualAction {
 impl DropEqualAction {
     pub fn new(source_labels: Vec<String>, target_label: String, separator: String, if_expression: Option<IfExpression>) -> Result<Self, String> {
         if source_labels.is_empty() {
-            return Err(format!("missing `source_labels` for `action=drop_equal`"));
+            return Err("missing `source_labels` for `action=drop_equal`".to_string());
         }
         Ok(Self {
             if_expr: if_expression,

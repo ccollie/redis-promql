@@ -529,15 +529,13 @@ impl Rule for AlertingRule {
 
     /// exec_range executes alerting rule on the given time range similarly to exec.
     /// It doesn't update internal states of the Rule and meant to be used just to get time series
-    /// for backfilling.
+    /// for back-filling.
     /// It returns ALERT and ALERT_FOR_STATE time series as a result.
     fn exec_range(&mut self, start: Timestamp, end: Timestamp) -> AlertsResult<Vec<RawTimeSeries>> {
         let res = self.querier.query_range(&self.expr, start, end)?;
         let mut result: Vec<RawTimeSeries> = vec![];
         let q_fn = |query: &str| -> AlertsResult<Vec<DatasourceMetric>> {
-            return Err(AlertsError::Generic(format!(
-                "`query` template isn't supported in replay mode"
-            )));
+            return Err(AlertsError::Generic("`query` template isn't supported in replay mode".to_string()));
         };
 
         for s in res.data.into_iter() {

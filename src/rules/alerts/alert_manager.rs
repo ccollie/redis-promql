@@ -17,14 +17,14 @@ pub struct Manager {
 }
 
 impl Manager {
-    fn start(&self, ctx: &Context, groups_cfg: &[GroupConfig]) -> AlertsResult<()> {
+    fn start(&mut self, ctx: &Context, groups_cfg: &[GroupConfig]) -> AlertsResult<()> {
         return self.update(ctx, groups_cfg, true)
     }
 
     fn start_group(&mut self, ctx: &Context, g: &Group, restore: bool) -> AlertsResult<()> {
         let id = g.ID();
         if restore {
-            g.start(ctx, self.notifiers, Arc::clone(&self.rw), m.rr)
+            g.start(ctx, self.notifiers, Arc::clone(&self.rw), self.rr)
         } else {
             g.start(ctx, self.notifiers, Arc::clone(&self.rw), nil)
         }
@@ -53,7 +53,7 @@ impl Manager {
             groups_registry.insert(ng.ID(), ng)
         }
 
-        if rr_present && m.rw == nil {
+        if rr_present && self.rw == nil {
             return fmt.Errorf("config contains recording rules but `-remoteWrite.url` isn't set")
         }
         if ar_present && self.notifiers == nil {
@@ -69,19 +69,21 @@ impl Manager {
         m.groupsMu.Lock();
         let to_delete = vec![];
         for (_, og) in self.groups {
-            if let Some(ng) = groups_registry.get(og.ID()) {
+            let ng = groups_registry.get(og.ID());
+            if ng.is_none() {
                 // old group is not present in new list,
                 // so must be stopped and deleted
                 self.remove(og.ID());
                 continue
             }
+            let ng = ng.unwrap();
             groups_registry.remove(ng.ID());
             if og.checksum != ng.checksum {
                 to_update.push(UpdateItem{old: og, new: ng})
             }
         }
         for (_, ng) in groups_registry {
-            self.start_group(ctx, ng, restore)?;
+            self.start_group(ctx, &ng, restore)?;
         }
         if !to_update.is_empty() {
             for item in to_update {

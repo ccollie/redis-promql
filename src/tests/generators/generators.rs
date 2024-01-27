@@ -191,7 +191,7 @@ mod tests {
             start: 1.0,
             end: 99.0,
         };
-        let mut iter = super::StdNormalGenerator::new(None, &r).unwrap();
+        let iter = super::StdNormalGenerator::new(None, &r).unwrap();
         validate_range(iter, &r);
     }
 
@@ -201,7 +201,7 @@ mod tests {
             start: 1.0,
             end: 99.0,
         };
-        let mut iter = super::MackeyGlassGenerator::new(17, None, &r);
+        let iter = super::MackeyGlassGenerator::new(17, None, &r);
         validate_range(iter, &r);
     }
 }

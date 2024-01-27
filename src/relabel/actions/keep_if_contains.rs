@@ -22,7 +22,7 @@ pub struct KeepIfContainsAction {
 impl KeepIfContainsAction {
     pub fn new(source_labels: Vec<String>, target_label: String, if_expression: Option<IfExpression>) -> Result<Self, String> {
         if source_labels.is_empty() {
-            return Err(format!("missing `source_labels` for `action=keep_if_contains`"));
+            return Err("missing `source_labels` for `action=keep_if_contains`".to_string());
         }
         Ok(Self {
             if_expr: if_expression,

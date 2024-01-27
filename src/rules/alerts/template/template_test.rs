@@ -150,7 +150,7 @@ fn test_templates_load() {
 				"templates/absent/good-*.tpl"
 			],
 			true,
-			mk_template("", None),
+			mk_template(Some(""), None),
 			"",
 		),
 		LoadTestCase::new(
@@ -165,7 +165,7 @@ fn test_templates_load() {
 				"templates/absent/good-*.tpl"
 			],
 			true,
-			mk_template("", None),
+			mk_template(Option::from(""), None),
 			""
 		),
 		LoadTestCase::new(
@@ -176,7 +176,7 @@ fn test_templates_load() {
 				"templates/test/good0-*.tpl"
 			],
 			false,
-			mk_template(r#"
+			mk_template(Some(r#"
 				{{- define "good0-test.tpl" -}}{{- end -}}
 				{{- define "test.0" -}}
 					{{ printf "Hello %s!" externalURL }}
@@ -190,22 +190,22 @@ fn test_templates_load() {
 				{{- define "test.3" -}}
 					{{ printf "Hello %s!" externalURL }}
 				{{- end -}}
-			"#, None),
+			"#), None),
 			""
 		),
 		LoadTestCase::new(
 			"existing path defined template override",
-			mk_template(r#"
+			mk_template(Some(r#"
 				{{- define "test.1" -}}
 					{{ printf "Hello %s!" "world" }}
 				{{- end -}}
-			"#, None),
+			"#), None),
 			vec![
 				"templates/other/nested/good0-*.tpl",
 				"templates/test/good0-*.tpl",
 			],
 			false,
-			mk_template(r##"
+			mk_template(Some(r##"
 				{{- define "good0-test.tpl" -}}{{- end -}}
 				{{- define "test.0" -}}
 					{{ printf "Hello %s!" externalURL }}
@@ -254,7 +254,7 @@ fn test_templates_load() {
 				{{- end -}}
 			"#, None),
 			"failed to parse template glob",
-		),
+		)
 	];
 
 	for tc in test_cases {

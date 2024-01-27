@@ -1,9 +1,9 @@
 use std::str::FromStr;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Enum for various alert errors.
-#[derive(Debug, Error, Eq, PartialEq, Serialize)]
+#[derive(Debug, Clone, Error, Eq, PartialEq, Serialize, Deserialize)]
 pub enum AlertsError {
     #[error("Invalid configuration. {0}")]
     InvalidConfiguration(String),
@@ -51,6 +51,7 @@ pub enum AlertsError {
     RuleRestoreError(String)
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ErrorGroup(pub Vec<String>);
 
 impl ErrorGroup {

@@ -1,7 +1,7 @@
 use crate::rules::alerts::{AlertsError, AlertsResult, Querier};
 use crate::rules::types::{new_time_series, RawTimeSeries};
 use crate::rules::{Rule, RuleStateEntry, RuleType};
-use crate::storage::{Timestamp};
+use crate::storage::{Label, Timestamp};
 use metricsql_engine::{Labels, METRIC_NAME_LABEL};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -47,10 +47,10 @@ impl RecordingRule {
         }
         labels.insert(METRIC_NAME_LABEL.to_string(), self.name.to_string());
         // override existing labels with configured ones
-        for (k, v) in self.labels {
-            labels.insert(k.clone(), v.clone())
+        for Label { name, value } in self.labels.iter() {
+            labels.insert(name.clone(), value.clone())
         }
-        return new_time_series(&m.values, &m.timestamps, labels);
+        return new_time_series(m.key, &m.values, &m.timestamps, labels);
     }
 
     fn run_query(&self, ts: Timestamp) -> AlertsResult<Vec<DatasourceMetric>> {
@@ -63,6 +63,10 @@ impl RecordingRule {
 impl Rule for RecordingRule {
     fn id(&self) -> u64 {
         todo!()
+    }
+
+    fn rule_type(&self) -> RuleType {
+        RuleType::Recording
     }
 
     fn exec(&mut self, ts: Timestamp, limit: usize) -> AlertsResult<Vec<RawTimeSeries>> {

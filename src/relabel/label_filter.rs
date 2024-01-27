@@ -179,7 +179,6 @@ impl fmt::Display for LabelMatchers {
 
 impl Deref for LabelMatchers {
     type Target = Vec<LabelFilter>;
-
     fn deref(&self) -> &Self::Target {
         &self.0
     }

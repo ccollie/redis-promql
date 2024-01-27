@@ -15,7 +15,6 @@ pub struct KeepAction {
     pub if_expr: Option<IfExpression>
 }
 
-
 impl KeepAction {
     pub fn new(source_labels: Vec<String>,
                separator: String,
@@ -23,7 +22,7 @@ impl KeepAction {
                if_expr: Option<IfExpression>) -> Result<Self, String> {
 
         if source_labels.is_empty() && if_expr.is_none() {
-            return Err(format!("missing `source_labels` for `action=keep`"));
+            return Err("missing `source_labels` for `action=keep`".to_string());
         }
 
         let (regex_anchored, _, prom_regex)  = parse_regex(regex, true)?;

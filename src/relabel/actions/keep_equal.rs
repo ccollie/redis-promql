@@ -16,7 +16,7 @@ pub struct KeepEqualAction {
 impl KeepEqualAction {
     pub fn new(source_labels: Vec<String>, target_label: String, separator: String, if_expression: Option<IfExpression>) -> Result<Self, String> {
         if source_labels.is_empty() {
-            return Err(format!("missing `source_labels` for `action=keep_equal`"));
+            return Err("missing `source_labels` for `action=keep_equal`".to_string());
         }
         Ok(Self {
             if_expr: if_expression,

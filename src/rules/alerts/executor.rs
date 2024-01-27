@@ -8,7 +8,7 @@ use crate::common::types::Timestamp;
 use crate::config::get_global_settings;
 use crate::rules::alerts::{AlertingRule, AlertsError, AlertsResult, Notifier, WriteQueue};
 use crate::rules::{new_time_series, RawTimeSeries, Rule, RuleType};
-use crate::rules::relabel::labels_to_string;
+use crate::rules::alerts::group::labels_to_string;
 use crate::storage::Label;
 
 pub type PreviouslySentSeries = HashMap<u64, HashMap<String, Vec<Label>>>;
@@ -48,7 +48,7 @@ impl Executor {
     fn get_stale_series(&self, rule: impl Rule, tss: &[RawTimeSeries], timestamp: Timestamp) -> Vec<RawTimeSeries> {
         let mut rule_labels: HashMap<String, &Vec<Label>> = HashMap::with_capacity(tss.len());
         for ts in tss.inter() {
-            // convert labels to strings so we can compare with previously sent series
+            // convert labels to strings, so we can compare with previously sent series
             let key = labels_to_string(&ts.labels);
             rule_labels.insert(key, &ts.labels);
         }
@@ -66,7 +66,7 @@ impl Executor {
                 let stamps = [timestamp];
                 let values = [STALE_NAN.clone()];
                 // previously sent series are missing in current series, so we mark them as stale
-                let ss = new_time_series(&values, &stamps, &labels);
+                let ss = new_time_series(key.clone(), &values, &stamps, &labels);
                 stales.push(ss)
             }
         }
@@ -115,7 +115,7 @@ impl Executor {
     fn push_to_rw(&mut self, rule: &impl Rule, tss: &[RawTimeSeries]) -> AlertsResult<()> {
         let mut last_err = "".to_string();
         for ts in tss {
-            if let Err(err) = self.rw.push(ts) {
+            if let Err(err) = self.rw.add(ts) {
                 last_err = format!("rule {:?}: remote write failure: {:?}", rule, err);
             }
         }

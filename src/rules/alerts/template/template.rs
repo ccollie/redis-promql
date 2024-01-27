@@ -202,6 +202,14 @@ gtmpl_fn!(fn parse_duration(s: &str) -> Result<f64, FuncError> {
     }
 });
 
+// same with parseDuration but returns a std::time::Duration
+gtmpl_fn!(fn parse_duration_time(s: &str) -> Result<Duration, FuncError> {
+    match metricsql_parser::prelude::parse_duration_value(s, 1) {
+        Ok(d) => Ok(Duration::milliseconds(d as i64)),
+        Err(e) => Ok(Duration::milliseconds(0))
+    }
+});
+
 // re_replace_all returns a copy of src, replacing matches of the Regexp with
 // the replacement string repl. Inside repl, $ signs are interpreted as in Expand,
 // so for instance $1 represents the text of the first submatch.
@@ -228,8 +236,10 @@ gtmpl_fn!(fn to_time(v: u64) -> Result<NaiveDateTime, FuncError> {
     if v.is_nan() || v.is_infinite() {
         return Err( FuncError::Generic(format!("cannot convert {} to Time", v)));
     }
-    let t = NaiveDateTime::from_timestamp_millis(v * 1000);
-    Ok(t)
+    match NaiveDateTime::from_timestamp_millis((v * 1000) as i64) {
+        Some(t) => Ok(t),
+        None => Err( FuncError::Generic(format!("cannot convert {} to Time", v)))
+    }
 });
 
 // match reports whether the string s
@@ -285,12 +295,6 @@ gtmpl_fn!(fn sort_by_label(label: &str, metrics: &[Metric]) -> Result<Vec<Metric
     Ok(metrics)
 });
 
-// same with parseDuration but returns a time.Duration
-gtmpl_fn!(fn parse_duration_time(s: &str) -> Result<Duration, FuncError> {
-    let d = parse_duration(s)?;
-    Ok(Duration::milliseconds(d as i64))
-});
-
 // Converts a list of objects to a map with keys arg0, arg1 etc.
 // This is intended to allow multiple arguments to be passed to templates.
 gtmpl_fn!(fn args(args: &[Value]) -> Result<Value, FuncError> {
@@ -302,13 +306,13 @@ gtmpl_fn!(fn args(args: &[Value]) -> Result<Value, FuncError> {
 });
 
 
-// pathEscape escapes the string so it can be safely placed inside a URL path segment.
+// pathEscape escapes the string, so it can be safely placed inside a URL path segment.
 //
 // See also queryEscape.
 gtmpl_fn!(fn path_escape(s: &str) -> Result<String, FuncError> {
     let base = "example.com";
     let mut url = parse_url(base)?;
-    url.set_path(Some(s));
+    url.set_path(s);
     let result = url.path();
     Ok(result.to_string())
 });
@@ -386,16 +390,16 @@ gtmpl_fn!(fn external_url() -> Result<String, FuncError> {
     Ok("".to_string())
 });
 
-// humanize converts given number to a human readable format
+// humanize converts given number to a human-readable format
 // by adding metric prefixes https://en.wikipedia.org/wiki/Metric_prefix
 gtmpl_fn!(fn humanize(v: f64) -> Result<String, FuncError> {
     Ok(common::humanize::humanize(v))
 });
 
-// humanize1024 converts given number to a human readable format with 1024 as base
+// humanize1024 converts given number to a human-readable format with 1024 as base
 gtmpl_fn!(fn humanize1024(v: f64) -> Result<String, FuncError> {
     if v.abs() <= 1.0 || v.is_nan() || v.is_infinite() {
-        return format!("{:.4}", v)
+        return Ok(format!("{:.4}", v))
     }
     Ok(humanize_bytes(v))
 });
@@ -488,7 +492,6 @@ pub fn template_funcs() -> FuncMap {
     funcs.insert("toLower".to_string(), to_lower);
     funcs.insert("crlfEscape".to_string(), crlf_escape);
     funcs.insert("quotesEscape".to_string(), quotes_escape);
-    funcs.insert("jsonEscape".to_string(), json_escape);
     funcs.insert("jsonEscape".to_string(), json_escape);
     funcs.insert("htmlEscape".to_string(), html_escape);
 

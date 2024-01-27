@@ -22,6 +22,13 @@ use crate::rules::alerts::datasource::datasource::{QuerierBuilder, QuerierParams
 use crate::rules::alerts::executor::Executor;
 use crate::storage::{Label, Timestamp};
 
+/// Control messages sent to Group channel duuring evaluation
+pub(crate) enum GroupMessage {
+    Stop,
+    Update(Group),
+    Interval
+}
+
 /// Group is an entity for grouping rules
 #[derive(Debug, Clone, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Group {
@@ -46,7 +53,7 @@ pub struct Group {
     first_run: AtomicBool,
     #[serde(skip)]
     concurrency: usize,
-    checksum: String,
+    pub(crate) checksum: String,
     /// eval_alignment will make the timestamp of group query requests be aligned with interval
     pub eval_alignment: Option<bool>,
     #[serde(skip)]
@@ -233,6 +240,30 @@ impl Group {
         Ok(())
     }
 
+    pub fn interrupt_eval(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+
+    pub fn close(&mut self) {
+        self.interrupt_eval();
+        self.metrics.iteration_total.store(0, Ordering::Relaxed);
+        self.metrics.iteration_duration.store(0, Ordering::Relaxed);
+        self.metrics.iteration_missed.store(0, Ordering::Relaxed);
+        self.metrics.iteration_interval.store(0, Ordering::Relaxed);
+        self.last_evaluation = 0;
+        for rule in self.alerting_rules.iter_mut() {
+            let _ = rule.close();
+        }
+        for rule in self.recording_rules.iter_mut() {
+            let _ = rule.close();
+        }
+    }
+
+
     pub fn get_rule(&self, name: &str) -> Option<&impl Rule> {
         let mut rule = self.alerting_rules.iter().find(|ar| ar.name() == name);
         if rule.is_some() {
@@ -256,7 +287,7 @@ impl Group {
             .is_some()
     }
 
-    pub(super) fn eval<'a>(&mut self, ts: Timestamp) {
+    pub(super) fn eval<'a>(&mut self, e: &mut Executor, ts: Timestamp) {
         self.metrics.iteration_total.fetch_add(1, Ordering::Relaxed);
 
         let start = current_time_millis();
@@ -313,7 +344,7 @@ impl Group {
             self.metrics.iteration_missed.fetch_add(missed, Ordering::Relaxed);
         }
         let eval_ts = eval_ts.add((missed + 1) * self.interval);
-        self.eval(eval_ts)
+        self.eval(e, eval_ts)
     }
 
     pub(super) fn resolve_duration(&self) -> Duration {

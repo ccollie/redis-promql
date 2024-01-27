@@ -16,10 +16,10 @@ pub struct UppercaseAction {
 impl UppercaseAction {
     pub fn new(source_labels: Vec<String>, target_label: String, separator: String, if_expression: Option<IfExpression>) -> Result<Self, String> {
         if source_labels.is_empty() {
-            return Err(format!("missing `source_labels` for `action=uppercase`"));
+            return Err("missing `source_labels` for `action=uppercase`".to_string());
         }
         if target_label.is_empty() {
-            return Err(format!("missing `target_label` for `action=uppercase`"));
+            return Err("missing `target_label` for `action=uppercase`".to_string());
         }
         Ok(Self { source_labels, target_label, separator, if_expr: if_expression })
     }

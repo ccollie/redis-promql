@@ -24,7 +24,7 @@ impl DropAction {
                if_expr: Option<IfExpression>) -> Result<Self, String> {
 
         if source_labels.is_empty() && if_expr.is_none() {
-            return Err(format!("missing `source_labels` for `action=drop`"));
+            return Err("missing `source_labels` for `action=drop`".to_string());
         }
 
         let (regex_anchored, _, prom_regex) = parse_regex(Some(regex), true)?;
