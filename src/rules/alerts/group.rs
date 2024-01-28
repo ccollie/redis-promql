@@ -265,11 +265,11 @@ impl Group {
 
 
     pub fn get_rule(&self, name: &str) -> Option<&impl Rule> {
-        let mut rule = self.alerting_rules.iter().find(|ar| ar.name() == name);
+        let mut rule = self.alerting_rules.iter().find(|ar| ar.name == name);
         if rule.is_some() {
             return rule;
         }
-        self.recording_rules.iter().find(|rr| rr.name() == name)
+        self.recording_rules.iter().find(|rr| rr.name == name)
     }
 
     pub fn contains_rule(&self, name: &str) -> bool {
@@ -277,12 +277,12 @@ impl Group {
     }
 
     pub fn remove_rule(&mut self, name: &str) -> bool {
-        let mut rule = self.alerting_rules.iter().position(|ar| ar.name() == name)
+        let mut rule = self.alerting_rules.iter().position(|ar| ar.name == name)
             .map(|i| self.alerting_rules.remove(i));
         if rule.is_none() {
             return false;
         }
-        self.recording_rules.iter().position(|rr| rr.name() == name)
+        self.recording_rules.iter().position(|rr| rr.name == name)
             .map(|i| self.recording_rules.remove(i))
             .is_some()
     }
@@ -344,7 +344,7 @@ impl Group {
             self.metrics.iteration_missed.fetch_add(missed, Ordering::Relaxed);
         }
         let eval_ts = eval_ts.add((missed + 1) * self.interval);
-        self.eval(e, eval_ts)
+        self.eval(&mut e, eval_ts)
     }
 
     pub(super) fn resolve_duration(&self) -> Duration {

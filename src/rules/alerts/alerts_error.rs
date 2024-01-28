@@ -11,6 +11,9 @@ pub enum AlertsError {
     #[error("Invalid rule. {0}")]
     InvalidRule(String),
 
+    #[error("Configuration error. {0}")]
+    Configuration(String),
+
     #[error("Serialization error. {0}")]
     CannotSerialize(String),
 

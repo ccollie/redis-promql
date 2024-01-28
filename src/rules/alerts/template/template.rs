@@ -31,7 +31,7 @@ pub type FuncMap = HashMap<String, Func>;
 // go template execution fails when it's tree is empty
 const DEFAULT_TEMPLATE: &str = r##"{{- define "default.template" -}}{{- end -}}"##;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Eq, PartialEq, Debug)]
 pub(crate) struct TextTemplate {
     pub(crate) current:     Template,
     pub(crate) replacement: Template
@@ -198,15 +198,15 @@ gtmpl_fn!(fn to_lower(s: &str) -> Result<String, FuncError> {
 gtmpl_fn!(fn parse_duration(s: &str) -> Result<f64, FuncError> {
     match metricsql_parser::prelude::parse_duration_value(s, 1) {
         Ok(d) => Ok((d / 1000) as f64),
-        Err(e) => Ok(0f64)
+        Err(_e) => Ok(0f64)
     }
 });
 
 // same with parseDuration but returns a std::time::Duration
 gtmpl_fn!(fn parse_duration_time(s: &str) -> Result<Duration, FuncError> {
     match metricsql_parser::prelude::parse_duration_value(s, 1) {
-        Ok(d) => Ok(Duration::milliseconds(d as i64)),
-        Err(e) => Ok(Duration::milliseconds(0))
+        Ok(d) => Ok(Duration::milliseconds(d)),
+        Err(_e) => Ok(Duration::milliseconds(0))
     }
 });
 

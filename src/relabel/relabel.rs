@@ -70,14 +70,14 @@ impl ParsedRelabelConfig {
     ) -> Self {
         let mut prc = ParsedRelabelConfig {
             rule_original: rule_original.to_string(),
-            source_labels,
+            source_labels: vec![],
             separator: separator.to_string(),
             target_label: target_label.to_string(),
             regex_anchored,
             modulus: 0,
             action,
             r#if: if_expr.clone(),
-            graphite_match_template,
+            graphite_match_template: None,
             graphite_label_rules: vec![],
             regex: PromRegex::default(),
             regex_original: regex_original_compiled,

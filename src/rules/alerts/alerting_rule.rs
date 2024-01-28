@@ -19,6 +19,7 @@ use std::ops::{Add, Sub};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
 use std::time::Duration;
+use tracing::debug;
 
 // https://github.com/VictoriaMetrics/VictoriaMetrics/blob/master/app/vmalert/alerting.go#L612
 
@@ -250,12 +251,15 @@ impl AlertingRule {
 
     /// alertsToSend walks through the current alerts of AlertingRule
     /// and returns only those which should be sent to notifier.
-    pub fn alerts_to_send(
+    pub fn process_alerts_to_send<F>(
         &self,
         ts: Timestamp,
         resolve_duration: Duration,
         resend_delay: Duration,
-    ) -> Vec<&Alert> {
+        f: F,
+    ) -> AlertsResult<()>
+    where F: Fn(Vec<&mut Alert>) -> AlertsResult<()>
+    {
         let needs_sending = |a: &Alert| -> bool {
             if a.state == AlertState::Pending {
                 return false;
@@ -263,7 +267,7 @@ impl AlertingRule {
             if a.resolved_at > a.last_sent {
                 return true;
             }
-            return a.last_sent + resend_delay < ts;
+            a.last_sent + resend_delay < ts
         };
 
         let mut alerts = Vec::with_capacity(10); // ?????
@@ -278,10 +282,11 @@ impl AlertingRule {
                 alert.end = alert.resolved_at;
             }
             alert.last_sent = ts;
-            alerts.push(&alert)
+            alerts.push(alert)
         }
-        return alerts;
+        return f(alerts);
     }
+
 
     fn new_alert(
         &mut self,
@@ -415,6 +420,7 @@ impl Rule for AlertingRule {
                 && ts.sub(alert.resolved_at) > RESOLVED_RETENTION.as_millis() as i64
             {
                 // ar.logDebugf(ts, alert, "deleted as inactive");
+                debug!("deleted as inactive");
                 to_delete.push(h);
             }
         }
@@ -422,7 +428,7 @@ impl Rule for AlertingRule {
             alerts.remove(&h);
         }
 
-        let query_fn = |query: &str| -> AlertsResult<QueryResult> { self.querier.query(query, ts) };
+        let query_fn: QueryFn = |query: &str| -> AlertsResult<QueryResult> { self.querier.query(query, ts) };
 
         let mut updated = HashSet::new();
         for m in res.data.into_iter() {
@@ -446,8 +452,8 @@ impl Rule for AlertingRule {
                     // self.logDebugf(ts, alert, "INACTIVE => PENDING")
                 }
                 alert.value = m.values[0]; //
-                                           // re-exec template since value or query can be used in annotations
 
+                // re-exec template since value or query can be used in annotations
                 alert.annotations =
                     alert.exec_template(query_fn, &labels.origin, &self.annotations)?;
                 alert.keep_firing_since = current_time_millis();
@@ -513,7 +519,7 @@ impl Rule for AlertingRule {
                 alert.state = AlertState::Firing;
                 alert.start = ts;
                 // alertsFired.Inc()
-                // ar.logDebugf(ts, a, "PENDING => FIRING: %s since becoming active at %v", ts.Sub(a.ActiveAt), a.ActiveAt)
+                // ar.logDebugf(ts, a, "PENDING => FIRING: %s since becoming active at %v", ts.sub(a.ActiveAt), a.ActiveAt)
             }
         }
         if limit > 0 && num_active_pending > limit {

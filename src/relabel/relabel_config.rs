@@ -108,7 +108,7 @@ pub(crate) struct RelabelConfig {
     pub if_expr: Option<IfExpression>,
     pub action: RelabelAction,
     pub source_labels: Vec<String>,
-    #[serde(defauult=";")]
+    #[serde(default=";")]
     pub separator: String,
     pub target_label: String,
     pub regex: Option<Regex>,

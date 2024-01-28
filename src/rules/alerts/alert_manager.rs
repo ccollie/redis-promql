@@ -1,7 +1,8 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
 use ahash::{AHashMap, HashMap};
 use redis_module::Context;
-use crate::rules::alerts::{AlertsResult, Group, GroupConfig, Notifier, QuerierBuilder, WriteQueue};
+use crate::rules::alerts::{AlertsError, AlertsResult, Group, GroupConfig, Notifier, QuerierBuilder, WriteQueue};
 
 /// manager controls group states
 pub struct Manager {
@@ -13,22 +14,35 @@ pub struct Manager {
     rr: Box<dyn QuerierBuilder>,
 
     labels: AHashMap<String, String>,
-    groups: HashMap<u64, Group>
+    groups: RwLock<AHashMap<u64, Group>>,
+    evaluation_interval: Duration,
 }
 
 impl Manager {
+
     fn start(&mut self, ctx: &Context, groups_cfg: &[GroupConfig]) -> AlertsResult<()> {
         return self.update(ctx, groups_cfg, true)
     }
 
-    fn start_group(&mut self, ctx: &Context, g: &Group, restore: bool) -> AlertsResult<()> {
-        let id = g.ID();
-        if restore {
-            g.start(ctx, self.notifiers, Arc::clone(&self.rw), self.rr)
-        } else {
-            g.start(ctx, self.notifiers, Arc::clone(&self.rw), nil)
+    pub fn close(&mut self) -> AlertsResult<()> {
+        self.rw.close()?;
+        let mut groups = self.groups.write().unwrap();
+        for (_, g) in groups.iter_mut() {
+            g.close()
         }
-        self.groups.insert(id, g);
+        Ok(())
+    }
+
+    fn start_group(&mut self, ctx: &Context, group: Group, restore: bool) -> AlertsResult<()> {
+        let id = group.ID();
+        let mut group = group;
+        if restore {
+            group.start(ctx, self.notifiers, Arc::clone(&self.rw), self.rr)
+        } else {
+            group.start(ctx, self.notifiers, Arc::clone(&self.rw), nil)
+        }
+        let mut groups = self.groups.write().unwrap();
+        groups.insert(id, group);
         Ok(())
     }
 
@@ -49,15 +63,15 @@ impl Manager {
                     ar_present = true
                 }
             }
-            let ng = Group::new(cfg, &self.querier_builder, *evaluationInterval, &self.labels);
+            let ng = Group::new(cfg, &self.querier_builder, self.evaluation_interval, &self.labels);
             groups_registry.insert(ng.ID(), ng)
         }
 
         if rr_present && self.rw == nil {
-            return fmt.Errorf("config contains recording rules but `-remoteWrite.url` isn't set")
+            return Err(AlertsError::Configuration("config contains recording rules but `-remoteWrite.url` isn't set".to_string()))
         }
         if ar_present && self.notifiers == nil {
-            return fmt.Errorf("config contains alerting rules but neither `-notifier.url` nor `-notifier.config` nor `-notifier.blackhole` aren't set")
+            return Err(AlertsError::Configuration("config contains alerting rules but neither `-notifier.url` nor `-notifier.config` nor `-notifier.blackhole` aren't set".to_string()))
         }
         struct UpdateItem<'a> {
             old: &'a Group,
@@ -66,9 +80,9 @@ impl Manager {
 
         let mut to_update = vec![];
 
-        m.groupsMu.Lock();
+        let mut groups = self.groups.write().unwrap();
         let to_delete = vec![];
-        for (_, og) in self.groups {
+        for (_, og) in groups.iter_mut() {
             let ng = groups_registry.get(og.ID());
             if ng.is_none() {
                 // old group is not present in new list,
@@ -79,16 +93,16 @@ impl Manager {
             let ng = ng.unwrap();
             groups_registry.remove(ng.ID());
             if og.checksum != ng.checksum {
-                to_update.push(UpdateItem{old: og, new: ng})
+                to_update.push(UpdateItem{old: &og, new: ng})
             }
         }
         for (_, ng) in groups_registry {
-            self.start_group(ctx, &ng, restore)?;
+            self.start_group(ctx, ng, restore)?;
         }
         if !to_update.is_empty() {
             for item in to_update {
                 old.update_with(new);
-                item.old.InterruptEval()
+                item.old.interrupt_eval();
             }
         }
         Ok(())

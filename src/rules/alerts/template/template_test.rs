@@ -95,13 +95,13 @@ fn equal_templates(tmpls: &[Template]) -> bool {
 		if i == 0 {
 			cmp = tmpl
 		} else {
-			if cmp == None || tmpl == None {
+			if cmp == None {
 				if cmp != tmpl {
 					return false
 				}
 				continue
 			}
-			if tmpls.len() != len(cmp.Templates()) {
+			if tmpls.len() != len(cmp.templates) {
 				return false
 			}
 			for t in tmpl.templates() {
@@ -263,13 +263,12 @@ fn test_templates_load() {
 		if tc.exp_err == "" && err != None {
 			t.Error("happened error that wasn't expected: %w", err)
 		}
-		if tc.exp_err != "" && err == None {
+		if tc.exp_err != "" {
 			t.Error("%+w", err);
-			t.Error("expected error that didn't happened")
+			panic!("expected error that didn't happen")
 		}
-		if err != None && !strings.Contains(err.Error(), tc.exp_err) {
-			t.Error("%+w", err);
-			t.Error("expected string doesn't exist in error message")
+		if err != None && !err.to_string().contains(tc.exp_err) {
+			panic!("expected string '{}' doesn't exist in error message '{:?}'", tc.exp_err, err)
 		}
 		if !equal_templates(&[master_tmpl.replacement, tc.expected_template.replacement]) {
 			panic!("replacement template is not as expected")

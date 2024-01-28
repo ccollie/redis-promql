@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use redis_module::Context;
 
 use crate::error::TsdbResult;
@@ -30,7 +28,7 @@ impl Notifier for NullNotifier {
         &self,
         _ctx: &Context,
         _alerts: &[Alert],
-        _notifier_headers: HashMap<String, String>,
+        _notifier_headers: &[Label],
     ) -> TsdbResult<()> {
         Ok(())
     }
