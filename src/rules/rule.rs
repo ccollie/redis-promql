@@ -84,11 +84,11 @@ pub trait Rule: Debug {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RuleStateEntry {
-    /// stores last moment of time rule.exec was called
+    /// stores last moment of time rule.exec() was called
     pub time: Timestamp,
-    /// stores the timestamp with which rule.exec was called
+    /// stores the timestamp with which rule.exec() was called
     pub at: Timestamp,
-    /// stores the duration of the last rule.exec call
+    /// stores the duration of the last rule.exec() call
     pub duration: Duration,
     /// stores last error that happened in exec func resets on every successful exec
     /// may be used as Health ruleState
@@ -160,10 +160,11 @@ impl RuleState {
     }
 
     pub fn get_all(&self) -> Vec<RuleStateEntry> {
+        let ts_default = Timestamp::default();
         self.0
             .iter()
             .rev()
-            .filter(|e| !e.time.IsZero() || !e.at.IsZero())
+            .filter(|e| e.time != ts_default || e.at != ts_default)
             .cloned()
             .collect::<Vec<_>>()
     }

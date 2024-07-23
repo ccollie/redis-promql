@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::hash::Hasher;
 use std::str::FromStr;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use ahash::AHashMap;
@@ -153,6 +154,18 @@ impl Display for RuleConfig {
         }
         Ok(())
     }
+}
+
+/// SkipRandSleepOnGroupStart will skip random sleep delay in group first evaluation
+pub static SKIP_RAND_SLEEP: OnceLock<bool> = OnceLock::new();
+
+// todo: this is a placeholder. use global config
+pub(crate) fn should_skip_rand_sleep_on_group_start() -> bool {
+    *SKIP_RAND_SLEEP.get_or_init(|| {
+        // get value from env
+        let env_val = std::env::var("SKIP_RAND_SLEEP").unwrap_or_default();
+        env_val == "true"
+    })
 }
 
 /// Group contains list of Rules grouped into entity with one name and evaluation interval

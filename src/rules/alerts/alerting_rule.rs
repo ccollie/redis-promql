@@ -208,8 +208,8 @@ impl AlertingRule {
             .map_err(|e| AlertsError::FailedToExpandLabels(e.to_string()))?;
 
         for (k, v) in extra_labels {
-            ls.processed.insert(k, v);
             ls.origin.insert(k.to_string(), v.to_string());
+            ls.processed.insert(k, v);
         }
 
         // set additional labels to identify group and rule name
@@ -267,7 +267,7 @@ impl AlertingRule {
             if a.resolved_at > a.last_sent {
                 return true;
             }
-            a.last_sent + resend_delay < ts
+            a.last_sent.add(resend_delay) < ts
         };
 
         let mut alerts = Vec::with_capacity(10); // ?????

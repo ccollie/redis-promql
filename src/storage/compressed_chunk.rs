@@ -31,6 +31,16 @@ pub enum ChunkEncoding {
     Gorilla = 2,
 }
 
+impl ChunkEncoding {
+    pub fn name(&self) -> &'static str {
+        match self {
+            ChunkEncoding::Basic => "basic",
+            ChunkEncoding::Quantile => "quantile",
+            ChunkEncoding::Gorilla => "gorilla",
+        }
+    }
+}
+
 impl Display for ChunkEncoding {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -349,13 +359,13 @@ impl CompressedChunk {
         self.data_size() / self.count
     }
 
-    // estimate remaining capacity based on the current data size and chunk max_size
+    /// estimate remaining capacity based on the current data size and chunk max_size
     pub fn remaining_capacity(&self) -> usize {
         self.max_size - self.data_size()
     }
 
-    /// estimate the number of samples that can be stored in the remaining capacity
-    /// note that for low sample counts this will be very inaccurate
+    /// Estimate the number of samples that can be stored in the remaining capacity
+    /// Note that for low sample counts this will be very inaccurate
     pub fn remaining_samples(&self) -> usize {
         if self.count == 0 {
             return 0;
@@ -456,7 +466,7 @@ impl Chunk for CompressedChunk {
             return Ok(1)
         }
 
-        // this compressed method does not do streaming compressed, so we have to accumulate all the samples
+        // we currently don't do streaming compression, so we have to accumulate all the samples
         // in a new chunk and then swap it with the old one
         let mut timestamps = get_pooled_vec_i64(self.count);
         let mut values = get_pooled_vec_f64(self.count);

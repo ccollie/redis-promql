@@ -1,7 +1,9 @@
+use serde::{Deserialize, Serialize};
 use crate::error::TsdbResult;
 use crate::storage::{DuplicatePolicy, Sample};
 
 // Time series measurements.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct SeriesData {
     pub timestamps: Vec<i64>,
     pub values: Vec<f64>,

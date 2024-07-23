@@ -69,12 +69,12 @@ impl RedisDatasource {
                 for v in vl {
                     // don't use .set() instead of del/add since it is allowed for GET params to be duplicated
                     // see https://github.com/VictoriaMetrics/VictoriaMetrics/issues/4908
-                    self.extra_params.insert(k.to_string(), v)
+                    self.extra_params.insert(k.to_string(), v);
                 }
             }
         }
         for (key, value) in params.headers {
-            self.extra_headers.insert(key, value)
+            self.extra_headers.insert(key, value);
         }
         self.debug = params.debug;
         return self;

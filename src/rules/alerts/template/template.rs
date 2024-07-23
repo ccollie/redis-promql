@@ -80,7 +80,7 @@ pub fn reload() {
 /// metric is private copy of provider.Metric,
 /// it is used for templating annotations,
 /// Labels as map simplifies templates evaluation.
-#[derive(Gtmpl)]
+#[derive(Gtmpl, Clone, Default)]
 struct Metric {
     labels: Labels,
     timestamp: i64,
@@ -136,11 +136,14 @@ pub(crate) fn make_query_fn(query: QueryFn) -> Func {
         if args.len() != 1 {
             return Err(FuncError::ExactlyXArgs("query".to_string(), 1))
         }
-        let q = args[0].as_str()
-            .ok_or_else(|| FuncError::Generic(format!("expected string argument, got {}", args[0].as_str().unwrap_or(""))))?;
-        let result = query(q)?;
-        let mss = datasource_metrics_to_template_metrics(&result).into();
-        Ok(Value::Array(mss))
+        let arg = &args[0];
+        if let Value::String(q) = arg {
+            let result = query(&q)?;
+            let mss = datasource_metrics_to_template_metrics(&result).into();
+            Ok(Value::Array(mss))
+        } else {
+            Err(FuncError::Generic(format!("expected string argument, got {}", arg)))
+        }
     }
 }
 
@@ -410,7 +413,7 @@ gtmpl_fn!(fn humanize_duration(v: f64) -> Result<String, FuncError> {
     if v.is_nan() || v.is_infinite() {
         return Ok(format!("{:.4}", v));
     }
-    if v == 0 {
+    if v == 0.0 {
         return Ok(format!("{:.4}s", v));
     }
     if v.abs() >= 1.0 {
@@ -444,14 +447,14 @@ gtmpl_fn!(fn humanize_duration(v: f64) -> Result<String, FuncError> {
             break
         }
         prefix = p;
-        v *= 1000
+        v *= 1000.0
     }
     Ok(format!("{:.4}{prefix}s", v))
 });
 
 // humanize_percentage converts given ratio value to a fraction of 100
 gtmpl_fn!(fn humanize_percentage(v: f64) -> Result<String, FuncError> {
-    Ok(format!("{:.4}%", v*100))
+    Ok(format!("{:.4}%", v*100.0))
 });
 
 // humanize_timestamp converts given timestamp to a human readable time equivalent

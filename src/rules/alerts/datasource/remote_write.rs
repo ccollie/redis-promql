@@ -165,7 +165,7 @@ impl WriteQueue {
         if series.is_empty() {
             return Ok(())
         }
-        if !series_exists(&ctx, &series[0].key) {
+        if !series_exists(&ctx, &series[0].id) {
             // create series
         }
         Ok(())

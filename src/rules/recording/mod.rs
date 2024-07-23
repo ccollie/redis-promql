@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
+use ahash::{AHashMap, AHashSet};
 use crate::common::current_time_millis;
 
 const ERR_DUPLICATE: &str =
@@ -31,24 +32,33 @@ pub struct RecordingRule {
     metrics: RecordingRuleMetrics,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct RecordingRuleMetrics {
     errors: AtomicU64,
     samples: AtomicU64,
+}
+
+impl Clone for RecordingRuleMetrics {
+    fn clone(&self) -> Self {
+        RecordingRuleMetrics {
+            errors: AtomicU64::new(self.errors.load(std::sync::atomic::Ordering::Relaxed)),
+            samples: AtomicU64::new(self.samples.load(std::sync::atomic::Ordering::Relaxed)),
+        }
+    }
 }
 
 type DatasourceMetric = crate::rules::alerts::Metric;
 
 impl RecordingRule {
     fn to_time_series(&self, m: DatasourceMetric) -> RawTimeSeries {
-        let mut labels = HashMap::with_capacity(m.labels.len() + 1);
+        let mut labels = AHashMap::with_capacity(m.labels.len() + 1);
         for label in m.labels.iter() {
-            labels.insert(label.name.clone(), label.value.clone())
+            labels.insert(label.name.clone(), label.value.clone());
         }
         labels.insert(METRIC_NAME_LABEL.to_string(), self.name.to_string());
         // override existing labels with configured ones
         for Label { name, value } in self.labels.iter() {
-            labels.insert(name.clone(), value.clone())
+            labels.insert(name.clone(), value.clone());
         }
         return new_time_series(m.key, &m.values, &m.timestamps, labels);
     }
@@ -77,11 +87,11 @@ impl Rule for RecordingRule {
         cur_state.at = ts;
 
         let res = self.run_query(ts);
-        cur_state.duration = Duration::from_millis(current_time_millis() - start);
+        cur_state.duration = Duration::from_millis((current_time_millis() - start) as u64);
 
         if let Err(err) = res {
-            cur_state.err = err.clone();
-            self.state.add(cur_state);
+            cur_state.err = Some(err.clone());
+            self.state.push(cur_state);
             return Err(err);
         }
 
@@ -93,14 +103,14 @@ impl Rule for RecordingRule {
         if limit > 0 && num_series > limit {
             let msg = format!("exec exceeded limit of {limit} with {num_series} series");
             let err = AlertsError::QueryExecutionError(msg);
-            cur_state.err = err.clone();
-            self.state.add(cur_state);
+            cur_state.err = Option::from(err.clone());
+            self.state.push(cur_state);
             return Err(err);
         }
 
         cur_state.series_fetched = num_series;
 
-        let duplicates: HashSet<String> = HashSet::with_capacity(num_series);
+        let mut duplicates: AHashSet<String> = AHashSet::with_capacity(num_series);
         let mut tss: Vec<RawTimeSeries> = Vec::with_capacity(num_series);
         for (_, r) in q_metrics.iter().enumerate() {
             let ts = self.to_time_series(r);
@@ -110,14 +120,14 @@ impl Rule for RecordingRule {
                     "original metric {:?}; resulting labels {key}: {}",
                     r.labels, ERR_DUPLICATE
                 );
-                self.state.add(cur_state);
+                self.state.push(cur_state);
                 return Err(AlertsError::DuplicateSeries(msg));
             }
-            duplicates.push(key);
+            duplicates.insert(key);
             tss.push(ts)
         }
 
-        self.state.add(cur_state);
+        self.state.push(cur_state);
         Ok(tss)
     }
 
@@ -130,19 +140,19 @@ impl Rule for RecordingRule {
             .query_range(&self.expr, start, end)
             .map_err(|e| AlertsError::QueryExecutionError(format!("{}: {:?}", self.expr, e)))?;
 
-        let mut duplicates: HashSet<String> = HashSet::with_capacity(res.len());
+        let mut duplicates: AHashSet<String> = AHashSet::with_capacity(res.len());
         let mut tss = Vec::with_capacity(res.len());
         for s in res.data.into_iter() {
             let ts = self.to_time_series(s);
             let key = stringify_labels(&ts);
-            if duplicates.contains_key(&key) {
+            if duplicates.contains(&key) {
                 let msg = format!(
                     "original metric {:?}; resulting labels {}: {}",
                     s.labels, key, ERR_DUPLICATE
                 );
                 return Err(AlertsError::DuplicateSeries(msg));
             }
-            duplicates.push(key);
+            duplicates.insert(key);
             tss.push(ts)
         }
         Ok(tss)

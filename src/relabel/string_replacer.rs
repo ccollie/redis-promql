@@ -3,6 +3,7 @@ use regex::Regex;
 use crate::common::regex_util::PromRegex;
 use crate::relabel::regex_parse::parse_regex;
 
+#[derive(Debug)]
 pub(crate) struct StringReplacer {
     pub(crate) regex: PromRegex,
     pub(crate) replacement: String,

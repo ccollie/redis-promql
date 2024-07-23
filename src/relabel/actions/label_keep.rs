@@ -4,7 +4,7 @@ use crate::relabel::actions::Action;
 use crate::relabel::IfExpression;
 use crate::storage::Label;
 
-#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LabelDropAction {
     pub if_expr: Option<IfExpression>,
     pub regex: Regex, // todo: PromRegex

@@ -64,7 +64,7 @@ impl TimeSeriesIndex {
     }
 
     pub(crate) fn next_id(&self) -> u64 {
-        // wee use Relaxed here since we only need uniqueness, not monotonicity
+        // we use Relaxed here since we only need uniqueness, not monotonicity
         self.series_sequence.fetch_add(1, Ordering::Relaxed)
     }
 
@@ -361,8 +361,8 @@ fn get_series_by_id<'a>(
 ) -> Result<Option<&'a mut TimeSeries>, RedisError> {
     if let Some(key) = id_to_key.get(&id) {
         // todo: eliminate this copy
-        let rkey = ctx.create_string(key.as_str());
-        return get_timeseries_mut(ctx, &rkey, false);
+        let redis_key = ctx.create_string(key.as_str());
+        return get_timeseries_mut(ctx, &redis_key, false);
     }
     Ok(None)
 }

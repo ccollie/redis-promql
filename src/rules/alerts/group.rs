@@ -12,12 +12,13 @@ use enquote::enquote;
 use metricsql_engine::TimestampTrait;
 use metricsql_parser::prelude::METRIC_NAME;
 use serde::{Deserialize, Serialize};
+use tracing::info;
 use xxhash_rust::xxh3::Xxh3;
 use crate::common::current_time_millis;
 use crate::config::get_global_settings;
 
 use crate::rules::{EvalContext, Rule, RuleType};
-use crate::rules::alerts::{AlertingRule, AlertsError, AlertsResult, DataSourceType, GroupConfig, Notifier, RecordingRule, WriteQueue};
+use crate::rules::alerts::{AlertingRule, AlertsError, AlertsResult, DataSourceType, GroupConfig, Notifier, RecordingRule, should_skip_rand_sleep_on_group_start, WriteQueue};
 use crate::rules::alerts::datasource::datasource::{QuerierBuilder, QuerierParams};
 use crate::rules::alerts::executor::Executor;
 use crate::storage::{Label, Timestamp};
@@ -239,6 +240,103 @@ impl Group {
         self.checksum = new_group.checksum.to_string();
         Ok(())
     }
+
+    //////////////////////////////////////////////
+    pub(super) fn start(&mut self,
+                        nts: fn() -> Vec<dyn Notifier>,
+                        rw: Arc<WriteQueue>,
+                        rr: Option<&dyn QuerierBuilder>) {
+
+        let mut eval_ts = current_time_millis();
+        // sleep random duration to spread group rules evaluation
+        // over time in order to reduce load on datasource.
+        if !should_skip_rand_sleep_on_group_start()  {
+            let sleep_before_start = delay_before_start(eval_ts, self.ID(), self.interval, self.eval_offset);
+            info!("will start in %v", sleep_before_start);
+
+            sleepTimer = time.NewTimer(sleep_before_start);
+            select {
+                case <-ctx.Done():
+                    sleepTimer.Stop()
+                return
+                case <-g.doneCh:
+    sleepTimer.Stop()
+    return
+    case <-sleepTimer.C:
+    }
+    eval_ts = eval_ts.add(sleep_before_start)
+    }
+
+    e := &executor{
+    Rw:                       rw,
+    Notifiers:                nts,
+    notifierHeaders:          g.NotifierHeaders,
+    previouslySentSeriesToRW: make(map[uint64]map[string][]prompbmarshal.Label),
+    }
+
+    info!("started rule group \"{}\"", self.name);
+
+    evalCtx, cancel := context.WithCancel(ctx)
+    g.evalCancel = cancel
+    defer g.evalCancel()
+
+    self.eval(evalCtx, eval_ts);
+
+    t := time.NewTicker(g.Interval)
+    defer t.Stop()
+
+    // restore the rules state after the first evaluation
+    // so only active alerts can be restored.
+    if let Some(rr) = rr {
+        if let Err(err) = self.restore(rr, eval_ts, remoteReadLookBack) {
+            error!("error while restoring ruleState for group {}: {:?}", self.name, err)
+        }
+    }
+
+    for {
+    select {
+    case <-ctx.Done():
+        info!("group \"{}\": context cancelled", self.name)
+    return
+    case <-g.doneCh:
+    info!("group {}: received stop signal", self.name)
+    return
+    case ng := <-g.updateCh:
+    g.mu.Lock()
+
+    // it is expected that g.evalCancel will be evoked
+    // somewhere else to unblock group from the rules evaluation.
+    // we recreate the evalCtx and g.evalCancel, so it can
+    // be called again.
+    evalCtx, cancel = context.WithCancel(ctx)
+    g.evalCancel = cancel
+
+    self.update_with(ng)
+        .ok_or_else(|| error!(format!("group {}: failed to update", self.name)));
+
+    // ensure that staleness is tracked for existing rules only
+    e.purgeStaleSeries(g.Rules)
+    e.notifier_headers = self.notifier_headers.clone();
+
+    g.infof("re-started");
+    case <-t.C:
+        let missed = (time.Since(eval_ts) / self.interval) - 1;
+    if missed < 0 {
+    // missed can become < 0 due to irregular delays during evaluation
+    // which can result in time.Since(eval_ts) < g.Interval
+    missed = 0;
+    }
+    if missed > 0 {
+        self.metrics.iterationMissed.Inc()
+    }
+    eval_ts = eval_ts.add((missed + 1) * self.interval);
+
+    eval(evalCtx, eval_ts)
+    }
+    }
+    }
+
+    //////////////////////////////////////////////
 
     pub fn interrupt_eval(&self) {
         self.cancelled.store(true, Ordering::SeqCst);

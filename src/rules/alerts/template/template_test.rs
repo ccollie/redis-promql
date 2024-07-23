@@ -101,7 +101,7 @@ fn equal_templates(tmpls: &[Template]) -> bool {
 				}
 				continue
 			}
-			if tmpls.len() != len(cmp.templates) {
+			if tmpls.len() != cmp.templates.len() {
 				return false
 			}
 			for t in tmpl.templates() {

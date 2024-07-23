@@ -54,7 +54,7 @@ pub enum AlertsError {
     RuleRestoreError(String)
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Eq)]
 pub struct ErrorGroup(pub Vec<String>);
 
 impl ErrorGroup {

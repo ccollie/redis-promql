@@ -28,6 +28,7 @@ pub struct TimeSeries {
     pub chunk_size_bytes: usize,
     pub chunks: Vec<TimeSeriesChunk>,
 
+    // meta
     pub total_samples: usize,
     pub first_timestamp: Timestamp,
     pub last_timestamp: Timestamp,
@@ -202,7 +203,7 @@ impl TimeSeries {
                 &uncompressed_chunk.values,
             )?;
 
-            // reuse last chunk
+            // clear last chunk for reuse
             last_chunk.clear();
 
             // insert new chunk before last block
@@ -296,7 +297,8 @@ impl TimeSeries {
         }
     }
 
-    /// Get the time series between give start and end time (both inclusive).
+    /// Get the time series between given start and end time (both inclusive).
+    /// todo: return a SeriesSlice or SeriesData so we don't realloc
     pub fn get_range(&self, start_time: Timestamp, end_time: Timestamp) -> TsdbResult<Vec<Sample>> {
         let mut result: BinaryHeap<Sample> = BinaryHeap::new();
         let mut timestamps = Vec::with_capacity(64);
@@ -488,16 +490,15 @@ impl Default for TimeSeries {
 }
 
 /// Return the index of the chunk in which the timestamp belongs. Assumes !chunks.is_empty()
-fn get_chunk_index(chunks: &Vec<TimeSeriesChunk>, timestamp: Timestamp) -> (usize, bool) {
+fn get_chunk_index(chunks: &[TimeSeriesChunk], timestamp: Timestamp) -> (usize, bool) {
     let len = chunks.len();
-    let slice = chunks.as_slice();
-    let first = slice[0].first_timestamp();
-    let last = slice[len - 1].last_timestamp();
+    let first = chunks[0].first_timestamp();
+    let last = chunks[len - 1].last_timestamp();
     if timestamp <= first {
         return (0, false);
     }
     if timestamp >= last {
-        return (slice.len() - 1, false);
+        return (len - 1, false);
     }
     return match chunks.binary_search_by(|probe| {
         if timestamp < probe.first_timestamp() {
@@ -574,10 +575,7 @@ impl<'a> SampleIterator<'a> {
             return false;
         }
         self.sample_index = if self.first_iter {
-            match self.timestamps.binary_search(&self.start) {
-                Ok(idx) => idx,
-                Err(idx) => idx,
-            }
+            self.timestamps.binary_search(&self.start).unwrap_or_else(|idx| idx)
         } else {
             0
         };

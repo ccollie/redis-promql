@@ -24,7 +24,7 @@ pub struct Settings {
     /// evaluation_interval of the parent group.
     pub max_resolve_duration: Duration,
 
-    /// The maximum number of time series, which can be returned from /api/v1/series. 
+    /// The maximum number of time series which can be returned from /api/v1/series.
     /// This option allows limiting memory usage
     pub max_series_limit: usize,  
 

@@ -125,6 +125,11 @@ impl PartialOrd for Label {
     }
 }
 
+impl Ord for Label {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
 
 #[non_exhaustive]
 #[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
@@ -189,18 +194,22 @@ pub enum DuplicatePolicy {
 
 impl Display for DuplicatePolicy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DuplicatePolicy::Block => write!(f, "block"),
-            DuplicatePolicy::KeepFirst => write!(f, "first"),
-            DuplicatePolicy::KeepLast => write!(f, "last"),
-            DuplicatePolicy::Min => write!(f, "min"),
-            DuplicatePolicy::Max => write!(f, "max"),
-            DuplicatePolicy::Sum => write!(f, "sum"),
-        }
+        write!(f, "{}", self.as_str())
     }
 }
 
 impl DuplicatePolicy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DuplicatePolicy::Block => "block",
+            DuplicatePolicy::KeepFirst => "first",
+            DuplicatePolicy::KeepLast => "last",
+            DuplicatePolicy::Min => "min",
+            DuplicatePolicy::Max => "max",
+            DuplicatePolicy::Sum => "sum",
+        }
+    }
+
     pub fn value_on_duplicate(self, ts: Timestamp, old: f64, new: f64) -> TsdbResult<f64> {
         use DuplicatePolicy::*;
         let has_nan = old.is_nan() || new.is_nan();
@@ -211,7 +220,7 @@ impl DuplicatePolicy {
         }
         Ok(match self {
             Block => {
-                // todo: format storage as iso-8601 or rfc3339
+                // todo: format ts as iso-8601 or rfc3339
                 let msg = format!("{new} @ {ts}");
                 return Err(TsdbError::DuplicateSample(msg));
             }

@@ -16,7 +16,7 @@ macro_rules! modulo_signed_ext_impl {
 }
 modulo_signed_ext_impl! { i8 i16 i32 i64 i128 }
 
-/// Retyrns the index of the first timestamp that is greater than or equal to `start_ts`.
+/// Returns the index of the first timestamp that is greater than or equal to `start_ts`.
 pub(crate) fn get_timestamp_index(timestamps: &[i64], start_ts: Timestamp) -> Option<usize> {
     if timestamps.is_empty() {
         return None;
