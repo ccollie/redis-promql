@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::default::Default;
 use std::hash::Hasher;
 use std::ops::Add;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use std::vec;
@@ -11,6 +11,7 @@ use ahash::AHashMap;
 use enquote::enquote;
 use metricsql_engine::TimestampTrait;
 use metricsql_parser::prelude::METRIC_NAME;
+use redis_module::Context;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 use xxhash_rust::xxh3::Xxh3;
@@ -23,7 +24,7 @@ use crate::rules::alerts::datasource::datasource::{QuerierBuilder, QuerierParams
 use crate::rules::alerts::executor::Executor;
 use crate::storage::{Label, Timestamp};
 
-/// Control messages sent to Group channel duuring evaluation
+/// Control messages sent to Group channel during evaluation
 pub(crate) enum GroupMessage {
     Stop,
     Update(Group),
@@ -31,7 +32,7 @@ pub(crate) enum GroupMessage {
 }
 
 /// Group is an entity for grouping rules
-#[derive(Debug, Clone, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Group {
     pub name: String,
     pub id: u64,
@@ -61,12 +62,51 @@ pub struct Group {
     pub timer_id: u64,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+impl Clone for Group {
+    fn clone(&self) -> Self {
+        Group {
+            source_type: self.source_type.clone(),
+            name: self.name.clone(),
+            id: self.id,
+            file: self.file.clone(),
+            alerting_rules: self.alerting_rules.clone(),
+            recording_rules: self.recording_rules.clone(),
+            interval: self.interval.clone(),
+            eval_offset: self.eval_offset.clone(),
+            limit: self.limit,
+            concurrency: self.concurrency,
+            checksum: self.checksum.clone(),
+            params: self.params.clone(),
+            headers: self.headers.clone(),
+            notifier_headers: self.notifier_headers.clone(),
+            labels: self.labels.clone(),
+            last_evaluation: self.last_evaluation,
+            metrics: self.metrics.clone(),
+            cancelled: AtomicBool::new(self.cancelled.load(Ordering::Relaxed)),
+            first_run: AtomicBool::new(self.first_run.load(Ordering::Relaxed)),
+            eval_alignment: self.eval_alignment,
+            timer_id: self.timer_id,
+        }
+    }
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct GroupMetrics {
     iteration_total: AtomicU64,
     iteration_duration: AtomicU64,
     iteration_missed: AtomicU64,
     iteration_interval: AtomicU64,
+}
+
+impl Clone for GroupMetrics {
+    fn clone(&self) -> Self {
+        GroupMetrics {
+            iteration_total: AtomicU64::new(self.iteration_total.load(Ordering::Relaxed)),
+            iteration_duration: AtomicU64::new(self.iteration_duration.load(Ordering::Relaxed)),
+            iteration_missed: AtomicU64::new(self.iteration_missed.load(Ordering::Relaxed)),
+            iteration_interval: AtomicU64::new(self.iteration_interval.load(Ordering::Relaxed)),
+        }
+    }
 }
 
 impl Group {
@@ -126,7 +166,7 @@ impl Group {
                 r.labels = labels.into();
             }
 
-            if r.rule_type() == RuleType::Alerting {
+            if matches!(r.rule_type(), RuleType::Alerting) {
                 let ar = AlertingRule::new(&r, &g);
                 g.alerting_rules.push(ar);
             } else {
@@ -173,7 +213,7 @@ impl Group {
                 evaluation_interval: self.interval.clone(),
                 eval_offset: Default::default(),
                 query_params: self.params.clone(),
-                headers: self.headers.clone(),
+                headers: self.headers.into(),
                 debug: ar.debug,
             });
             ar.restore(ctx, ts, look_back)
@@ -243,6 +283,7 @@ impl Group {
 
     //////////////////////////////////////////////
     pub(super) fn start(&mut self,
+                        ctx: &Context,
                         nts: fn() -> Vec<dyn Notifier>,
                         rw: Arc<WriteQueue>,
                         rr: Option<&dyn QuerierBuilder>) {
@@ -251,39 +292,38 @@ impl Group {
         // sleep random duration to spread group rules evaluation
         // over time in order to reduce load on datasource.
         if !should_skip_rand_sleep_on_group_start()  {
-            let sleep_before_start = delay_before_start(eval_ts, self.ID(), self.interval, self.eval_offset);
+            let sleep_before_start = delay_before_start(eval_ts, self.id(), self.interval, self.eval_offset);
             info!("will start in %v", sleep_before_start);
 
-            sleepTimer = time.NewTimer(sleep_before_start);
+            let sleep_timer = time.NewTimer(sleep_before_start);
             select {
                 case <-ctx.Done():
-                    sleepTimer.Stop()
+                sleepTimer: sleep_timer.stop()
                 return
                 case <-g.doneCh:
-    sleepTimer.Stop()
+    sleep_timer.Stop()
     return
-    case <-sleepTimer.C:
+    case <- sleepTimer: sleep_timer.C:
     }
     eval_ts = eval_ts.add(sleep_before_start)
     }
 
-    e := &executor{
-    Rw:                       rw,
-    Notifiers:                nts,
-    notifierHeaders:          g.NotifierHeaders,
-    previouslySentSeriesToRW: make(map[uint64]map[string][]prompbmarshal.Label),
-    }
+    let e = Executor::new(nts, &self.notifier_headers, rw);
 
     info!("started rule group \"{}\"", self.name);
 
-    evalCtx, cancel := context.WithCancel(ctx)
+    evalCtx, cancel = context.WithCancel(ctx)
     g.evalCancel = cancel
-    defer g.evalCancel()
+    defer! {
+      self.eval_cancel()
+    }
 
     self.eval(evalCtx, eval_ts);
 
-    t := time.NewTicker(g.Interval)
-    defer t.Stop()
+    let t = time.NewTicker(g.Interval);
+    defer!{
+      t.stop();
+    }
 
     // restore the rules state after the first evaluation
     // so only active alerts can be restored.
@@ -295,7 +335,7 @@ impl Group {
 
     for {
     select {
-    case <-ctx.Done():
+    case <-ctx.done():
         info!("group \"{}\": context cancelled", self.name)
     return
     case <-g.doneCh:
@@ -308,30 +348,28 @@ impl Group {
     // somewhere else to unblock group from the rules evaluation.
     // we recreate the evalCtx and g.evalCancel, so it can
     // be called again.
-    evalCtx, cancel = context.WithCancel(ctx)
-    g.evalCancel = cancel
 
     self.update_with(ng)
         .ok_or_else(|| error!(format!("group {}: failed to update", self.name)));
 
     // ensure that staleness is tracked for existing rules only
-    e.purgeStaleSeries(g.Rules)
+    e.purge_stale_results(g.Rules);
     e.notifier_headers = self.notifier_headers.clone();
 
     g.infof("re-started");
     case <-t.C:
-        let missed = (time.Since(eval_ts) / self.interval) - 1;
-    if missed < 0 {
-    // missed can become < 0 due to irregular delays during evaluation
-    // which can result in time.Since(eval_ts) < g.Interval
-    missed = 0;
-    }
-    if missed > 0 {
-        self.metrics.iterationMissed.Inc()
-    }
-    eval_ts = eval_ts.add((missed + 1) * self.interval);
+        let mut missed = (time.since(eval_ts) / self.interval) - 1;
+        if missed < 0 {
+            // missed can become < 0 due to irregular delays during evaluation
+            // which can result in time.Since(eval_ts) < g.Interval
+            missed = 0;
+        }
+        if missed > 0 {
+            self.metrics.iteration_missed.inc()
+        }
+        eval_ts = eval_ts.add(Duration::from_millis((missed + 1) * self.interval));
 
-    eval(evalCtx, eval_ts)
+        eval(evalCtx, eval_ts)
     }
     }
     }
@@ -398,7 +436,9 @@ impl Group {
         let resolve_duration = self.resolve_duration();
         let ts = self.adjust_req_timestamp(ts);
 
-        let errs = e.exec_concurrently(g.rules, ts, resolve_duration, self.limit);
+        // todo: rayon
+        let errs = e.exec_concurrently(&mut self.recording_rules, ts, resolve_duration, self.limit);
+        let errs1 = e.exec_concurrently(&mut self.alerting_rules, ts, resolve_duration, self.limit);
         for err in errs {
             if err != nil {
                 let msg = format!("group {}: {:?}", self.name, err);
@@ -429,19 +469,21 @@ impl Group {
         }
 
         // ensure that staleness is tracked for existing rules only
-        e.purge_stale_series(self.rules);
+        e.purge_stale_series(&self.recording_rules);
+        e.purge_stale_series(&self.alerting_rules);
+
         e.notifier_headers = self.notifier_headers.clone();
 
-        let mut missed = (self.last_evaluation - eval_ts) / self.interval - 1;
+        let mut missed = (self.last_evaluation - eval_ts) / (self.interval.as_millis() - 1) as u64 as i64;
         if missed < 0 {
             // missed can become < 0 due to irregular delays during evaluation
             // which can result in time.since(eval_ts) < g.interval
             missed = 0;
         }
         if missed > 0 {
-            self.metrics.iteration_missed.fetch_add(missed, Ordering::Relaxed);
+            self.metrics.iteration_missed.fetch_add(missed as u64, Ordering::Relaxed);
         }
-        let eval_ts = eval_ts.add((missed + 1) * self.interval);
+        let eval_ts = eval_ts.add(((missed + 1) * self.interval.as_millis());
         self.eval(&mut e, eval_ts)
     }
 

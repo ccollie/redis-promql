@@ -14,7 +14,7 @@ const ERR_DUPLICATE: &str =
     "result contains metrics with the same labelset after applying rule labels.";
 
 /// RecordingRule is a Rule that evaluates a configured expression and returns a timeseries as result.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordingRule {
     rule_type: RuleType,
     rule_id: u64,
@@ -23,16 +23,12 @@ pub struct RecordingRule {
     labels: Labels,
     group_id: u64,
 
-    #[serde(skip)]
-    querier: Box<dyn Querier>,
-
     // state stores recent state changes during evaluations
     state: Vec<RuleStateEntry>,
-
     metrics: RecordingRuleMetrics,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RecordingRuleMetrics {
     errors: AtomicU64,
     samples: AtomicU64,
@@ -63,8 +59,8 @@ impl RecordingRule {
         return new_time_series(m.key, &m.values, &m.timestamps, labels);
     }
 
-    fn run_query(&self, ts: Timestamp) -> AlertsResult<Vec<DatasourceMetric>> {
-        self.querier
+    fn run_query(&self, querier: &impl Querier, ts: Timestamp) -> AlertsResult<Vec<DatasourceMetric>> {
+        querier
             .query(&self.expr, ts)
             .map_err(|e| AlertsError::QueryExecutionError(format!("{}: {:?}", self.expr, e)))
     }
@@ -79,14 +75,14 @@ impl Rule for RecordingRule {
         RuleType::Recording
     }
 
-    fn exec(&mut self, ts: Timestamp, limit: usize) -> AlertsResult<Vec<RawTimeSeries>> {
+    fn exec(&mut self, querier: &impl Querier, ts: Timestamp, limit: usize) -> AlertsResult<Vec<RawTimeSeries>> {
         let start = current_time_millis();
 
         let mut cur_state = RuleStateEntry::default();
         cur_state.time = start;
         cur_state.at = ts;
 
-        let res = self.run_query(ts);
+        let res = self.run_query(querier, ts);
         cur_state.duration = Duration::from_millis((current_time_millis() - start) as u64);
 
         if let Err(err) = res {
@@ -134,9 +130,8 @@ impl Rule for RecordingRule {
     /// exec_range executes recording rule on the given time range similarly to Exec.
     /// It doesn't update internal states of the Rule and meant to be used just
     /// to get time series for backfilling.
-    fn exec_range(&mut self, start: Timestamp, end: Timestamp) -> AlertsResult<Vec<RawTimeSeries>> {
-        let mut res = self
-            .querier
+    fn exec_range(&mut self, querier: &impl Querier, start: Timestamp, end: Timestamp) -> AlertsResult<Vec<RawTimeSeries>> {
+        let mut res = querier
             .query_range(&self.expr, start, end)
             .map_err(|e| AlertsError::QueryExecutionError(format!("{}: {:?}", self.expr, e)))?;
 

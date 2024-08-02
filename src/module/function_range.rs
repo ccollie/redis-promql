@@ -128,7 +128,6 @@ pub fn range(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 
     let samples = series.get_range(start, end)
         .map_err(|e| {
-            // todo: log error
             ctx.log_warning(format!("ERR fetching range {:?}", e).as_str());
             RedisError::Str("ERR fetching range")
         })?;

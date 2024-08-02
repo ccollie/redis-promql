@@ -1,4 +1,6 @@
 use metricsql_engine::parse_metric_selector;
+use regex::Regex;
+use crate::common::regex_util::simplify;
 use crate::storage::Label;
 
 /// new_labels_from_string creates labels from s, which can have the form `metric{labels}`.
@@ -25,7 +27,7 @@ pub fn concat_label_values(labels: &[Label], label_names: &[String], separator: 
     let mut need_truncate = false;
     let mut dst = String::with_capacity(64); // todo: get from pool
     for label_name in label_names.iter() {
-        if let Some(label) = labels.iter().find(|lbl| lbl.name == label_name) {
+        if let Some(label) = labels.iter().find(|lbl| &lbl.name == label_name) {
             dst.push_str(&label.value);
             dst.push_str(separator);
             need_truncate = true;
@@ -96,4 +98,10 @@ pub fn contains_all_label_values(labels: &[Label], target_label: &str, source_la
         }
     }
     true
+}
+
+pub(super) fn get_regex_literal_prefix(regex: &Regex) -> (String, bool) {
+    let (prefix, suffix) = simplify(regex.as_str())
+        .unwrap_or((EMPTY_STRING.into(), EMPTY_STRING.into()));
+    (prefix, suffix.is_empty())
 }

@@ -30,7 +30,7 @@ const RESOLVED_RETENTION: Duration = Duration::from_micros(15 * 60 * 1000);
 // todo: move to global config
 const DISABLE_ALERT_GROUP_LABEL: bool = false;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct AlertingRuleMetrics {
     errors: AtomicU64,
     pending: AtomicU64,
@@ -39,8 +39,20 @@ pub struct AlertingRuleMetrics {
     series_fetched: AtomicU64,
 }
 
+impl Clone for AlertingRuleMetrics {
+    fn clone(&self) -> Self {
+        AlertingRuleMetrics {
+            errors: AtomicU64::new(self.errors.load(Ordering::Relaxed)),
+            pending: AtomicU64::new(self.pending.load(Ordering::Relaxed)),
+            active: AtomicU64::new(self.active.load(Ordering::Relaxed)),
+            sample: AtomicU64::new(self.sample.load(Ordering::Relaxed)),
+            series_fetched: AtomicU64::new(self.series_fetched.load(Ordering::Relaxed)),
+        }
+    }
+}
+
 /// AlertingRule is basic alert entity
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AlertingRule {
     pub rule_type: RuleType,
     rule_id: u64,
@@ -55,14 +67,34 @@ pub struct AlertingRule {
     pub eval_interval: Duration,
     pub debug: bool,
 
-    #[serde(skip)]
-    querier: Box<dyn Querier>,
     /// stores list of active alerts
     pub alerts: RwLock<HashMap<u64, Alert>>,
     /// state stores recent state changes during evaluations
     pub state: RuleState,
 
     pub metrics: AlertingRuleMetrics,
+}
+
+impl Clone for AlertingRule {
+    fn clone(&self) -> Self {
+        AlertingRule {
+            rule_type: self.rule_type.clone(),
+            rule_id: self.rule_id,
+            name: self.name.clone(),
+            expr: self.expr.clone(),
+            r#for: self.r#for,
+            keep_firing_for: self.keep_firing_for,
+            labels: self.labels.clone(),
+            annotations: self.annotations.clone(),
+            group_id: self.group_id,
+            group_name: self.group_name.clone(),
+            eval_interval: self.eval_interval,
+            debug: self.debug,
+            alerts: RwLock::new(self.alerts.read().unwrap().clone()),
+            state: self.state.clone(),
+            metrics: self.metrics.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
@@ -237,7 +269,7 @@ impl AlertingRule {
             .iter()
             .filter(|(_hash, a)| a.state != AlertState::Inactive)
             .map(|(_, alert)| self.alert_to_timeseries(alert, timestamp))
-            .collect()
+            .collect::<Vec<RawTimeSeries>>()
     }
 
     fn alert_to_timeseries(&self, alert: &Alert, timestamp: Timestamp) -> Vec<RawTimeSeries> {
@@ -385,30 +417,35 @@ impl Rule for AlertingRule {
         RuleType::Alerting
     }
 
-    fn exec(&mut self, ts: Timestamp, limit: usize) -> AlertsResult<Vec<RawTimeSeries>> {
+    fn exec(&mut self, querier: &impl Querier, ts: Timestamp, limit: usize) -> AlertsResult<Vec<RawTimeSeries>> {
         let start = current_time_millis();
-        let mut res = self.querier.query(&self.expr, ts)?;
-        let end = current_time_millis();
+
         let mut cur_state = RuleStateEntry {
             time: start,
             at: ts,
-            duration: Duration::from_millis((end - start) as u64),
-            samples: res.data.len(),
+            duration: Duration::from_millis(0),
+            samples: 0,
             err: None,
-            series_fetched: res.series_fetched,
+            series_fetched: 0,
         };
+
+        let mut res = match querier.query(&self.expr, ts) {
+            Ok(res) => res,
+            Err(e) => {
+                self.metrics.errors.fetch_add(1, Ordering::Relaxed);
+                cur_state.err = Some(e.clone());
+                cur_state.duration = Duration::from_millis((current_time_millis() - start) as u64);
+                let msg = format!("failed to execute query {}: {:?}", self.expr, e);
+                return Err(e);
+            }
+        };
+
+        let end = current_time_millis();
+        cur_state.duration = Duration::from_millis((end - start) as u64);
 
         defer! {
             self.state.add(cur_state)
         }
-
-        if let Err(e) = res {
-            self.metrics.errors.fetch_add(1, Ordering::Relaxed);
-            cur_state.err = Some(e.clone());
-            let msg = format!("failed to execute query {}: {:?}", self.expr, res);
-            return Err(e);
-        }
-        res = res.unwrap();
 
         // self.logDebugf(ts, nil, "query returned {} samples (elapsed: {})", curState.samples, curState.duration)
 
@@ -428,7 +465,7 @@ impl Rule for AlertingRule {
             alerts.remove(&h);
         }
 
-        let query_fn: QueryFn = |query: &str| -> AlertsResult<QueryResult> { self.querier.query(query, ts) };
+        let query_fn: QueryFn = |query: &str| -> AlertsResult<QueryResult> { querier.query(query, ts) };
 
         let mut updated = HashSet::new();
         for m in res.data.into_iter() {
@@ -534,11 +571,11 @@ impl Rule for AlertingRule {
     }
 
     /// exec_range executes alerting rule on the given time range similarly to exec.
-    /// It doesn't update internal states of the Rule and meant to be used just to get time series
+    /// It doesn't update internal states of the Rule and is meant to be used just to get time series
     /// for back-filling.
     /// It returns ALERT and ALERT_FOR_STATE time series as a result.
-    fn exec_range(&mut self, start: Timestamp, end: Timestamp) -> AlertsResult<Vec<RawTimeSeries>> {
-        let res = self.querier.query_range(&self.expr, start, end)?;
+    fn exec_range(&mut self, querier: &impl Querier, start: Timestamp, end: Timestamp) -> AlertsResult<Vec<RawTimeSeries>> {
+        let res = querier.query_range(&self.expr, start, end)?;
         let mut result: Vec<RawTimeSeries> = vec![];
         let q_fn = |query: &str| -> AlertsResult<Vec<DatasourceMetric>> {
             return Err(AlertsError::Generic("`query` template isn't supported in replay mode".to_string()));

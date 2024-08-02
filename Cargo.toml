@@ -24,8 +24,9 @@ metricsql_common = { git = "https://github.com/ccollie/metricsql", branch = "mai
 metricsql_encoding = { git = "https://github.com/ccollie/metricsql", branch = "main" }
 metricsql_engine = { git = "https://github.com/ccollie/metricsql", branch = "main" }
 metricsql_parser = { git = "https://github.com/ccollie/metricsql", branch = "main" }
+pco = "0.3"
 q_compress = "0.11.7"
-redis-module = "2.0.7"
+redis-module = "2.0"
 redis-module-macros = "2.0.7"
 scopeguard = "1.2.0"
 serde = { version = "1.0", features = ["derive"] }
@@ -37,11 +38,12 @@ regex = "1.10"
 regex-syntax = { version = "0.8", features = [] }
 roaring = { version = "0.10", features = ["serde"]}
 timer = "0.2.0"
+tsz = "0.1.4"
 url = { version = "2.5", features = ["serde"] }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 rand = "0.8.5"
 rand_distr = "0.4.3"
-tracing = "0.1.40"
+tracing = "0.1"
 
 [lib]
 crate-type=["rlib", "cdylib"]

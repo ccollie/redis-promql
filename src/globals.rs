@@ -1,54 +1,15 @@
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
+use ahash::HashMapExt;
+use metricsql_common::hash::IntMap;
 use metricsql_engine::prelude::{Context as QueryContext};
-use rayon::ThreadPool;
-use redis_module::RedisGILGuard;
-use crate::index::TimeSeriesIndex;
+use crate::index::{TimeSeriesIndex};
 use crate::provider::TsdbDataProvider;
+use redis_module::{Context, RedisModule_GetSelectedDb};
 
-static TIMESERIES_INDEX: OnceLock<TimeSeriesIndex> = OnceLock::new();
+pub type TimeSeriesIndexMap = IntMap<u32, TimeSeriesIndex>;
+
+static TIMESERIES_INDEX: OnceLock<TimeSeriesIndexMap> = OnceLock::new();
 static QUERY_CONTEXT: OnceLock<QueryContext> = OnceLock::new();
-
-const DEFAULT_EXECUTION_THREADS: usize = 4;
-
-pub struct GlobalCtx {
-    pool: Mutex<Option<ThreadPool>>,
-    /// Thread pool which used to run management tasks that should not be
-    /// starved by user tasks (which run on [`GlobalCtx::pool`]).
-    management_pool: RedisGILGuard<Option<ThreadPool>>,
-}
-
-static mut GLOBALS: Option<GlobalCtx> = None;
-
-fn get_globals() -> &'static GlobalCtx {
-    unsafe { GLOBALS.as_ref().unwrap() }
-}
-
-fn get_globals_mut() -> &'static mut GlobalCtx {
-    unsafe { GLOBALS.as_mut().unwrap() }
-}
-
-pub(crate) fn get_thread_pool() -> &'static mut ThreadPool {
-    let mut pool = get_globals().pool.lock().unwrap();
-    pool.get_or_insert_with(|| {
-        // todo: get thread count from env
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(DEFAULT_EXECUTION_THREADS)
-            .thread_name(|idx| format!("promql-pool-{}", idx))
-            .build()
-            .unwrap()
-    })
-}
-
-
-/// Executes the passed job object in a dedicated thread allocated
-/// from the global module thread pool.
-pub(crate) fn execute_on_pool<F: FnOnce() + Send + 'static>(job: F) {
-    get_thread_pool()
-        .execute(move || {
-            job();
-        });
-}
-
 
 pub fn get_query_context() -> &'static QueryContext {
     QUERY_CONTEXT.get_or_init(create_query_context)
@@ -71,9 +32,13 @@ pub(crate) fn set_query_context(ctx: QueryContext) {
     }
 }
 
+pub unsafe fn get_current_db(ctx: &Context) -> u32 {
+    let db = RedisModule_GetSelectedDb.unwrap()(ctx.ctx);
+    db as u32
+}
 
-// todo: segregate by database
-// see RedisModule_GetSelectedDb
-pub fn get_timeseries_index() -> &'static TimeSeriesIndex {
-    TIMESERIES_INDEX.get_or_init(|| TimeSeriesIndex::new())
+pub fn get_timeseries_index(ctx: &Context) -> &'static mut TimeSeriesIndex {
+    let mut map = TIMESERIES_INDEX.get_or_init(|| TimeSeriesIndexMap::new());
+    let db = unsafe { get_current_db(ctx) };
+    map.entry(db).or_insert_with(TimeSeriesIndex::new)
 }

@@ -12,7 +12,7 @@ use crate::common::regex_util::match_handlers::StringMatchHandler;
 /// - substring match such as ".*foo.*" or ".+bar.+"
 ///
 /// The rest of regexps are also optimized by returning cached match results for the same input strings.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct PromRegex {
     /// prefix contains literal prefix for regex.
     /// For example, prefix="foo" for regex="foo(a|b)"
@@ -38,11 +38,11 @@ impl PromRegex {
         Ok(pr)
     }
 
-    /// match_string returns true if s matches pr.
+    /// is_match returns true if s matches pr.
     ///
     /// The pr is automatically anchored to the beginning and to the end
     /// of the matching string with '^' and '$'.
-    pub fn match_string(&self, s: &str) -> bool {
+    pub fn is_match(&self, s: &str) -> bool {
         if self.prefix_matcher.matches(s) {
             if let Some(suffix) = s.strip_prefix(&self.prefix) {
                 return self.suffix_matcher.matches(suffix);

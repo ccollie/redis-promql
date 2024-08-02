@@ -6,7 +6,7 @@ use metricsql_engine::TimestampTrait;
 use crate::common::constants::STALE_NAN;
 use crate::common::types::Timestamp;
 use crate::config::get_global_settings;
-use crate::rules::alerts::{AlertingRule, AlertsError, AlertsResult, Notifier, WriteQueue};
+use crate::rules::alerts::{AlertingRule, AlertsError, AlertsResult, Notifier, Querier, WriteQueue};
 use crate::rules::{new_time_series, RawTimeSeries, Rule, RuleType};
 use crate::rules::alerts::group::labels_to_string;
 use crate::storage::Label;
@@ -88,31 +88,40 @@ impl Executor {
         map.retain(|id, _| id_hash_set.contains(id));
     }
 
-    pub(super) fn exec_concurrently(&mut self, rules: &[impl Rule], ts: Timestamp, resolve_duration: Duration, limit: usize) -> AlertsResult<()> {
-        for rule in rules {
-            res < -self.exec(rule, ts, resolve_duration, limit)
-        }
-        return res;
+    pub(super) fn exec_concurrently(&mut self,
+                                    querier: &impl Querier,
+                                    rules: &mut [impl Rule],
+                                    ts: Timestamp,
+                                    resolve_duration: Duration,
+                                    limit: usize) -> AlertsResult<()> {
+        rules
+            .par_items_mut()
+            .try_for_each(|rule| self.exec(rule, querier, ts, resolve_duration, limit))
     }
 
-    pub fn exec(&mut self, rule: &mut impl Rule, ts: Timestamp, resolve_duration: Duration, limit: usize) -> AlertsResult<()> {
-        let tss = rule.exec(ts, limit)
+    pub fn exec(&mut self,
+                querier: &impl Querier,
+                rule: &mut impl Rule,
+                ts: Timestamp,
+                resolve_duration: Duration,
+                limit: usize) -> AlertsResult<()> {
+        let tss = rule.exec(querier, ts, limit)
             .map_err(|err| AlertsError::QueryExecutionError(format!("rule {:?}: failed to execute: {:?}", rule, err)))?;
 
-        self.push_to_rw(&rule, &tss)?;
-
         let stale_series = self.get_stale_series(rule, &tss, ts);
-        self.push_to_rw(&rule, &stale_series)?;
+
+        self.push_to_rw(&rule, tss)?;
+        self.push_to_rw(&rule, stale_series)?;
 
         if rule.rule_type() == RuleType::Alerting {
             let settings = get_global_settings();
-            let alerting_rule = rule.as_any().downcast_ref::<AlertingRule>().unwrap();
+            let alerting_rule = rule.downcast_ref::<AlertingRule>().unwrap();
             return self.send_notifications(alerting_rule, ts, resolve_duration, settings.resend_delay);
         }
         Ok(())
     }
 
-    fn push_to_rw(&mut self, rule: &impl Rule, tss: &[RawTimeSeries]) -> AlertsResult<()> {
+    fn push_to_rw(&mut self, rule: &impl Rule, tss: Vec<RawTimeSeries>) -> AlertsResult<()> {
         let mut last_err = "".to_string();
         for ts in tss {
             if let Err(err) = self.rw.add(ts) {
@@ -138,7 +147,7 @@ impl Executor {
                 err_gr.push(msg);
             }
         }
-        return err_gr.Err();
+        return Ok(err_gr);
     }
 
     pub(super) fn on_tick(&mut self) {

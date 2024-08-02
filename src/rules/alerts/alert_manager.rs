@@ -1,7 +1,9 @@
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
+
 use ahash::{AHashMap, HashMap};
 use redis_module::Context;
+
 use crate::rules::alerts::{AlertsError, AlertsResult, Group, GroupConfig, Notifier, QuerierBuilder, WriteQueue};
 
 /// manager controls group states
@@ -34,12 +36,12 @@ impl Manager {
     }
 
     fn start_group(&mut self, ctx: &Context, group: Group, restore: bool) -> AlertsResult<()> {
-        let id = group.ID();
+        let id = group.id();
         let mut group = group;
         if restore {
             group.start(ctx, self.notifiers, Arc::clone(&self.rw), self.rr)
         } else {
-            group.start(ctx, self.notifiers, Arc::clone(&self.rw), nil)
+            group.start(ctx, self.notifiers, Arc::clone(&self.rw), None)
         }
         let mut groups = self.groups.write().unwrap();
         groups.insert(id, group);

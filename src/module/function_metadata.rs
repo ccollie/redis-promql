@@ -16,7 +16,7 @@ use crate::module::arg_parse::{parse_series_selector, TimestampRangeValue};
 /// https://prometheus.io/docs/prometheus/latest/querying/api/#finding-series-by-label-matchers
 pub(crate) fn series(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let label_args = parse_metadata_command_args(ctx, args, true)?;
-    let ts_index = get_timeseries_index();
+    let ts_index = get_timeseries_index(ctx);
 
     let series =
         ts_index.series_by_matchers(ctx, &label_args.matchers, label_args.start, label_args.end);
@@ -42,7 +42,7 @@ pub(crate) fn series(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 
 pub(crate) fn cardinality(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let label_args = parse_metadata_command_args(ctx, args, true)?;
-    let ts_index = get_timeseries_index();
+    let ts_index = get_timeseries_index(ctx);
 
     let series =
         ts_index.series_by_matchers(ctx, &label_args.matchers, label_args.start, label_args.end);
@@ -53,7 +53,7 @@ pub(crate) fn cardinality(ctx: &Context, args: Vec<RedisString>) -> RedisResult 
 /// https://prometheus.io/docs/prometheus/latest/querying/api/#getting-label-names
 pub(crate) fn label_names(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let label_args = parse_metadata_command_args(ctx, args, false)?;
-    let ts_index = get_timeseries_index();
+    let ts_index = get_timeseries_index(ctx);
 
     let labels =
         ts_index.labels_by_matchers(ctx, &label_args.matchers, label_args.start, label_args.end);
@@ -91,7 +91,7 @@ pub(crate) fn label_values(ctx: &Context, args: Vec<RedisString>) -> RedisResult
     }
     let label_name = args.remove(1).try_as_str()?;
     let label_args = parse_metadata_command_args(ctx, args, true)?;
-    let ts_index = get_timeseries_index();
+    let ts_index = get_timeseries_index(ctx);
 
     let mut series =
         ts_index.series_by_matchers(ctx, &label_args.matchers, label_args.start, label_args.end);

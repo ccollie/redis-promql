@@ -24,7 +24,7 @@ pub fn alter(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     }
 
     if let Some(labels) = options.labels {
-        let ts_index = get_timeseries_index();
+        let ts_index = get_timeseries_index(ctx);
         let key = parsed_key.to_string();
 
         ts_index.remove_series_by_key(&key);

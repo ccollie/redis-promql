@@ -3,16 +3,18 @@ use regex::Regex;
 use crate::common::regex_util::{PromRegex, remove_start_end_anchors, simplify};
 use crate::relabel::{DEFAULT_ORIGINAL_REGEX_FOR_RELABEL_CONFIG, DEFAULT_REGEX_FOR_RELABEL_CONFIG};
 
-pub(in crate::relabel) fn parse_regex(regex: Option<Regex>, strip_anchors: bool) -> Result<(Regex, Regex, PromRegex), String> {
-    let reg_str = regex.as_str();
+const EMPTY_REGEX: &str = "";
+
+pub(super) fn parse_regex(regex: Option<Regex>, strip_anchors: bool) -> Result<(Regex, Regex, PromRegex), String> {
+    let reg_str = regex.as_ref().map_or(EMPTY_REGEX, |r| r.as_str());
     let (regex_anchored, regex_original_compiled, prom_regex) =
         if !is_empty_regex(&regex) && !is_default_regex(&reg_str) {
             let mut regex = reg_str;
             let mut regex_orig = regex;
             if strip_anchors {
                 let stripped = remove_start_end_anchors(&regex);
-                regex_orig = stripped.to_string();
-                regex = format!("^(?:{stripped})$");
+                regex_orig = &*stripped.to_string();
+                regex = format!("^(?:{stripped})$").as_str();
             }
             let regex_anchored =
                 Regex::new(&regex).map_err(|e| format!("cannot parse `regex` {regex}: {:?}", e))?;
@@ -32,6 +34,7 @@ pub(in crate::relabel) fn parse_regex(regex: Option<Regex>, strip_anchors: bool)
             PromRegex::new(".*").unwrap(),
         )
     };
+    Ok((regex_anchored, regex_original_compiled, prom_regex))
 }
 
 

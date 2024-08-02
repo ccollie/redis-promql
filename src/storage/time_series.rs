@@ -301,6 +301,7 @@ impl TimeSeries {
     /// todo: return a SeriesSlice or SeriesData so we don't realloc
     pub fn get_range(&self, start_time: Timestamp, end_time: Timestamp) -> TsdbResult<Vec<Sample>> {
         let mut result: BinaryHeap<Sample> = BinaryHeap::new();
+        // todo: possibly used pooled vecs
         let mut timestamps = Vec::with_capacity(64);
         let mut values = Vec::with_capacity(64);
 

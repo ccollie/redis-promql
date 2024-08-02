@@ -1,6 +1,7 @@
 use crate::common::regex_util::PromRegex;
-use crate::relabel::{DEFAULT_REGEX_FOR_RELABEL_CONFIG, fill_label_references, IfExpression};
+use crate::relabel::{DEFAULT_REGEX_FOR_RELABEL_CONFIG, fill_label_references, IfExpression, is_default_regex_for_config};
 use crate::relabel::actions::Action;
+use crate::relabel::actions::utils::filter_labels;
 use crate::relabel::regex_parse::parse_regex;
 use crate::relabel::string_replacer::StringReplacer;
 use crate::relabel::utils::{concat_label_values, set_label_value};
@@ -39,7 +40,7 @@ impl ReplaceAction {
         let has_label_reference_in_replacement = replacement.contains("{{");
         let has_capture_group_in_target_label = target_label.contains("(");
         let replacer = StringReplacer::new(regex_prom.clone(), replacement.clone())?;
-        let is_default_regex = regex_anchored == *DEFAULT_REGEX_FOR_RELABEL_CONFIG;
+        let is_default_regex = is_default_regex_for_config(&regex_anchored);
 
         Ok(Self {
             source_labels,
@@ -117,6 +118,6 @@ impl Action for ReplaceAction {
     }
 
     fn filter(&self, labels: &[Label]) -> bool {
-        self.if_expr.is_some_and(|if_expr| if_expr.is_match(labels))
+        filter_labels(&self.if_expr, labels)
     }
 }

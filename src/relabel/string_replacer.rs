@@ -2,13 +2,17 @@ use dynamic_lru_cache::DynamicCache;
 use regex::Regex;
 use crate::common::regex_util::PromRegex;
 use crate::relabel::regex_parse::parse_regex;
+use crate::relabel::utils::get_regex_literal_prefix;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct StringReplacer {
-    pub(crate) regex: PromRegex,
-    pub(crate) replacement: String,
-    pub(crate) regex_original: Regex,
-    pub(crate) regex_anchored: Regex,
+    pub regex: PromRegex,
+    pub replacement: String,
+    pub regex_original: Regex,
+    pub regex_anchored: Regex,
+    prefix: String,
+    /// returns false if the .
+    has_suffix: bool,
     has_capture_group_in_replacement: bool,
     has_label_reference_in_replacement: bool,
     cache: DynamicCache<String, String>, // todo: AHash/gxhash
@@ -21,8 +25,12 @@ impl StringReplacer {
         let cache = DynamicCache::new(1000);
         let has_capture_group_in_replacement = replacement.contains("$");
         let has_label_reference_in_replacement = replacement.contains("{{");
+        let (prefix, complete) = get_regex_literal_prefix(&regex_original);
+
         Ok(StringReplacer {
             regex: regex_prom,
+            prefix,
+            has_suffix: !complete,
             replacement,
             cache,
             regex_original,
@@ -33,7 +41,7 @@ impl StringReplacer {
     }
 
     pub fn is_match(&self, s: &str) -> bool {
-        self.regex.match_string(s)
+        self.regex.is_match(s)
     }
 
     /// replaces s with the replacement if s matches '^regex$'.
@@ -41,9 +49,9 @@ impl StringReplacer {
     /// s is returned as is if it doesn't match '^regex$'.
     pub(crate) fn replace_fast(&self, s: &str) -> String {
         // todo: use a COW here
-        let (prefix, complete) = self.regex_original.LiteralPrefix();
+        let prefix = &self.prefix;
         let replacement = &self.replacement;
-        if complete && !self.has_capture_group_in_replacement {
+        if !self.has_suffix && !self.has_capture_group_in_replacement {
             if s == prefix {
                 // Fast path - s matches literal regex
                 return replacement.clone();
@@ -104,7 +112,7 @@ impl StringReplacer {
         if let Some(captures) = self.regex_anchored.captures(source) {
             let mut s = String::with_capacity(template.len() + 16);
             captures.expand(template, &mut s);
-            s
+            return s
         }
         source.to_string()
     }

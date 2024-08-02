@@ -1,4 +1,5 @@
 use crate::relabel::actions::Action;
+use crate::relabel::actions::utils::filter_labels;
 use crate::relabel::IfExpression;
 use crate::relabel::submatch_replacer::SubmatchReplacer;
 use crate::storage::Label;
@@ -28,6 +29,6 @@ impl Action for LabelMapAllAction {
     }
 
     fn filter(&self, labels: &[Label]) -> bool {
-        self.if_expr.is_some_and(|if_expr| if_expr.is_match(labels))
+        filter_labels(&self.if_expr, labels)
     }
 }

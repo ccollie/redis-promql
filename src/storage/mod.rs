@@ -19,6 +19,9 @@ mod uncompressed_chunk;
 mod utils;
 mod series_data;
 mod defrag;
+mod serialization;
+mod compressed_series;
+mod compressed_segment;
 
 use crate::error::{TsdbError, TsdbResult};
 pub(super) use chunk::*;

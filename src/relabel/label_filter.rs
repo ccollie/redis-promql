@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Deref;
 
@@ -6,7 +7,10 @@ use serde::{Deserialize, Serialize};
 use crate::common::regex_util::PromRegex;
 use crate::storage::Label;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// todo: borrow this from metricsql_parser
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Copy, Hash, Serialize, Deserialize,
+)]
 pub enum LabelFilterOp {
     Equal,
     NotEqual,
@@ -55,7 +59,7 @@ impl From<&str> for LabelFilterOp {
 
 
 /// labelFilter contains PromQL filter for `{label op "value"}`
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
 pub struct LabelFilter {
     pub label: String,
     pub op: LabelFilterOp,
@@ -65,6 +69,33 @@ pub struct LabelFilter {
     // re contains compiled regexp for `=~` and `!~` op.
     pub re: Option<PromRegex>,
 }
+
+impl PartialEq<LabelFilter> for LabelFilter {
+    fn eq(&self, other: &Self) -> bool {
+        self.op.eq(&other.op) && self.label.eq(&other.label) && self.value.eq(&other.value)
+    }
+}
+
+
+impl PartialOrd for LabelFilter {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for LabelFilter {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let mut cmp = self.label.cmp(&other.label);
+        if cmp == Ordering::Equal {
+            cmp = self.value.cmp(&other.value);
+            if cmp == Ordering::Equal {
+                cmp = self.op.cmp(&other.op);
+            }
+        }
+        cmp
+    }
+}
+
 
 impl LabelFilter {
     pub fn matches(&self, labels: &[Label]) -> bool {
@@ -83,7 +114,7 @@ impl LabelFilter {
                 continue;
             }
             label_name_matches += 1;
-            if &label.value == self.value {
+            if label.value == self.value {
                 return true;
             }
         }
@@ -96,20 +127,21 @@ impl LabelFilter {
 
     fn match_regexp(&self, labels: &[Label]) -> bool {
         let mut label_name_matches = 0;
-        let re = &self.re.unwrap();
 
-        for label in labels {
-            if to_canonical_label_name(&label.name) != self.label {
-                continue;
+        if let Some(re) = &self.re {
+            for label in labels {
+                if to_canonical_label_name(&label.name) != self.label {
+                    continue;
+                }
+                label_name_matches += 1;
+                if re.is_match(&label.value) {
+                    return true;
+                }
             }
-            label_name_matches += 1;
-            if re.match_string(&label.value) {
-                return true;
+            if label_name_matches == 0 {
+                // Special case for {non_existing_label=~"something|"}, which matches empty non_existing_label
+                return re.is_match("");
             }
-        }
-        if label_name_matches == 0 {
-            // Special case for {non_existing_label=~"something|"}, which matches empty non_existing_label
-            return re.match_string("");
         }
         return false;
     }

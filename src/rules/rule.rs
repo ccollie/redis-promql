@@ -1,3 +1,4 @@
+use std::ascii::AsciiExt;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display};
 use std::str::FromStr;
@@ -8,10 +9,27 @@ use crate::common::types::{Timestamp};
 use crate::rules::alerts::{AlertingRule, AlertsError, AlertsResult, Querier, RecordingRule};
 use crate::rules::types::RawTimeSeries;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RuleType {
     Recording,
     Alerting,
+}
+
+impl RuleType {
+    pub fn name(&self) -> &'static str {
+        match self {
+            RuleType::Recording => "recording",
+            RuleType::Alerting => "alerting",
+        }
+    }
+
+    pub fn is_recording(&self) -> bool {
+        matches!(self, RuleType::Recording)
+    }
+
+    pub fn is_alerting(&self) -> bool {
+        matches!(self, RuleType::Alerting)
+    }
 }
 
 impl Default for RuleType {
@@ -22,11 +40,7 @@ impl Default for RuleType {
 
 impl Display for RuleType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            RuleType::Recording => "recording",
-            RuleType::Alerting => "alerting",
-        };
-        write!(f, "{}", s)
+        write!(f, "{}", self.name())
     }
 }
 
@@ -35,9 +49,9 @@ impl FromStr for RuleType {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "recording" |
-            "recording_rule" => Ok(RuleType::Recording),
-            "alerting" => Ok(RuleType::Alerting),
+            value if value.eq_ignore_ascii_case("recording_rule") => Ok(RuleType::Recording),
+            value if value.eq_ignore_ascii_case(RuleType::Recording.name()) => Ok(RuleType::Recording),
+            value if value.eq_ignore_ascii_case(RuleType::Alerting.name()) => Ok(RuleType::Alerting),
             _ => Err(format!("unknown rule type: {}", s)),
         }
     }
@@ -77,9 +91,9 @@ pub trait Rule: Debug {
     fn rule_type(&self) -> RuleType;
     /// exec executes the rule with given context at the given timestamp and limit.
     /// returns an err if number of resulting time series exceeds the limit.
-    fn exec(&mut self, ts: Timestamp, limit: usize) -> AlertsResult<Vec<RawTimeSeries>>;
+    fn exec(&mut self, querier: &impl Querier, ts: Timestamp, limit: usize) -> AlertsResult<Vec<RawTimeSeries>>;
     /// exec_range executes the rule on the given time range.
-    fn exec_range(&mut self, start: Timestamp, end: Timestamp) -> AlertsResult<Vec<RawTimeSeries>>;
+    fn exec_range(&mut self, querier: &impl Querier, start: Timestamp, end: Timestamp) -> AlertsResult<Vec<RawTimeSeries>>;
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -93,7 +107,7 @@ pub struct RuleStateEntry {
     /// stores last error that happened in exec func resets on every successful exec
     /// may be used as Health ruleState
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) err: Option<AlertsError>,    // todo: error type
+    pub err: Option<AlertsError>,    // todo: error type
     /// stores the number of samples returned during the last evaluation
     pub samples: usize,
     /// stores the number of time series fetched during the last evaluation.
@@ -101,7 +115,7 @@ pub struct RuleStateEntry {
 }
 
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PromRule {
     AlertRule(AlertingRule),
     RecordRule(RecordingRule),
@@ -122,17 +136,17 @@ impl Rule for PromRule {
         }
     }
 
-    fn exec(&mut self, ts: Timestamp, limit: usize) -> AlertsResult<Vec<RawTimeSeries>> {
+    fn exec(&mut self, querier: &impl Querier, ts: Timestamp, limit: usize) -> AlertsResult<Vec<RawTimeSeries>> {
         match self {
-            PromRule::AlertRule(rule) => rule.exec(ts, limit),
-            PromRule::RecordRule(rule) => rule.exec(ts, limit),
+            PromRule::AlertRule(rule) => rule.exec(querier, ts, limit),
+            PromRule::RecordRule(rule) => rule.exec(querier, ts, limit),
         }
     }
 
-    fn exec_range(&mut self, start: Timestamp, end: Timestamp) -> AlertsResult<Vec<RawTimeSeries>> {
+    fn exec_range(&mut self, querier: &impl Querier, start: Timestamp, end: Timestamp) -> AlertsResult<Vec<RawTimeSeries>> {
         match self {
-            PromRule::AlertRule(rule) => rule.exec_range(start, end),
-            PromRule::RecordRule(rule) => rule.exec_range(start, end),
+            PromRule::AlertRule(rule) => rule.exec_range(querier, start, end),
+            PromRule::RecordRule(rule) => rule.exec_range(querier, start, end),
         }
     }
 }

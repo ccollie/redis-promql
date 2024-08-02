@@ -70,14 +70,14 @@ pub(crate) fn get_timestamp_index_bounds(timestamps: &[i64], start_ts: Timestamp
     Some((start_idx, end_idx))
 }
 
-pub fn trim_data<'a>(timestamps: &'a [i64], values: &'a [f64], start_ts: Timestamp, end_ts: Timestamp) -> (&'a [i64], &'a [f64]) {
+pub(crate) fn trim_to_date_range<'a>(timestamps: &'a [i64], values: &'a [f64], start_ts: Timestamp, end_ts: Timestamp) -> Option<(&'a [i64], &'a [f64])> {
     if let Some((start_idx, end_idx)) = get_timestamp_index_bounds(timestamps, start_ts, end_ts) {
         let stamps = &timestamps[0..];
         let timestamps = &stamps[start_idx..end_idx];
         let values = &values[start_idx..end_idx];
-        (timestamps, values)
+        Some((timestamps, values))
     } else {
-        return (&[], &[]);
+        None
     }
 }
 

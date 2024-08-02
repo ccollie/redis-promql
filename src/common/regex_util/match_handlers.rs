@@ -3,7 +3,7 @@ use crate::common::regex_util::regex_utils::{skip_first_and_last_char, skip_firs
 
 pub type MatchFn = fn(pattern: &str, candidate: &str) -> bool;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Hash, Eq)]
 pub(crate) enum StringMatchHandler {
     Fsm(FastStringMatcher),
     FastRegex(FastRegexMatcher),

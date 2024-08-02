@@ -7,20 +7,22 @@ use crate::index::RedisContext;
 use crate::module::commands::create_series_ex;
 use crate::module::get_timeseries_mut;
 use crate::rules::alerts::{AlertsError, AlertsResult};
+use crate::rules::RawTimeSeries;
 use crate::storage::time_series::TimeSeries;
 use crate::storage::TimeSeriesOptions;
 
 /// a queue for writing timeseries back to redis.
 pub struct WriteQueue {
     addr: String,
-    data: RwLock<Vec<TimeSeries>>,
+    // todo: mpsc
+    data: RwLock<Vec<RawTimeSeries>>,
     flush_interval: Duration,
     max_batch_size: usize,
     max_queue_size: usize,
     closed: AtomicBool,
 }
 
-/// Config is config for remote write.
+/// WriteQueueConfig is config for remote write.
 #[derive(Clone, Default, Debug)]
 pub struct WriteQueueConfig {
     /// Addr of remote storage
@@ -65,7 +67,7 @@ impl WriteQueue {
             cfg.flush_interval
         };
 
-        let storage: Vec<TimeSeries> = Vec::with_capacity(cfg.max_queue_size);
+        let storage: Vec<RawTimeSeries> = Vec::with_capacity(cfg.max_queue_size);
         let c = WriteQueue {
             addr: cfg.addr.trim_end_matches("/").to_string(),
             flush_interval,
@@ -78,26 +80,40 @@ impl WriteQueue {
         Ok(c)
     }
 
+    pub fn run(&mut self) {
+        let mut interval = self.flush_interval;
+        if interval.is_zero() {
+            interval = Duration::from_millis(DEFAULT_FLUSH_INTERVAL as u64);
+        }
+        loop {
+            if self.is_closed() {
+                return
+            }
+            self.flush();
+            std::thread::sleep(interval);
+        }
+    }
+
     pub fn is_closed(&self) -> bool {
         self.closed.load(Ordering::SeqCst)
     }
 
     fn add_internal<F>(&self, f: F) -> Result<(), String>
-    where F: FnOnce(&mut RwLockWriteGuard<Vec<TimeSeries>>) -> Result<(), String>
+    where F: FnOnce(&mut RwLockWriteGuard<Vec<RawTimeSeries>>) -> Result<(), String>
     {
         if self.is_closed() {
             return Err("client is closed".to_string())
         }
         let mut writer = self.data.write().unwrap();
         if writer.len() >= self.max_queue_size {
-            self.flush()?;
+            self.flush();
             // Err()
         }
         f(&mut writer)?;
         Ok(())
     }
 
-    pub fn add(&self, ts: TimeSeries) -> Result<(), String> {
+    pub fn add(&self, ts: RawTimeSeries) -> Result<(), String> {
         self.add_internal(|writer| {
             writer.push(ts);
             Ok(())
@@ -106,7 +122,7 @@ impl WriteQueue {
 
     /// push adds timeseries into queue for writing into remote storage.
     /// Push returns and error if client is stopped or if queue is full.
-    pub fn push(&self, s: Vec<TimeSeries>) -> Result<(), String> {
+    pub fn push(&self, s: Vec<RawTimeSeries>) -> Result<(), String> {
         self.add_internal(|writer| {
             writer.extend(s.into_iter());
             Ok(())
@@ -161,7 +177,7 @@ impl WriteQueue {
         Ok(series)
     }
 
-    fn send(&self, ctx: &ContextGuard, series: &mut [TimeSeries]) -> AlertsResult<()> {
+    fn send(&self, ctx: &ContextGuard, series: &mut [RawTimeSeries]) -> AlertsResult<()> {
         if series.is_empty() {
             return Ok(())
         }

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use crate::relabel::actions::Action;
+use crate::relabel::actions::utils::filter_labels;
 use crate::relabel::IfExpression;
 use crate::relabel::string_replacer::StringReplacer;
 use crate::relabel::utils::set_label_value;
@@ -25,7 +26,7 @@ impl Action for LabelMapAction {
         // Copy `source_labels` to `target_label`
         // Replace label names with the `replacement` if they match `regex`
         for label in labels.iter() {
-            let label_name = self.string_replacer.replace_full_string_fast(&label.name);
+            let label_name = self.string_replacer.replace_fast(&label.name);
             if label_name != label.name {
                 let value_str = label.value.clone();
                 set_label_value(labels, labels_offset, &label_name, value_str)
@@ -34,6 +35,6 @@ impl Action for LabelMapAction {
     }
 
     fn filter(&self, labels: &[Label]) -> bool {
-        self.if_expr.is_some_and(|if_expr| if_expr.is_match(labels))
+        filter_labels(&self.if_expr, labels)
     }
 }

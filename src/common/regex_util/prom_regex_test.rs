@@ -17,7 +17,7 @@ mod test {
     fn test_prom_regex() {
         fn f(expr: &str, s: &str, result_expected: bool) {
             let pr = PromRegex::new(expr).expect("unexpected failure");
-            let result = pr.match_string(s);
+            let result = pr.is_match(s);
             assert_eq!(
                 result, result_expected,
                 "unexpected result when matching \"{expr}\" against \"{s}\"; got {result}; want {result_expected}"

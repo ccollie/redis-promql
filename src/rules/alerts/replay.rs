@@ -9,11 +9,9 @@ use crate::config::get_global_settings;
 /**
 var (
 replayRulesDelay = flag.Duration("replay.rulesDelay", time.Second,
-"Delay between rules evaluation within the group. Could be important if there are chained rules inside the group "+
-"and processing need to wait for previous rule results to be persisted by remote storage before evaluating the next rule."+
-"Keep it equal or bigger than -remoteWrite.flushInterval.")
 )
 **/
+#[derive(Debug, Clone)]
 pub struct ReplayOptions {
     /// The time filter to select time series with timestamp equal or higher than provided value.
     pub from: Timestamp,
@@ -108,8 +106,13 @@ fn replay_group<'a>(
         );
         ctx.log_info(&msg);
     }
+    // todo: rayon::join
 
-    for rule in group.rules {
+    for rule in group.recording_rules.iter_mut() {
+        total += replay_range(ctx, rule, start, *end, step, *rule_retry_attempts, rw)?;
+    }
+
+    for rule in group.alerting_rules.iter_mut() {
         total += replay_range(ctx, rule, start, *end, step, *rule_retry_attempts, rw)?;
     }
 
@@ -161,9 +164,9 @@ fn replay_rule(
     let mut err: Option<AlertsError> = None;
 
     for i in 0..rule_retry_attempts {
-        match rule.exec_range(*start, *end) {
+        match rule.exec_range(&ctx.querier, *start, *end) {
             Ok(res) => {
-                for ts in res.iter() {
+                for ts in res.into_iter() {
                     tss.push(ts);
                 }
                 break;
@@ -239,11 +242,11 @@ impl RangeIterator {
 impl Iterator for RangeIterator {
     type Item = Range;
     fn next(&mut self) -> Option<Self::Item> {
-        self.start_cursor = self.start + (self.step_ms * self.iter);
+        self.start_cursor = (self.start as u64 + (self.step_ms * self.iter as u64)) as Timestamp;
         if self.start_cursor > self.end {
             return None;
         }
-        self.end_cursor = self.start_cursor + self.step_ms;
+        self.end_cursor = self.start_cursor.add(self.step_ms.into());
         if self.end_cursor > self.end {
             self.end_cursor = self.end;
         }

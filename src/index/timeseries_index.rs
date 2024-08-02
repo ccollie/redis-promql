@@ -19,7 +19,7 @@ pub type BitmapMap = BTreeMap<String, RoaringTreemap>;
 
 /// Index for quick access to timeseries by label, label value or metric name.
 /// TODO: do we need to have one per db ?
-pub struct TimeSeriesIndex {
+pub(crate) struct TimeSeriesIndex {
     group_sequence: AtomicU64,
     /// Map from timeseries id to timeseries key.
     id_to_key: RwLock<AHashMap<u64, String>>,

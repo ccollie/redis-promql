@@ -16,8 +16,9 @@ use crate::relabel::ParsedRelabelConfig;
 use crate::storage::Label;
 
 /// AlertState is the state of an alert.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum AlertState {
+    #[default]
     /// Inactive is the state of an alert that is neither firing nor pending.
     Inactive,
     /// Pending is the state of an alert that has been active for less than the configured threshold duration.
@@ -26,14 +27,22 @@ pub enum AlertState {
     Firing,
 }
 
-impl Display for AlertState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
+impl AlertState {
+    pub fn name(&self) -> &'static str {
+        match self {
             AlertState::Inactive => "inactive",
             AlertState::Pending => "pending",
             AlertState::Firing => "firing",
-        };
-        write!(f, "{}", s)
+        }
+    }
+    pub fn is_firing(&self) -> bool {
+        matches!(self, AlertState::Firing)
+    }
+}
+
+impl Display for AlertState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
     }
 }
 
@@ -42,9 +51,9 @@ impl FromStr for AlertState {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "inactive" => Ok(AlertState::Inactive),
-            "pending" => Ok(AlertState::Pending),
-            "firing" => Ok(AlertState::Firing),
+            value if value.eq_ignore_ascii_case(AlertState::Inactive::name()) => Ok(AlertState::Inactive),
+            value if value.eq_ignore_ascii_case(AlertState::Pending::name()) => Ok(AlertState::Pending),
+            value if value.eq_ignore_ascii_case(AlertState::Firing::name()) => Ok(AlertState::Firing),
             _ => Err(format!("unknown alert state: {}", s)),
         }
     }
@@ -54,6 +63,8 @@ impl FromStr for AlertState {
 // TODO: Looks like alert name isn't unique
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Alert {
+    /// id is the unique identifier for the Alert
+    pub id: u64,
     /// group_id contains the id of the parent rules group
     pub group_id: u64,
     /// name represents Alert name
@@ -80,8 +91,6 @@ pub struct Alert {
     pub keep_firing_since: Timestamp,
     /// value stores the value returned from evaluating expression from expr field
     pub value: f64,
-    /// id is the unique identifier for the Alert
-    pub id: u64,
     /// restored is true if Alert was restored after restart
     pub restored: bool,
     /// for defines for how long Alert needs to be active to become StateFiring
@@ -179,7 +188,8 @@ pub(crate) fn validate_templates(annotations: &AHashMap<String, String>) -> Aler
             r#for: Default::default(),
         },
         &tmpl,
-    );
+    )?;
+    Ok(())
 }
 
 fn template_annotations(
@@ -194,7 +204,7 @@ fn template_annotations(
     let header_len = TPL_HEADERS.len();
     for (key, text) in annotations {
         builder.clear();
-        builder.resize(header_len + text.len());
+        builder.reserve(header_len + text.len());
         builder.push_str(&TPL_HEADERS);
         builder.push_str(&text);
 

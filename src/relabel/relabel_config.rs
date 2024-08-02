@@ -91,8 +91,8 @@ impl FromStr for RelabelAction {
             "lowercase" => Ok(Lowercase),
             "labelmap" => Ok(LabelMap),
             "labelmap_all" => Ok(LabelMapAll),
-            "labeldrop" => Ok(LabelDrop),
-            "labelkeep" => Ok(LabelKeep),
+            "labeldrop" | "label_drop" => Ok(LabelDrop),
+            "labelkeep" | "label_keep" => Ok(LabelKeep),
             "uppercase" => Ok(Uppercase),
             _ => Err(format!("unknown action: {}", s)),
         }
@@ -102,7 +102,7 @@ impl FromStr for RelabelAction {
 /// RelabelConfig represents relabel config.
 ///
 /// See https://prometheus.io/docs/prometheus/latest/configuration/configuration/#relabel_config
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RelabelConfig {
     #[serde(rename = "if")]
     pub if_expr: Option<IfExpression>,
@@ -167,9 +167,9 @@ impl ParsedConfigs {
             in_str = labels_to_string(labels[&labels_offset..])
         }
         for prc in self.0.iter() {
-            let labels = prc.apply(labels, labels_offset);
+            prc.apply(labels, labels_offset);
             if debug {
-                let out_str = labels_to_string(labels[labels_offset..]);
+                let out_str = labels_to_string(&labels[labels_offset..]);
                 dss.push(DebugStep {
                     rule: prc.to_string(),
                     r#in: in_str,
@@ -238,9 +238,14 @@ pub fn parse_relabel_configs(rcs: Vec<RelabelConfig>) -> Result<ParsedConfigs, S
     Ok(ParsedConfigs(prcs))
 }
 
+// todo: use OnceLock
 lazy_static! {
-    pub static ref DEFAULT_ORIGINAL_REGEX_FOR_RELABEL_CONFIG: Regex = Regex::new(".*");
-    pub static ref DEFAULT_REGEX_FOR_RELABEL_CONFIG: Regex = Regex::new("^(.*)$");
+    pub static ref DEFAULT_ORIGINAL_REGEX_FOR_RELABEL_CONFIG: Regex = Regex::new(".*").unwrap();
+    pub static ref DEFAULT_REGEX_FOR_RELABEL_CONFIG: Regex = Regex::new("^(.*)$").unwrap();
+}
+
+pub(crate) fn is_default_regex_for_config(regex: &Regex) -> bool {
+    regex.as_str() == "^(.*)$"
 }
 
 fn validate_labels(
@@ -273,12 +278,12 @@ pub fn parse_relabel_config(rc: RelabelConfig) -> Result<ParsedRelabelConfig, St
     let reg_str = rc.regex.to_string();
     let (regex_anchored, regex_original_compiled, prom_regex) =
         if !is_empty_regex(&rc.regex) && !is_default_regex(&reg_str) {
-            let mut regex = reg_str;
+            let mut regex = &reg_str[0..];
             let mut regex_orig = regex;
             if rc.action != ReplaceAll && rc.action != LabelMapAll {
                 let stripped = remove_start_end_anchors(&regex);
-                regex_orig = stripped.to_string();
-                regex = format!("^(?:{stripped})$");
+                regex_orig = &stripped.to_string();
+                regex = format!("^(?:{stripped})$").as_str();
             }
             let regex_anchored =
                 Regex::new(&regex).map_err(|e| format!("cannot parse `regex` {regex}: {:?}", e))?;
@@ -307,7 +312,7 @@ pub fn parse_relabel_config(rc: RelabelConfig) -> Result<ParsedRelabelConfig, St
     let mut replacement = if !rc.replacement.is_empty() {
         rc.replacement.clone()
     } else {
-        "$1"
+        "$1".to_string()
     };
     let mut graphite_match_template: Option<GraphiteMatchTemplate> = None;
     if !rc.r#match.is_empty() {
@@ -327,13 +332,13 @@ pub fn parse_relabel_config(rc: RelabelConfig) -> Result<ParsedRelabelConfig, St
             if graphite_label_rules.is_empty() {
                 return Err("missing `labels` for `action=graphite`; see https://docs.victoriametrics.com/vmagent.html#graphite-relabeling".to_string());
             }
-            if !rc.source_labels.is_empty() {
+            if !source_labels.is_empty() {
                 return Err("`source_labels` cannot be used with `action=graphite`; see https://docs.victoriametrics.com/vmagent.html#graphite-relabeling".to_string());
             }
-            if !rc.target_label.is_empty() {
+            if !target_label.is_empty() {
                 return Err("`target_label` cannot be used with `action=graphite`; see https://docs.victoriametrics.com/vmagent.html#graphite-relabeling".to_string());
             }
-            if !rc.replacement.is_empty() {
+            if !replacement.is_empty() {
                 return Err("`replacement` cannot be used with `action=graphite`; see https://docs.victoriametrics.com/vmagent.html#graphite-relabeling".to_string());
             }
             if rc.regex.is_some() {

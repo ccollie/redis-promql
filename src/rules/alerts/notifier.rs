@@ -13,6 +13,11 @@ pub trait Notifier {
     fn addr(&self) -> String;
 }
 
+// todo: implement other notifiers
+// 1. PubSub notifier
+// 2. Redis Streams notifier
+
+/// NullNotifier is a notifier that does nothing.
 pub struct NullNotifier {
     addr: String,
 }

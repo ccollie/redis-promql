@@ -82,7 +82,7 @@ unsafe extern "C" fn copy(
 ) -> *mut c_void {
     let sm = &*(value as *mut TimeSeries);
     let mut new_series = sm.clone();
-    let mut ts_index = get_timeseries_index();
+    let ts_index = get_timeseries_index(ctx);
     // ???? How to handle failure ??
     match RedisString::from_ptr(tokey) {
         Ok(key) => {

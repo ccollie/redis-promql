@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
-
+use ahash::AHashMap;
 use crate::common::time::current_time_millis;
 use crate::common::types::Timestamp;
 
@@ -27,7 +27,7 @@ pub struct StringTransformCache<R: Clone> {
 #[derive(Clone, Debug)]
 struct InnerTransformer<R: Clone> {
     last_cleanup_time: Timestamp,
-    map: HashMap<String, CacheEntry<R>>,
+    map: AHashMap<String, CacheEntry<R>>,
 }
 
 #[derive(Clone, Debug)]
@@ -43,7 +43,7 @@ impl<R: Clone> StringTransformCache<R> {
     pub fn new(transform_func: fn(&str) -> R) -> Self {
         let inner = InnerTransformer {
             last_cleanup_time: current_time_millis(),
-            map: HashMap::new(),
+            map: AHashMap::new(),
         };
         return Self {
             inner: Mutex::new(inner),

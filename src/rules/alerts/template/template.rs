@@ -13,7 +13,7 @@
 
 use std::sync::{OnceLock, RwLock};
 use std::collections::HashMap;
-use chrono::{Duration, NaiveDateTime};
+use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 use enquote::enquote;
 use crate::rules::alerts::{AlertsError, AlertsResult, DatasourceMetric};
 use gtmpl::{FuncError, gtmpl_fn, Template, Func, Value};
@@ -31,10 +31,28 @@ pub type FuncMap = HashMap<String, Func>;
 // go template execution fails when it's tree is empty
 const DEFAULT_TEMPLATE: &str = r##"{{- define "default.template" -}}{{- end -}}"##;
 
-#[derive(Clone, Default, Eq, PartialEq, Debug)]
+#[derive(Default)]
 pub(crate) struct TextTemplate {
     pub(crate) current:     Template,
     pub(crate) replacement: Template
+}
+
+impl Clone for TextTemplate {
+    fn clone(&self) -> Self {
+        TextTemplate {
+            current: clone_template(&self.current),
+            replacement: clone_template(&self.replacement)
+        }
+    }
+}
+
+fn clone_base_template(tpl: &Template) -> Template {
+    let mut result = Template::default();
+    result.name = tpl.name.clone();
+    result.tree_set = tpl.tree_set.clone();
+    result.funcs = tpl.funcs.clone();
+    result.text = tpl.text.clone();
+    result
 }
 
 static MASTER_TEMPLATE: OnceLock<RwLock<TextTemplate>> = OnceLock::new();
@@ -52,7 +70,7 @@ fn create_master_template() -> RwLock<TextTemplate> {
 }
 pub(crate) fn new_template() -> AlertsResult<Template> {
     let mut tmpl = Template::default();
-    tmpl.funcs(template_funcs());
+    tmpl.add_funcs(&template_funcs);
     tmpl.parse(DEFAULT_TEMPLATE)
         .map_err(|e| AlertsError::TemplateParseError(e.to_string()))?;
     Ok(tmpl)
@@ -87,6 +105,20 @@ struct Metric {
     value: f64,
 }
 
+impl Metric {
+    fn new(labels: Labels, timestamp: i64, value: f64) -> Self {
+        Metric {
+            labels,
+            timestamp,
+            value
+        }
+    }
+
+    fn get_label(&self, key: &str) -> &str {
+        self.labels.get(key).unwrap_or("")
+    }
+}
+
 /// converts Metrics from provider package to private copy for templating.
 fn datasource_metrics_to_template_metrics(ms: &[DatasourceMetric]) -> Vec<Metric> {
     let mut mss = Vec::with_capacity(ms.len());
@@ -111,7 +143,7 @@ pub type QueryFn = fn(query: &str) -> AlertsResult<Vec<DatasourceMetric>>;
 pub(crate) fn update_with_funcs(funcs: &FuncMap) {
     let master_template = get_master_template_ref();
     let mut writer = master_template.write().unwrap();
-    writer.current = writer.current.Funcs(funcs);
+    writer.current.funcs = funcs.clone();
 }
 
 /// returns a copy of current template with additional FuncMap provided with funcs argument
@@ -236,9 +268,6 @@ gtmpl_fn!(fn first(metrics: &Vec<Metric>) -> Result<Metric, FuncError> {
 // toTime converts given timestamp to a time.Time.
 gtmpl_fn!(fn to_time(v: u64) -> Result<NaiveDateTime, FuncError> {
     // v here is seconds
-    if v.is_nan() || v.is_infinite() {
-        return Err( FuncError::Generic(format!("cannot convert {} to Time", v)));
-    }
     match NaiveDateTime::from_timestamp_millis((v * 1000) as i64) {
         Some(t) => Ok(t),
         None => Err( FuncError::Generic(format!("cannot convert {} to Time", v)))
@@ -380,7 +409,9 @@ gtmpl_fn!(fn html_escape(q: &str) -> Result<String, FuncError> {
 //
 // See also quotesEscape.
 gtmpl_fn!(fn json_escape(s: &str) -> Result<String, FuncError> {
-    Ok(serde_json::to_string(s)?)
+    let value = serde_json::to_string(s)
+        .map_err(|e| FuncError::Generic(format!("cannot convert {s} to JSON: {e}")))?;
+    Ok(value)
 });
 
 // externalURL returns value of `external.url` flag
@@ -459,10 +490,10 @@ gtmpl_fn!(fn humanize_percentage(v: f64) -> Result<String, FuncError> {
 
 // humanize_timestamp converts given timestamp to a human readable time equivalent
 gtmpl_fn!(fn humanize_timestamp(v: i64) -> Result<String, FuncError> {
-    if v.is_nan() || v.is_infinite() {
+    if v == i64::MAX || v == i64::MIN {
         return Ok(format!("{:.4}", v))
     }
-    if let Some(t) = NaiveDateTime::from_timestamp_millis(v * 1000) {
+    if let Some(t) = DateTime::from_timestamp(v, 0) {
         Ok(t.to_string())
     } else {
         Ok("".to_string())

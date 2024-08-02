@@ -33,21 +33,21 @@ fn config_changed_event_handler(ctx: &RedisContext, changed_configs: &[&str]) {
     ctx.log_notice("config changed")
 }
 
-fn remove_key_from_cache(key: &[u8]) {
-    let index = get_timeseries_index();
+fn remove_key_from_cache(ctx: &RedisContext, key: &[u8]) {
+    let ts_index = get_timeseries_index(ctx);
     let key = String::from_utf8_lossy(key).to_string();
     index.remove_series_by_key(&key);
 }
 
-fn on_event(_ctx: &RedisContext, _event_type: NotifyEvent, event: &str, key: &[u8]) {
+fn on_event(ctx: &RedisContext, _event_type: NotifyEvent, event: &str, key: &[u8]) {
     match event {
         "del" | "set" | "expired" | "evict" | "evicted" | "expire" | "trimmed" => {
-            remove_key_from_cache(key);
+            remove_key_from_cache(ctx, key);
         }
         "rename_from" => {
             // RenameSeriesFrom(ctx, key);
         }
-        "storage.alter" => remove_key_from_cache(key),
+        "storage.alter" => remove_key_from_cache(ctx, key),
         _ => {
             // ctx.log_warning(&format!("Unknown event: {}", event));
         }

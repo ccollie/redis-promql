@@ -51,7 +51,7 @@ mod test {
 			assert_eq!(data, json_expected,
 					   "unexpected value after json marshaling;\ngot\n{}\nwant\n{}", data, json_expected);
 
-			let ie2 = match serde_json::from_str(&data) {
+			let ie2: IfExpression = match serde_json::from_str(&data) {
 				Ok(data) => data,
 				Err(err) => {
 					panic!("cannot unmarshal ifExpression from json {data}: {:?}", err);

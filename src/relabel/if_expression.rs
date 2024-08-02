@@ -20,7 +20,7 @@ use crate::storage::Label;
 /// - 'foo{bar="baz"}'
 /// - '{x=~"y"}'
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
-pub struct IfExpression(pub(crate) Vec<IfExpressionMatcher>);
+pub struct IfExpression(Vec<IfExpressionMatcher>);
 
 impl IfExpression {
     pub fn new(ies: Vec<IfExpressionMatcher>) -> Self {
@@ -33,7 +33,8 @@ impl IfExpression {
     /// Parse parses ie from s.
     pub fn parse(s: &str) -> AlertsResult<Self> {
         let mut ies = vec![];
-        let ie = IfExpressionMatcher::parse(s)?;
+        // todo: more specific error enum
+        let ie = IfExpressionMatcher::parse(s).map_err(|e| AlertsError::InvalidRule(e))?;
         ies.push(ie);
         Ok(IfExpression(ies))
     }
@@ -74,7 +75,8 @@ impl IfExpressionMatcher {
 
         match expr {
             Expr::MetricExpression(me) => {
-                let matchers_list = metric_expr_to_label_filter_list(&me)?;
+                let matchers_list = metric_expr_to_label_filter_list(&me)
+                    .map_err(|e| e.to_string())?;
                 let ie = IfExpressionMatcher {
                     s: s.to_string(),
                     matchers_list,
@@ -143,7 +145,11 @@ fn new_label_filter(mlf: &BaseLabelFilter) -> AlertsResult<LabelFilter> {
     };
     if lf.op.is_regex() {
         let re = PromRegex::new(&lf.value)
-            .map_err(|e| format!("cannot parse regexp for {}: {}", mlf, e))?;
+            .map_err(|e| {
+                let msg = format!("cannot parse regexp for {}: {}", mlf, e);
+                // todo: specific error
+                AlertsError::Generic(msg)
+            })?;
         lf.re = Some(re);
     }
     Ok(lf)

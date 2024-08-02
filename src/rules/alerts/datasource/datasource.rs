@@ -4,7 +4,8 @@ use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
 use crate::common::types::Timestamp;
 use crate::rules::alerts::{AlertsResult, DataSourceType};
-use crate::storage::Label;
+use crate::rules::RawTimeSeries;
+use crate::storage::{Label, SeriesData};
 
 /// Querier trait wraps query and query_range methods
 pub trait Querier {
@@ -48,9 +49,9 @@ pub(crate) struct QuerierParams {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Metric {
     pub key: String,
-    pub(crate) labels: Vec<Label>,
-    pub(crate) timestamps: Vec<i64>,
-    pub(crate) values: Vec<f64>
+    pub labels: Vec<Label>,
+    pub timestamps: Vec<i64>,
+    pub values: Vec<f64>
 }
 
 // temporary. Please remove
@@ -116,3 +117,15 @@ impl Metric {
     }
 }
 
+impl Into<RawTimeSeries> for Metric {
+    fn into(self) -> RawTimeSeries {
+        RawTimeSeries {
+            key: self.key,
+            data: SeriesData {
+                values: self.values,
+                timestamps: self.timestamps
+            },
+            labels: self.labels,
+        }
+    }
+}

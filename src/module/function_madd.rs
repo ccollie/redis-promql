@@ -24,16 +24,16 @@ pub(crate) fn madd(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         let mut values: Vec<RedisValue> = Vec::with_capacity(sample_count);
 
         while let Some(arg) = args.next() {
-            let res = get_timeseries_mut(ctx, &arg, true);
-            if res.is_err() {
-                values.push(RedisValue::SimpleStringStatic("ERR TSDB: the key is not a timeseries") );
+            let res = get_timeseries_mut(ctx, &arg, true)?;
+            let timestamp = parse_timestamp(args.next_str()?)?;
+            let value = args.next_f64()?;
+            // Safety: we checked above that the key exists
+            let series = res.unwrap().unwrap();
+            if let Ok(res) = series.add( timestamp, value, Some(policy)) {
+                values.push(RedisValue::from(timestamp));
             } else {
-                let timestamp = parse_timestamp(args.next_str()?)?;
-                let value = args.next_f64()?;
-                // Safety: we checked above that the key exists
-                let series = res.unwrap().unwrap();
-                if let Ok(res) = series.add( timestamp, value, Some(policy)) {
-                }
+                // todo !!!!!
+                values.push(RedisValue::SimpleString("ERR".to_string()));
             }
         }
 

@@ -11,7 +11,7 @@ use xxhash_rust::xxh3::xxh3_64;
 use crate::common::FastStringTransformer;
 
 use crate::common::regex_util::PromRegex;
-use crate::relabel::{DEFAULT_REGEX_FOR_RELABEL_CONFIG, GraphiteLabelRule, GraphiteMatchTemplate, IfExpression};
+use crate::relabel::{DEFAULT_ORIGINAL_REGEX_FOR_RELABEL_CONFIG, DEFAULT_REGEX_FOR_RELABEL_CONFIG, GraphiteLabelRule, GraphiteMatchTemplate, IfExpression, is_default_regex_for_config};
 use crate::relabel::relabel_config::{RelabelAction};
 use crate::relabel::utils::{are_equal_label_values, concat_label_values, contains_all_label_values, get_label_value, set_label_value};
 use crate::storage::Label;
@@ -32,7 +32,7 @@ pub struct DebugStep {
 /// ParsedRelabelConfig contains parsed `relabel_config`.
 ///
 /// See https://prometheus.io/docs/prometheus/latest/configuration/configuration/#relabel_config
-#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ParsedRelabelConfig {
     /// rule_original contains the original relabeling rule for the given ParsedRelabelConfig.
     pub rule_original: String,
@@ -44,7 +44,7 @@ pub struct ParsedRelabelConfig {
     pub modulus: u64,
     pub replacement: String,
     pub action: RelabelAction,
-    pub r#if: IfExpression,
+    pub r#if: Option<IfExpression>,
 
     pub regex: PromRegex,
     pub regex_original: Regex,
@@ -68,6 +68,7 @@ impl ParsedRelabelConfig {
         replacement: &str,
         if_expr: Option<IfExpression>
     ) -> Self {
+        let regex_original_compiled = DEFAULT_ORIGINAL_REGEX_FOR_RELABEL_CONFIG.clone();
         let mut prc = ParsedRelabelConfig {
             rule_original: rule_original.to_string(),
             source_labels: vec![],
@@ -101,13 +102,15 @@ impl ParsedRelabelConfig {
     pub fn apply(&self, labels: &mut Vec<Label>, labels_offset: usize) {
         use RelabelAction::*;
         let src = &labels[labels_offset..];
-        if !self.r#if.is_match(src) {
-            if self.action == Keep {
-                // Drop the target on `if` mismatch for `action: keep`
-                labels.truncate(labels_offset);
+        if let Some(if_expr) = &self.r#if {
+            if !if_expr.is_match(src) {
+                if self.action == Keep {
+                    // Drop the target on `if` mismatch for `action: keep`
+                    labels.truncate(labels_offset);
+                }
+                // Do not apply prc actions on `if` mismatch.
+                return;
             }
-            // Do not apply prc actions on `if` mismatch.
-            return;
         }
         match &self.action {
             Drop => self.handle_drop(labels, labels_offset),
@@ -128,13 +131,15 @@ impl ParsedRelabelConfig {
             Uppercase => self.uppercase(labels, labels_offset),
             Replace => handle_replace(self, labels, labels_offset),
             ReplaceAll => self.replace_all(labels, labels_offset),
-            _ => panic!("BUG: unknown action={}", &self.action),
+            _=> {
+                panic!("BUG: unsupported action: {}", self.action);
+            }
         }
     }
 
     /// Drop the entry if `source_labels` joined with `separator` matches `regex`
     fn handle_drop(&self, labels: &mut Vec<Label>, labels_offset: usize) {
-        if self.regex_anchored == *DEFAULT_REGEX_FOR_RELABEL_CONFIG {
+        if is_default_regex_for_config(&self.regex_anchored) {
             // Fast path for the case with `if` and without explicitly set `regex`:
             //
             // - action: drop
@@ -144,7 +149,7 @@ impl ParsedRelabelConfig {
         }
 
         let buf = concat_label_values(&labels, &self.source_labels, &self.separator);
-        let drop = self.regex.match_string(&buf);
+        let drop = self.regex.is_match(&buf);
         if drop {
             labels.truncate(labels_offset);
         }
@@ -161,15 +166,15 @@ impl ParsedRelabelConfig {
         labels.truncate(labels_offset);
     }
 
+    /// Drop the entry if target_label contains all the label values listed in source_labels.
+    /// For example, the following relabeling rule would drop the entry if __meta_consul_tags
+    /// contains values of __meta_required_tag1 and __meta_required_tag2:
+    ///
+    ///   - action: drop_if_contains
+    ///     target_label: __meta_consul_tags
+    ///     source_labels: [__meta_required_tag1, __meta_required_tag2]
+    ///
     fn drop_if_contains(&self, labels: &mut Vec<Label>, labels_offset: usize) {
-        // Drop the entry if target_label contains all the label values listed in source_labels.
-        // For example, the following relabeling rule would drop the entry if __meta_consul_tags
-        // contains values of __meta_required_tag1 and __meta_required_tag2:
-        //
-        //   - action: drop_if_contains
-        //     target_label: __meta_consul_tags
-        //     source_labels: [__meta_required_tag1, __meta_required_tag2]
-        //
         if contains_all_label_values(labels, &self.target_label, &self.source_labels) {
             labels.truncate(labels_offset);
         }
@@ -217,7 +222,7 @@ impl ParsedRelabelConfig {
 
     fn keep(&self, labels: &mut Vec<Label>, labels_offset: usize) {
         // Keep the entry if `source_labels` joined with `separator` matches `regex`
-        if self.regex_anchored == *DEFAULT_REGEX_FOR_RELABEL_CONFIG {
+        if is_default_regex_for_config(&self.regex_anchored) {
             // Fast path for the case with `if` and without explicitly set `regex`:
             //
             // - action: keep
@@ -226,7 +231,7 @@ impl ParsedRelabelConfig {
             return;
         }
         let buf = concat_label_values(&labels, &self.source_labels, &self.separator);
-        let keep = self.regex.match_string(&buf);
+        let keep = self.regex.is_match(&buf);
         if !keep {
             labels.truncate(labels_offset);
         }
@@ -243,29 +248,29 @@ impl ParsedRelabelConfig {
         labels.truncate(labels_offset);
     }
 
+    /// Keep the entry if target_label contains all the label values listed in source_labels.
+    /// For example, the following relabeling rule would leave the entry if __meta_consul_tags
+    /// contains values of __meta_required_tag1 and __meta_required_tag2:
+    ///
+    ///   - action: keep_if_contains
+    ///     target_label: __meta_consul_tags
+    ///     source_labels: [__meta_required_tag1, __meta_required_tag2]
+    ///
     fn keep_if_contains(&self, labels: &mut Vec<Label>, labels_offset: usize) {
-        // Keep the entry if target_label contains all the label values listed in source_labels.
-        // For example, the following relabeling rule would leave the entry if __meta_consul_tags
-        // contains values of __meta_required_tag1 and __meta_required_tag2:
-        //
-        //   - action: keep_if_contains
-        //     target_label: __meta_consul_tags
-        //     source_labels: [__meta_required_tag1, __meta_required_tag2]
-        //
         if contains_all_label_values(labels, &self.target_label, &self.source_labels) {
             return
         }
         labels.truncate(labels_offset);
     }
 
+    /// Keep the entry if all the label values in source_labels are equal.
+    /// For example:
+    ///
+    ///   - source_labels: [foo, bar]
+    ///     action: keep_if_equal
+    ///
+    /// Would leave the entry if `foo` value equals `bar` value
     fn keep_if_equal(&self, labels: &mut Vec<Label>, labels_offset: usize) {
-        // Keep the entry if all the label values in source_labels are equal.
-        // For example:
-        //
-        //   - source_labels: [foo, bar]
-        //     action: keep_if_equal
-        //
-        // Would leave the entry if `foo` value equals `bar` value
         if !are_equal_label_values(labels, &self.source_labels) {
             labels.truncate(labels_offset);
         }
@@ -273,12 +278,12 @@ impl ParsedRelabelConfig {
 
     fn label_drop(&self, labels: &mut Vec<Label>, _labels_offset: usize) {
         // Drop all the labels matching `regex`
-        labels.retain(|label| !self.regex.match_string(&label.name))
+        labels.retain(|label| !self.regex.is_match(&label.name))
     }
 
     fn label_keep(&self, labels: &mut Vec<Label>, _labels_offset: usize) {
         // Keep all the labels matching `regex`
-        labels.retain(|label| self.regex.match_string(&label.name))
+        labels.retain(|label| self.regex.is_match(&label.name))
     }
 
     fn label_map(&self, labels: &mut Vec<Label>, labels_offset: usize) {
@@ -441,7 +446,7 @@ fn handle_replace(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, labels_off
     };
 
     let buf = concat_label_values(labels, &prc.source_labels, &prc.separator);
-    if prc.regex_anchored == *DEFAULT_REGEX_FOR_RELABEL_CONFIG && !prc.has_capture_group_in_target_label {
+    if is_default_regex_for_config(&prc.regex_anchored) && !prc.has_capture_group_in_target_label {
         if replacement == "$1" {
             // Fast path for the rule that copies source label values to destination:
             // - source_labels: [...]
@@ -458,7 +463,7 @@ fn handle_replace(prc: &ParsedRelabelConfig, labels: &mut Vec<Label>, labels_off
         }
     }
     let source_str = &buf;
-    if !prc.regex.match_string(source_str) {
+    if !prc.regex.is_match(source_str) {
         // Fast path - regexp mismatch.
         return;
     }

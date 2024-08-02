@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error, Eq, PartialEq)]
-/// Enum for various errors in Tsldb.
+/// Enum for various errors in Tsdb.
 pub enum TsdbError {
   #[error("Invalid size. Expected {0}, Received {1}.")]
   InvalidSize(usize, usize),

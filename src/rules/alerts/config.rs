@@ -13,7 +13,7 @@ use crate::config::DEFAULT_RULE_UPDATE_ENTRIES_LIMIT;
 use crate::rules::alerts::{AlertsError, AlertsResult};
 use crate::rules::RuleType;
 
-#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Hash, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum DataSourceType {
     #[default]
@@ -348,7 +348,7 @@ fn hash_rule_config(r: &RuleConfig) -> u64 {
         let v = r.labels.get(key).unwrap();
         h.write(key.as_bytes());
         h.write(v.as_bytes());
-        h.Write("\0xff");
+        h.write("\0xff".as_ref());
     }
     h.digest()
 }

@@ -22,7 +22,7 @@ pub struct RedisDatasource {
     query_step: Duration,
     data_source_type: DataSourceType,
 
-    /// Whether to align "time" parameter with evaluation interval.Alignment supposed to produce deterministic
+    /// Whether to align "time" parameter with evaluation interval. Alignment supposed to produce deterministic
     /// results despite number of vmalert replicas or time they were started. See more details here
     /// https://github.com/VictoriaMetrics/VictoriaMetrics/pull/1257 (default true)
     query_time_alignment: bool,

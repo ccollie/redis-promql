@@ -991,7 +991,7 @@ action: replace
     fn test_regex_match_string_success() {
         fn f(pattern: &str, s: &str) {
             let prc = new_test_regex_relabel_config(pattern);
-            if !prc.regex.match_string(s) {
+            if !prc.regex.is_match(s) {
                 panic!("unexpected match_string(%{s}) result; got false; want true")
             }
         }
@@ -1013,7 +1013,7 @@ action: replace
     fn test_regexp_match_string_failure() {
         fn f(pattern: &str, s: &str) {
             let prc = new_test_regex_relabel_config(pattern);
-            if prc.regex.match_string(s) {
+            if prc.regex.is_match(s) {
                 format!("unexpected match_string({}) result; got true; want false", s)
             }
         }
