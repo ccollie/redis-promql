@@ -18,7 +18,7 @@ use enquote::enquote;
 use crate::rules::alerts::{AlertsError, AlertsResult, DatasourceMetric};
 use gtmpl::{FuncError, gtmpl_fn, Template, Func, Value};
 use gtmpl_derive::Gtmpl;
-use metricsql_engine::METRIC_NAME_LABEL;
+use metricsql_runtime::METRIC_NAME_LABEL;
 use regex::Regex;
 use url::Url;
 use crate::common;

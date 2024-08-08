@@ -1,7 +1,9 @@
 use std::borrow::Cow;
+
 use redis_module::{CallOptionResp, CallOptions, CallOptionsBuilder, CallResult, RedisError, RedisResult, RedisValue};
-use crate::common::{current_time_millis};
-use crate::common::types::{Timestamp};
+
+use crate::common::current_time_millis;
+use crate::common::types::Timestamp;
 use crate::config::get_global_settings;
 use crate::module::arg_parse::{parse_timestamp_range_value, TimestampRangeValue};
 
@@ -86,4 +88,17 @@ pub(crate) fn normalize_range_args(
     }
 
     Ok((start, end))
+}
+
+/// todo: move to file aggregations.rs
+
+/// Calculate the beginning of aggregation bucket
+pub(crate) fn calc_bucket_start(ts: Timestamp, bucket_duration: i64, timestamp_alignment: i64) -> Timestamp {
+    let timestamp_diff = ts - timestamp_alignment;
+    ts - ((timestamp_diff % bucket_duration + bucket_duration) % bucket_duration)
+}
+
+// If bucket_ts is negative converts it to 0
+pub fn normalize_bucket_start(bucket_ts: Timestamp) -> Timestamp {
+    bucket_ts.max(0)
 }

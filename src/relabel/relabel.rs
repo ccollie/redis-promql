@@ -1,32 +1,32 @@
 use std::fmt;
 use std::fmt::Display;
 use std::sync::OnceLock;
-use dynamic_lru_cache::DynamicCache;
 
+use dynamic_lru_cache::DynamicCache;
 use enquote::enquote;
-use metricsql_engine::METRIC_NAME_LABEL;
+use metricsql_runtime::METRIC_NAME_LABEL;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use xxhash_rust::xxh3::xxh3_64;
-use crate::common::FastStringTransformer;
 
+use crate::common::FastStringTransformer;
 use crate::common::regex_util::PromRegex;
-use crate::relabel::{DEFAULT_ORIGINAL_REGEX_FOR_RELABEL_CONFIG, DEFAULT_REGEX_FOR_RELABEL_CONFIG, GraphiteLabelRule, GraphiteMatchTemplate, IfExpression, is_default_regex_for_config};
-use crate::relabel::relabel_config::{RelabelAction};
+use crate::relabel::{DEFAULT_ORIGINAL_REGEX_FOR_RELABEL_CONFIG, GraphiteLabelRule, GraphiteMatchTemplate, IfExpression, is_default_regex_for_config};
+use crate::relabel::actions::RelabelActionType;
 use crate::relabel::utils::{are_equal_label_values, concat_label_values, contains_all_label_values, get_label_value, set_label_value};
 use crate::storage::Label;
 
 /// DebugStep contains debug information about a single relabeling rule step
 #[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
-pub struct DebugStep {
+pub(super) struct DebugStep {
     /// rule contains string representation of the rule step
-    pub(crate) rule: String,
+    pub rule: String,
 
     /// In contains the input labels before the execution of the rule step
-    pub(crate) r#in: String,
+    pub r#in: String,
 
     /// Out contains the output labels after the execution of the rule step
-    pub(crate) out: String,
+    pub out: String,
 }
 
 /// ParsedRelabelConfig contains parsed `relabel_config`.
@@ -43,7 +43,7 @@ pub struct ParsedRelabelConfig {
     pub regex_anchored: Regex,
     pub modulus: u64,
     pub replacement: String,
-    pub action: RelabelAction,
+    pub action: RelabelActionType,
     pub r#if: Option<IfExpression>,
 
     pub regex: PromRegex,
@@ -61,7 +61,7 @@ pub struct ParsedRelabelConfig {
 
 impl ParsedRelabelConfig {
     pub fn new(
-        action: RelabelAction,
+        action: RelabelActionType,
         rule_original: &str,
         target_label: &str,
         separator: &str,
@@ -100,7 +100,7 @@ impl ParsedRelabelConfig {
     ///
     /// See https://prometheus.io/docs/prometheus/latest/configuration/configuration/#relabel_config
     pub fn apply(&self, labels: &mut Vec<Label>, labels_offset: usize) {
-        use RelabelAction::*;
+        use RelabelActionType::*;
         let src = &labels[labels_offset..];
         if let Some(if_expr) = &self.r#if {
             if !if_expr.is_match(src) {
@@ -204,7 +204,7 @@ impl ParsedRelabelConfig {
             }
             // Slow path - extract labels from graphite metric name
             for gl in self.graphite_label_rules.iter() {
-                let value_str = gl.grt.expand(&matches);
+                let value_str = gl.expand(&matches);
                 set_label_value(labels, labels_offset, &gl.target_label, value_str)
             }
         } else {

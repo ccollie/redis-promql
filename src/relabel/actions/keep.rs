@@ -2,9 +2,8 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::common::regex_util::PromRegex;
-use crate::relabel::{IfExpression, is_default_regex_for_config};
 use crate::relabel::actions::Action;
-use crate::relabel::actions::utils::filter_labels;
+use crate::relabel::is_default_regex_for_config;
 use crate::relabel::regex_parse::parse_regex;
 use crate::relabel::utils::concat_label_values;
 use crate::storage::Label;
@@ -15,18 +14,16 @@ pub struct KeepAction {
     pub separator: String,
     pub regex: PromRegex,
     pub regex_anchored: Regex,
-    pub if_expr: Option<IfExpression>
 }
 
 impl KeepAction {
     pub fn new(source_labels: Vec<String>,
                separator: String,
-               regex: Option<Regex>,
-               if_expr: Option<IfExpression>) -> Result<Self, String> {
+               regex: Option<Regex>) -> Result<Self, String> {
 
-        if source_labels.is_empty() && if_expr.is_none() {
-            return Err("missing `source_labels` for `action=keep`".to_string());
-        }
+        // if source_labels.is_empty() && if_expr.is_none() {
+        //     return Err("missing `source_labels` for `action=keep`".to_string());
+        // }
 
         let (regex_anchored, _, prom_regex)  = parse_regex(regex, true)?;
 
@@ -34,8 +31,7 @@ impl KeepAction {
             source_labels,
             separator,
             regex: prom_regex,
-            regex_anchored,
-            if_expr
+            regex_anchored
         })
     }
 }
@@ -57,9 +53,4 @@ impl Action for KeepAction {
             labels.truncate(labels_offset);
         }
     }
-
-    fn filter(&self, labels: &[Label]) -> bool {
-        filter_labels(&self.if_expr, labels)
-    }
-
 }

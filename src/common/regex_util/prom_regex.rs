@@ -12,11 +12,11 @@ use crate::common::regex_util::match_handlers::StringMatchHandler;
 /// - substring match such as ".*foo.*" or ".+bar.+"
 ///
 /// The rest of regexps are also optimized by returning cached match results for the same input strings.
-#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct PromRegex {
     /// prefix contains literal prefix for regex.
     /// For example, prefix="foo" for regex="foo(a|b)"
-    prefix: String,
+    pub prefix: String,
     prefix_matcher: StringMatchHandler,
     suffix_matcher: StringMatchHandler,
 }

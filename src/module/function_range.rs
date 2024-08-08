@@ -7,6 +7,7 @@ use crate::arg_parse::{parse_duration_arg, parse_integer_arg, parse_number_with_
 use crate::common::types::Timestamp;
 use crate::error::TsdbResult;
 use crate::module::{get_timeseries_mut, parse_timestamp_arg};
+use crate::module::arg_parse::TimestampRangeValue;
 use crate::module::result::sample_to_result;
 use crate::storage::{RangeFilter, ValueFilter};
 
@@ -30,35 +31,45 @@ pub enum RangeAlignment {
 }
 
 #[derive(Debug, Default, PartialEq, Clone, Copy)]
-pub enum BucketTimestampOutput {
+pub enum BucketTimestamp {
     #[default]
     Start,
     End,
     Mid
 }
 
-impl TryFrom<&str> for BucketTimestampOutput {
+impl BucketTimestamp {
+    pub fn calculate(&self, ts: Timestamp, time_delta: i64) -> Timestamp {
+        match self {
+            Start => ts,
+            Mid => ts + time_delta / 2,
+            End => ts + time_delta,
+        }
+    }
+
+}
+impl TryFrom<&str> for BucketTimestamp {
     type Error = RedisError;
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         if value.len() == 1 {
             let c = value.chars().next().unwrap();
             match c {
-                '-' => return Ok(BucketTimestampOutput::Start),
-                '+' => return Ok(BucketTimestampOutput::End),
+                '-' => return Ok(BucketTimestamp::Start),
+                '+' => return Ok(BucketTimestamp::End),
                 _ => {}
             }
         }
         match value {
-            value if value.eq_ignore_ascii_case("start") => return Ok(BucketTimestampOutput::Start),
-            value if value.eq_ignore_ascii_case("end") => return Ok(BucketTimestampOutput::End),
-            value if value.eq_ignore_ascii_case("mid") => return Ok(BucketTimestampOutput::Mid),
+            value if value.eq_ignore_ascii_case("start") => return Ok(BucketTimestamp::Start),
+            value if value.eq_ignore_ascii_case("end") => return Ok(BucketTimestamp::End),
+            value if value.eq_ignore_ascii_case("mid") => return Ok(BucketTimestamp::Mid),
             _ => {}
         }
         return Err(RedisError::Str("TSDB: invalid BUCKETTIMESTAMP parameter"))
     }
 }
 
-impl TryFrom<&RedisString> for BucketTimestampOutput {
+impl TryFrom<&RedisString> for BucketTimestamp {
     type Error = RedisError;
     fn try_from(value: &RedisString) -> Result<Self, Self::Error> {
         value.to_string_lossy().as_str().try_into()
@@ -70,14 +81,14 @@ pub struct AggregationOptions {
     pub aggregator: Aggregator,
     pub align: Option<RangeAlignment>,
     pub bucket_duration: Duration,
-    pub timestamp_output: BucketTimestampOutput,
+    pub timestamp_output: BucketTimestamp,
     pub empty: bool
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct RangeOptions {
-    pub start: Timestamp,
-    pub end: Timestamp,
+    pub start: TimestampRangeValue,
+    pub end: TimestampRangeValue,
     pub count: Option<usize>,
     pub aggregation: Option<AggregationOptions>,
     pub filter: Option<RangeFilter>,
@@ -86,8 +97,8 @@ pub struct RangeOptions {
 impl RangeOptions {
     pub fn new(start: Timestamp, end: Timestamp) -> Self {
         Self {
-            start,
-            end,
+            start: TimestampRangeValue::Value(start),
+            end: TimestampRangeValue::Value(end),
             ..Default::default()
         }
     }
@@ -113,24 +124,33 @@ pub fn range(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 
     // Safety: passing 'true' as the third parameter ensures the key exists
     let series = get_timeseries_mut(ctx, &key, true)?.unwrap();
-
-    let from = parse_timestamp_arg(args.next_str()?, "startTimestamp")?;
-    let to = parse_timestamp_arg(args.next_str()?, "endTimestamp")?;
+    let options = parse_range_options(&mut args)?;
 
     args.done()?;
 
-    let start = from.to_timestamp();
-    let end = to.to_timestamp();
+    let start = options.start.to_series_timestamp(series);
+    let end = options.end.to_series_timestamp(series);
 
     if start > end {
         return Err(RedisError::Str("ERR invalid range"));
     }
 
-    let samples = series.get_range(start, end)
+    let mut samples = series.get_range(start, end)
         .map_err(|e| {
             ctx.log_warning(format!("ERR fetching range {:?}", e).as_str());
             RedisError::Str("ERR fetching range")
         })?;
+
+    if let Some(value_filter) = options.filter.as_ref() {
+        samples = samples.into_iter().filter(|s| value_filter.filter(s.timestamp, s.value)).collect();
+    }
+    if let Some(aggregation) = options.aggregation.as_ref() {
+        samples = series.aggregate_range(samples, aggregation)
+            .map_err(|e| {
+                ctx.log_warning(format!("ERR aggregating range {:?}", e).as_str());
+                RedisError::Str("ERR aggregating range")
+            })?;
+    }
 
     let result = samples.iter().map(|s| sample_to_result(s.timestamp, s.value)).collect();
     Ok(RedisValue::Array(result))
@@ -138,6 +158,9 @@ pub fn range(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 
 pub fn parse_range_options(args: &mut Skip<IntoIter<RedisString>>) -> RedisResult<RangeOptions> {
     let mut options = RangeOptions::default();
+    options.start = parse_timestamp_arg(args.next_str()?, "startTimestamp")?;
+    options.end = parse_timestamp_arg(args.next_str()?, "endTimestamp")?;
+
     while let Ok(arg) = args.next_str() {
         match arg {
             arg if arg.eq_ignore_ascii_case(CMD_ARG_FILTER_BY_VALUE) => {
@@ -157,6 +180,9 @@ pub fn parse_range_options(args: &mut Skip<IntoIter<RedisString>>) -> RedisResul
                 let next = args.next_arg()?;
                 let count = parse_integer_arg(&next, CMD_ARG_COUNT, false)
                     .map_err(|_| RedisError::Str("TSDB: COUNT must be a positive integer"))?;
+                if count > usize::MAX as i64 {
+                    return Err(RedisError::Str("TSDB: COUNT value is too large"));
+                }
                 options.count = Some(count as usize);
             }
             _ => {}
@@ -234,7 +260,7 @@ pub fn parse_aggregation_args(args: &mut Skip<IntoIter<RedisString>>) -> RedisRe
         aggregator,
         align: None,
         bucket_duration,
-        timestamp_output: BucketTimestampOutput::Start,
+        timestamp_output: BucketTimestamp::Start,
         empty: false,
     };
     let mut arg_count: usize = 0;
@@ -253,7 +279,7 @@ pub fn parse_aggregation_args(args: &mut Skip<IntoIter<RedisString>>) -> RedisRe
             arg if arg.eq_ignore_ascii_case(CMD_ARG_BUCKET_TIMESTAMP) => {
                 let next = args.next_str()?;
                 arg_count += 1;
-                aggr.timestamp_output = BucketTimestampOutput::try_from(next)?;
+                aggr.timestamp_output = BucketTimestamp::try_from(next)?;
             }
             _ => {
                 return Err(RedisError::Str("TSDB: unknown AGGREGATION option"))

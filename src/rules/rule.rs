@@ -1,4 +1,3 @@
-use std::ascii::AsciiExt;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display};
 use std::str::FromStr;

@@ -59,7 +59,7 @@ impl From<&str> for LabelFilterOp {
 
 
 /// labelFilter contains PromQL filter for `{label op "value"}`
-#[derive(Debug, Clone, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LabelFilter {
     pub label: String,
     pub op: LabelFilterOp,
@@ -154,7 +154,7 @@ pub(crate) fn to_canonical_label_name(label_name: &str) -> &str {
     label_name
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LabelMatchers(Vec<LabelFilter>);
 
 impl LabelMatchers {

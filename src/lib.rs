@@ -36,7 +36,7 @@ fn config_changed_event_handler(ctx: &RedisContext, changed_configs: &[&str]) {
 fn remove_key_from_cache(ctx: &RedisContext, key: &[u8]) {
     let ts_index = get_timeseries_index(ctx);
     let key = String::from_utf8_lossy(key).to_string();
-    index.remove_series_by_key(&key);
+    ts_index.remove_series_by_key(&key);
 }
 
 fn on_event(ctx: &RedisContext, _event_type: NotifyEvent, event: &str, key: &[u8]) {

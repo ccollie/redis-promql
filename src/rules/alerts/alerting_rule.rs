@@ -11,7 +11,7 @@ use crate::rules::types::{new_time_series, RawTimeSeries};
 use crate::rules::{EvalContext, Rule, RuleState, RuleStateEntry, RuleType};
 use crate::storage::{Label, Timestamp};
 use ahash::AHashMap;
-use metricsql_engine::METRIC_NAME_LABEL;
+use metricsql_runtime::METRIC_NAME_LABEL;
 use scopeguard::defer;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -545,7 +545,7 @@ impl Rule for AlertingRule {
                     if ts.sub(alert.keep_firing_since) > self.keep_firing_for {
                         alert.state = AlertState::Inactive;
                         alert.resolved_at = ts;
-                        // ar.logDebugf(ts, a, "FIRING => INACTIVE: is absent in current evaluation round")
+                        // ar.debug(ts, a, "FIRING => INACTIVE: is absent in current evaluation round")
                         continue;
                     }
                     // self.logDebugf(ts, a, "KEEP_FIRING: will keep firing for %fs since %v", ar.KeepFiringFor.Seconds(), a.KeepFiringSince)

@@ -1,4 +1,5 @@
 use crate::common::types::Timestamp;
+use crate::storage::SeriesSlice;
 
 trait ModuloSignedExt {
     fn modulo(&self, n: Self) -> Self;
@@ -111,6 +112,56 @@ pub fn trim_vec_data<'a>(timestamps: &mut Vec<i64>, values: &mut Vec<f64>, start
     } else {
         return;
     }
+}
+
+
+// returns the number of matches
+fn filter_samples(samples: &mut SeriesSlice, by_ts_args: &[Timestamp], ts_filter_index: &mut usize, last_index: &mut usize) -> usize {
+    let mut count = 0;
+
+    let ts_slice = &by_ts_args[*ts_filter_index..];
+    if ts_slice.is_empty() {
+        return 0;
+    }
+
+    let last_ts = samples.timestamps[samples.timestamps.len() - 1];
+    let mut first_ts = samples.timestamps[0];
+
+    if first_ts > by_ts_args[last_index] {
+        *ts_filter_index = *last_index;
+        return 0;
+    }
+
+    if last_ts < by_ts_args[*ts_filter_index] {
+        return 0;
+    }
+
+    while by_ts_args[ts_filter_index] < first_ts && *ts_filter_index < *last_index {
+        *ts_filter_index += 1;
+    }
+
+    let mut i = 0;
+    let mut sample_ts = 0;
+    while i < samples.timestamps.len() {
+        let filter_ts = by_ts_args[*ts_filter_index];
+        for j in i ..samples.timestamps.len() {
+            sample_ts = samples.timestamps[i];
+            if sample_ts >= filter_ts {
+                break;
+            }
+            i = j;
+        }
+        if sample_ts == filter_ts {
+            // samples.timestamps[count] = sample_ts;
+            // samples.values[count] = samples.values[i];
+            todo!("implement");
+            count += 1;
+        }
+        *ts_filter_index += 1;
+        i += 1;
+    }
+
+    count
 }
 
 #[cfg(test)]

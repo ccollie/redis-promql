@@ -11,7 +11,7 @@ use metricsql_encoding::encoders::{
     timestamp::encode as timestamp_compress,
 };
 use metricsql_encoding::marshal::{marshal_var_i64, unmarshal_var_i64};
-use metricsql_engine::Timestamp;
+use metricsql_runtime::Timestamp;
 use pco::ChunkConfig;
 use pco::data_types::NumberLike;
 use pco::standalone::{simple_compress, simple_decompress_into};

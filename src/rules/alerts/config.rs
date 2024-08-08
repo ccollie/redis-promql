@@ -168,7 +168,7 @@ pub(crate) fn should_skip_rand_sleep_on_group_start() -> bool {
     })
 }
 
-/// Group contains list of Rules grouped into entity with one name and evaluation interval
+/// Group contains list of Rules grouped into an entity with one name and evaluation interval
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct GroupConfig {
     #[serde(rename = "type")]

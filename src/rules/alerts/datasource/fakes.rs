@@ -24,7 +24,7 @@ impl FakeQuerier {
     }
 
     pub fn add_metrics(&mut self, metrics: Vec<Metric>) {
-        let inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
         inner.metrics.extend(metrics);
     }
 

@@ -22,10 +22,10 @@ pub trait Querier {
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QueryResult {
     /// Data contains list of received Metric
-    pub(crate) data: Vec<Metric>,
+    pub data: Vec<Metric>,
     /// SeriesFetched contains amount of time series processed by provider during query evaluation.
     /// If 0, then this feature is not supported by the provider.
-    pub(crate) series_fetched: usize
+    pub series_fetched: usize
 }
 
 /// QuerierBuilder builds Querier with given params.
@@ -36,7 +36,7 @@ pub trait QuerierBuilder {
 
 /// QuerierParams params for Querier.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct QuerierParams {
+pub struct QuerierParams {
     pub data_source_type: DataSourceType,
     pub evaluation_interval: Duration,
     pub eval_offset: Duration,

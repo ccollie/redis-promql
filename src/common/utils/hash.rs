@@ -1,6 +1,6 @@
 use std::hash::Hasher;
 use ahash::AHashMap;
-use metricsql_engine::METRIC_NAME_LABEL;
+use metricsql_runtime::METRIC_NAME_LABEL;
 use xxhash_rust::xxh3::Xxh3;
 
 pub fn hash_labels_without_metric_name(labels: &AHashMap<String, String>) -> u64 {

@@ -10,7 +10,7 @@ use crate::common::types::Timestamp;
 use crate::error::{TsdbError, TsdbResult};
 use crate::storage::{DEFAULT_CHUNK_SIZE_BYTES, DuplicatePolicy, F64_SIZE, I64_SIZE, Sample, SeriesSlice, VEC_BASE_SIZE};
 use crate::storage::chunk::Chunk;
-use crate::storage::serialization::{compress_timestamps, compress_values, CompressionOptions, decompress_timestamps, decompress_values};
+use crate::storage::serialization::{compress_timestamps, compress_values, COMPRESSION_PARALLELIZATION_THRESHOLD, CompressionOptions, decompress_timestamps, decompress_values};
 use crate::storage::utils::{get_timestamp_index_bounds, trim_vec_data};
 
 /// `CompressedBlock` holds information about location and time range of a block of compressed data.

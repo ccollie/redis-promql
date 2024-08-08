@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use metricsql_engine::METRIC_NAME_LABEL;
+use metricsql_runtime::METRIC_NAME_LABEL;
 use metricsql_parser::prelude::{LabelFilter, LabelFilterOp, Matchers};
 use redis_module::{Context, RedisError};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -51,6 +51,7 @@ impl TimeSeriesIndex {
         let mut label_kv_to_ts = self.label_kv_to_ts.write().unwrap();
         label_kv_to_ts.clear();
 
+        // we use Relaxed here since we only need uniqueness, not monotonicity
         self.series_sequence.store(0, Ordering::Relaxed);
     }
 
@@ -195,6 +196,9 @@ impl TimeSeriesIndex {
     }
 
     pub(crate) fn remove_series_by_key(&self, key: &String) {
+        // get series by key
+
+
         todo!()
     }
 

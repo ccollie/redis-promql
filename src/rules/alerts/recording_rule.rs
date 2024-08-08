@@ -2,7 +2,7 @@ use std::default::Default;
 use std::time::Duration;
 
 use ahash::{AHashMap, AHashSet};
-use metricsql_engine::METRIC_NAME_LABEL;
+use metricsql_runtime::METRIC_NAME_LABEL;
 use serde::{Deserialize, Serialize};
 
 use crate::common::current_time_millis;

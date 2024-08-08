@@ -1,6 +1,6 @@
 use crate::storage::time_series::TimeSeries;
-use metricsql_engine::provider::MetricDataProvider;
-use metricsql_engine::{
+use metricsql_runtime::provider::MetricDataProvider;
+use metricsql_runtime::{
     Deadline, MetricName, QueryResult, QueryResults, RuntimeResult, SearchQuery,
 };
 use rayon::iter::IntoParallelRefIterator;
@@ -49,7 +49,7 @@ impl MetricDataProvider for TsdbDataProvider {
     fn search(&self, sq: &SearchQuery, _deadline: &Deadline) -> RuntimeResult<QueryResults> {
         // see: https://github.com/RedisLabsModules/redismodule-rs/blob/master/examples/call.rs#L144
         let ctx_guard = redis_module::MODULE_CONTEXT.lock();
-        let index = get_timeseries_index();
+        let index = get_timeseries_index(&ctx_guard);
 
         let data = self.get_series_data(&ctx_guard, index, sq);
         let result = QueryResults::new(data);

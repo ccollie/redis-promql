@@ -25,7 +25,8 @@ pub fn create(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         return Err(RedisError::Str("TSDB: the key already exists"));
     }
 
-    let ts = create_series(&parsed_key, options);
+    let ts = create_series(&parsed_key, options, ctx)
+        .map_err(|e| RedisError::Str(&format!("TSDB: failed to create series: {:?}", e)))?;
 
     key.set_value(&REDIS_PROMQL_SERIES_TYPE, ts)?;
 
@@ -100,10 +101,11 @@ pub fn parse_create_options(args: Vec<RedisString>) -> RedisResult<(RedisString,
 pub(crate) fn create_series(
     key: &RedisString,
     options: TimeSeriesOptions,
+    ctx: &Context,
 ) -> TsdbResult<TimeSeries> {
     let mut ts = TimeSeries::with_options(options)?;
     // todo: we need to have a default retention value
-    let ts_index = get_timeseries_index();
+    let ts_index = get_timeseries_index(ctx);
     ts_index.index_time_series(&mut ts, key.to_string());
     Ok(ts)
 }
@@ -115,7 +117,7 @@ pub(crate) fn create_series_ex(ctx: &Context, key: &RedisString, options: TimeSe
         return Err(RedisError::Str("TSDB: the key already exists"));
     }
 
-    let ts = create_series(&key, options)?;
+    let ts = create_series(&key, options, ctx)?;
     _key.set_value(&REDIS_PROMQL_SERIES_TYPE, ts)?;
 
     ctx.replicate_verbatim();

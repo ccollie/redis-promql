@@ -14,7 +14,7 @@ use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
 use dynamic_lru_cache::DynamicCache;
-
+use crate::relabel::actions::RelabelActionType;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum RelabelAction {
@@ -106,7 +106,7 @@ impl FromStr for RelabelAction {
 pub(crate) struct RelabelConfig {
     #[serde(rename = "if")]
     pub if_expr: Option<IfExpression>,
-    pub action: RelabelAction,
+    pub action: RelabelActionType,
     pub source_labels: Vec<String>,
     #[serde(default=";")]
     pub separator: String,
@@ -249,7 +249,7 @@ pub(crate) fn is_default_regex_for_config(regex: &Regex) -> bool {
 }
 
 fn validate_labels(
-    action: RelabelAction,
+    action: RelabelActionType,
     source_labels: &Vec<String>,
     target_label: &str,
 ) -> Result<(), String> {
@@ -263,7 +263,7 @@ fn validate_labels(
 }
 
 pub fn parse_relabel_config(rc: RelabelConfig) -> Result<ParsedRelabelConfig, String> {
-    use RelabelAction::*;
+    use RelabelActionType::*;
 
     let mut rc = rc;
 

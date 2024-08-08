@@ -1,9 +1,8 @@
-use std::collections::HashMap;
-use std::sync::Mutex;
-use std::time::Duration;
-use ahash::AHashMap;
 use crate::common::time::current_time_millis;
 use crate::common::types::Timestamp;
+use ahash::AHashMap;
+use std::sync::Mutex;
+use std::time::Duration;
 
 // todo: move to global config
 const CACHE_EXPIRE_DURATION: Duration = Duration::from_secs(5 * 60);

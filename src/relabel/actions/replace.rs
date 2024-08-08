@@ -1,7 +1,9 @@
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+
 use crate::common::regex_util::PromRegex;
-use crate::relabel::{DEFAULT_REGEX_FOR_RELABEL_CONFIG, fill_label_references, IfExpression, is_default_regex_for_config};
+use crate::relabel::{fill_label_references, is_default_regex_for_config};
 use crate::relabel::actions::Action;
-use crate::relabel::actions::utils::filter_labels;
 use crate::relabel::regex_parse::parse_regex;
 use crate::relabel::string_replacer::StringReplacer;
 use crate::relabel::utils::{concat_label_values, set_label_value};
@@ -9,7 +11,7 @@ use crate::storage::Label;
 
 /// replaces the first occurrence of `regex` at `source_labels` joined with `separator` with the `replacement`
 /// and store the result at `target_label`
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplaceAction {
     pub source_labels: Vec<String>,
     pub target_label: String,
@@ -18,7 +20,6 @@ pub struct ReplaceAction {
     pub replacement: String,
     pub has_label_reference_in_replacement: bool,
     pub has_capture_group_in_target_label: bool,
-    pub if_expr: Option<IfExpression>,
     is_default_regex: bool,
     replacer: StringReplacer
 }
@@ -27,9 +28,8 @@ impl ReplaceAction {
     pub fn new(source_labels: Vec<String>,
                target_label: String,
                separator: String,
-               regex: Option<regex::Regex>,
+               regex: Option<Regex>,
                replacement: String,
-               if_expression: Option<IfExpression>
     ) -> Result<Self, String> {
         if source_labels.is_empty() {
             return Err("missing `source_labels` for `action=replace`".to_string());
@@ -39,8 +39,8 @@ impl ReplaceAction {
 
         let has_label_reference_in_replacement = replacement.contains("{{");
         let has_capture_group_in_target_label = target_label.contains("(");
-        let replacer = StringReplacer::new(regex_prom.clone(), replacement.clone())?;
         let is_default_regex = is_default_regex_for_config(&regex_anchored);
+        let replacer = StringReplacer::new(regex_anchored, replacement.clone())?;
 
         Ok(Self {
             source_labels,
@@ -50,7 +50,6 @@ impl ReplaceAction {
             replacement,
             has_label_reference_in_replacement,
             has_capture_group_in_target_label,
-            if_expr: if_expression,
             replacer,
             is_default_regex
         })
@@ -115,9 +114,5 @@ impl Action for ReplaceAction {
         }
 
         set_label_value(labels, labels_offset, name_str, value_str)
-    }
-
-    fn filter(&self, labels: &[Label]) -> bool {
-        filter_labels(&self.if_expr, labels)
     }
 }

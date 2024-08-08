@@ -20,8 +20,8 @@ mod utils;
 mod series_data;
 mod defrag;
 mod serialization;
-mod compressed_series;
 mod compressed_segment;
+mod types;
 
 use crate::error::{TsdbError, TsdbResult};
 pub(super) use chunk::*;
@@ -100,7 +100,7 @@ impl PartialOrd for Sample {
     }
 }
 
-pub const SAMPLE_SIZE: usize = std::mem::size_of::<Sample>();
+pub const SAMPLE_SIZE: usize = size_of::<Sample>();
 
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -245,9 +245,9 @@ impl FromStr for DuplicatePolicy {
         match s {
             s if s.eq_ignore_ascii_case("block") => Ok(Block),
             s if s.eq_ignore_ascii_case("first") => Ok(KeepFirst),
-            s if s.eq_ignore_ascii_case("keepfirst") => Ok(KeepFirst),
+            s if s.eq_ignore_ascii_case("keepfirst") || s.eq_ignore_ascii_case("keep_first") => Ok(KeepFirst),
             s if s.eq_ignore_ascii_case("last") => Ok(KeepLast),
-            s if s.eq_ignore_ascii_case("keeplast") => Ok(KeepLast),
+            s if s.eq_ignore_ascii_case("keeplast") || s.eq_ignore_ascii_case("keep_first") => Ok(KeepLast),
             s if s.eq_ignore_ascii_case("min") => Ok(Min),
             s if s.eq_ignore_ascii_case("max") => Ok(Max),
             s if s.eq_ignore_ascii_case("sum") => Ok(Sum),

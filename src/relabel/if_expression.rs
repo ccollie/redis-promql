@@ -59,6 +59,20 @@ impl Display for IfExpression {
     }
 }
 
+impl TryFrom<MetricExpr> for IfExpression {
+    type Error = AlertsError;
+
+    fn try_from(me: MetricExpr) -> Result<Self, Self::Error> {
+        let matchers_list = metric_expr_to_label_filter_list(&me)
+            .map_err(|e| AlertsError::InvalidRule(e.to_string()))?;
+        let ie = IfExpressionMatcher {
+            s: me.to_string(),
+            matchers_list,
+        };
+        Ok(IfExpression(vec![ie]))
+    }
+}
+
 type BaseLabelFilter = metricsql_parser::prelude::LabelFilter;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

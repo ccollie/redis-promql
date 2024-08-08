@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
 use ahash::{AHashMap, AHashSet};
 use metricsql_engine::TimestampTrait;
+
 use crate::common::constants::STALE_NAN;
 use crate::common::types::Timestamp;
 use crate::config::get_global_settings;
-use crate::rules::alerts::{AlertingRule, AlertsError, AlertsResult, Notifier, Querier, WriteQueue};
 use crate::rules::{new_time_series, RawTimeSeries, Rule, RuleType};
+use crate::rules::alerts::{AlertingRule, AlertsError, AlertsResult, Notifier, Querier, WriteQueue};
 use crate::rules::alerts::group::labels_to_string;
 use crate::storage::Label;
 
@@ -18,12 +20,14 @@ pub struct Executor {
     pub notifiers: fn() -> Vec<Box<dyn Notifier>>,
     pub notifier_headers: AHashMap<String, String>,
     pub rw: Arc<WriteQueue>,
+    pub querier: Arc<dyn Querier>,
 
     /// previously_sent_series stores series sent to RW on previous iteration
     /// HashMap<RuleID, HashMap<ruleLabels, Vec<Label>>
     /// where `ruleID` is id of the Rule within a Group and `ruleLabels` is Vec<Label> marshalled
     /// to a string
     previously_sent_series: Mutex<PreviouslySentSeries>,
+    pub(super) last_evaluation: Timestamp,
 }
 
 /// SKIP_RAND_SLEEP_ON_GROUP_START will skip random sleep delay in group first evaluation
@@ -34,13 +38,16 @@ impl Executor {
         notifiers: fn() -> Vec<Box<dyn Notifier>>,
         notifier_headers: &AHashMap<String, String>,
         rw: Arc<WriteQueue>,
+        querier: impl Querier,
     ) -> Self {
         Executor {
             eval_ts: Timestamp::now(),
             notifiers,
             notifier_headers: notifier_headers.clone(),
             rw: Arc::clone(&rw),
+            querier: Arc::new(querier),
             previously_sent_series: Mutex::new(HashMap::new()),
+            last_evaluation: Timestamp::now(),
         }
     }
 
@@ -77,7 +84,7 @@ impl Executor {
         return stales;
     }
 
-    /// deletes references in tracked previously_sent_series_to_rw list to rules
+    /// Deletes references in tracked previously_sent_series_to_rw list to rules
     /// which aren't present in the given active_rules list. The method is used when the list
     /// of loaded rules has changed and executor has to remove references to non-existing rules.
     pub(super) fn purge_stale_series(&mut self, active_rules: &[impl Rule]) {
@@ -89,23 +96,21 @@ impl Executor {
     }
 
     pub(super) fn exec_concurrently(&mut self,
-                                    querier: &impl Querier,
                                     rules: &mut [impl Rule],
                                     ts: Timestamp,
                                     resolve_duration: Duration,
                                     limit: usize) -> AlertsResult<()> {
         rules
             .par_items_mut()
-            .try_for_each(|rule| self.exec(rule, querier, ts, resolve_duration, limit))
+            .try_for_each(|rule| self.exec(rule, ts, resolve_duration, limit))
     }
 
     pub fn exec(&mut self,
-                querier: &impl Querier,
                 rule: &mut impl Rule,
                 ts: Timestamp,
                 resolve_duration: Duration,
                 limit: usize) -> AlertsResult<()> {
-        let tss = rule.exec(querier, ts, limit)
+        let tss = rule.exec(&self.querier, ts, limit)
             .map_err(|err| AlertsError::QueryExecutionError(format!("rule {:?}: failed to execute: {:?}", rule, err)))?;
 
         let stale_series = self.get_stale_series(rule, &tss, ts);
@@ -151,6 +156,5 @@ impl Executor {
     }
 
     pub(super) fn on_tick(&mut self) {
-
     }
 }

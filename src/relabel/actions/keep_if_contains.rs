@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
+
 use crate::relabel::actions::Action;
-use crate::relabel::actions::utils::filter_labels;
-use crate::relabel::IfExpression;
 use crate::relabel::utils::contains_all_label_values;
 use crate::storage::Label;
 
@@ -15,18 +14,16 @@ use crate::storage::Label;
 ///
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct KeepIfContainsAction {
-    pub if_expr: Option<IfExpression>,
     pub source_labels: Vec<String>,
     pub target_label: String,
 }
 
 impl KeepIfContainsAction {
-    pub fn new(source_labels: Vec<String>, target_label: String, if_expression: Option<IfExpression>) -> Result<Self, String> {
+    pub fn new(source_labels: Vec<String>, target_label: String) -> Result<Self, String> {
         if source_labels.is_empty() {
             return Err("missing `source_labels` for `action=keep_if_contains`".to_string());
         }
         Ok(Self {
-            if_expr: if_expression,
             source_labels,
             target_label,
         })
@@ -39,9 +36,5 @@ impl Action for KeepIfContainsAction {
             return
         }
         labels.truncate(labels_offset);
-    }
-
-    fn filter(&self, labels: &[Label]) -> bool {
-        filter_labels(&self.if_expr, labels)
     }
 }

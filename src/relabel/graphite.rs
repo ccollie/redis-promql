@@ -13,7 +13,7 @@ pub struct GraphiteMatchTemplate {
 }
 
 impl GraphiteMatchTemplate {
-    pub(crate) fn new(s: &str) -> Self {
+    pub fn new(s: &str) -> Self {
         let s_orig = s.to_string();
         let mut parts: Vec<String> = Vec::new();
 
@@ -102,8 +102,14 @@ impl Display for GraphiteMatchTemplate {
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GraphiteLabelRule {
-    pub(crate) grt: GraphiteReplaceTemplate,
-    pub(crate) target_label: String,
+    grt: GraphiteReplaceTemplate,
+    pub target_label: String,
+}
+
+impl GraphiteLabelRule {
+    pub fn expand(&self, matches: &Vec<String>) -> String {
+        self.grt.expand(matches)
+    }
 }
 
 impl Display for GraphiteLabelRule {

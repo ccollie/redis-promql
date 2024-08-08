@@ -1,3 +1,4 @@
+use scopeguard::defer;
 use std::collections::HashMap;
 use std::default::Default;
 use std::hash::Hasher;
@@ -9,7 +10,7 @@ use std::vec;
 use ahash::AHashMap;
 
 use enquote::enquote;
-use metricsql_engine::TimestampTrait;
+use metricsql_runtime::TimestampTrait;
 use metricsql_parser::prelude::METRIC_NAME;
 use redis_module::Context;
 use serde::{Deserialize, Serialize};
@@ -19,17 +20,11 @@ use crate::common::current_time_millis;
 use crate::config::get_global_settings;
 
 use crate::rules::{EvalContext, Rule, RuleType};
-use crate::rules::alerts::{AlertingRule, AlertsError, AlertsResult, DataSourceType, GroupConfig, Notifier, RecordingRule, should_skip_rand_sleep_on_group_start, WriteQueue};
+use crate::rules::alerts::{AlertingRule, AlertsError, AlertsResult, DataSourceType, GroupConfig, Notifier, Querier, RecordingRule, should_skip_rand_sleep_on_group_start, WriteQueue};
 use crate::rules::alerts::datasource::datasource::{QuerierBuilder, QuerierParams};
 use crate::rules::alerts::executor::Executor;
 use crate::storage::{Label, Timestamp};
 
-/// Control messages sent to Group channel during evaluation
-pub(crate) enum GroupMessage {
-    Stop,
-    Update(Group),
-    Interval
-}
 
 /// Group is an entity for grouping rules
 #[derive(Debug, Serialize, Deserialize)]
@@ -49,8 +44,6 @@ pub struct Group {
     pub headers: Vec<Label>,
     pub notifier_headers: AHashMap<String, String>,
     pub metrics: GroupMetrics,
-    #[serde(skip)]
-    cancelled: AtomicBool,
     #[serde(skip)]
     first_run: AtomicBool,
     #[serde(skip)]
@@ -82,7 +75,6 @@ impl Clone for Group {
             labels: self.labels.clone(),
             last_evaluation: self.last_evaluation,
             metrics: self.metrics.clone(),
-            cancelled: AtomicBool::new(self.cancelled.load(Ordering::Relaxed)),
             first_run: AtomicBool::new(self.first_run.load(Ordering::Relaxed)),
             eval_alignment: self.eval_alignment,
             timer_id: self.timer_id,
@@ -130,7 +122,6 @@ impl Group {
             last_evaluation: 0,
             metrics: GroupMetrics::default(),
             recording_rules: vec![],
-            cancelled: Default::default(),
             first_run: AtomicBool::new(true),
             eval_alignment: cfg.eval_alignment,
             timer_id: 0,
@@ -281,108 +272,60 @@ impl Group {
         Ok(())
     }
 
+    fn createQuerier(&self, qb: impl QuerierBuilder) -> Box<dyn Querier> {
+        qb.build_with_params(QuerierParams {
+            data_source_type: self.source_type.clone(),
+            evaluation_interval: self.interval,
+            eval_offset: self.eval_offset,
+            query_params: Default::default(),
+            headers: Default::default(),
+            debug: false,
+        })
+    }
+
     //////////////////////////////////////////////
     pub(super) fn start(&mut self,
                         ctx: &Context,
                         nts: fn() -> Vec<dyn Notifier>,
-                        rw: Arc<WriteQueue>,
-                        rr: Option<&dyn QuerierBuilder>) {
+                        write_queue: Arc<WriteQueue>,
+                        querier_builder: Arc<&dyn QuerierBuilder>) {
 
         let mut eval_ts = current_time_millis();
         // sleep random duration to spread group rules evaluation
         // over time in order to reduce load on datasource.
-        if !should_skip_rand_sleep_on_group_start()  {
-            let sleep_before_start = delay_before_start(eval_ts, self.id(), self.interval, self.eval_offset);
+        if !should_skip_rand_sleep_on_group_start() {
+            let sleep_before_start = delay_before_start(eval_ts,
+                                                        self.id(),
+                                                        self.interval,
+                                                        Some(&self.eval_offset));
             info!("will start in %v", sleep_before_start);
 
             let sleep_timer = time.NewTimer(sleep_before_start);
-            select {
-                case <-ctx.Done():
-                sleepTimer: sleep_timer.stop()
-                return
-                case <-g.doneCh:
-    sleep_timer.Stop()
-    return
-    case <- sleepTimer: sleep_timer.C:
-    }
-    eval_ts = eval_ts.add(sleep_before_start)
-    }
-
-    let e = Executor::new(nts, &self.notifier_headers, rw);
-
-    info!("started rule group \"{}\"", self.name);
-
-    evalCtx, cancel = context.WithCancel(ctx)
-    g.evalCancel = cancel
-    defer! {
-      self.eval_cancel()
-    }
-
-    self.eval(evalCtx, eval_ts);
-
-    let t = time.NewTicker(g.Interval);
-    defer!{
-      t.stop();
-    }
-
-    // restore the rules state after the first evaluation
-    // so only active alerts can be restored.
-    if let Some(rr) = rr {
-        if let Err(err) = self.restore(rr, eval_ts, remoteReadLookBack) {
-            error!("error while restoring ruleState for group {}: {:?}", self.name, err)
+            // todo sleep
         }
-    }
 
-    for {
-    select {
-    case <-ctx.done():
-        info!("group \"{}\": context cancelled", self.name)
-    return
-    case <-g.doneCh:
-    info!("group {}: received stop signal", self.name)
-    return
-    case ng := <-g.updateCh:
-    g.mu.Lock()
+        let querier = self.createQuerier(querier_builder);
+        let mut e = Executor::new(nts, &self.notifier_headers, write_queue, querier);
 
-    // it is expected that g.evalCancel will be evoked
-    // somewhere else to unblock group from the rules evaluation.
-    // we recreate the evalCtx and g.evalCancel, so it can
-    // be called again.
+        info!("started rule group \"{}\"", self.name);
 
-    self.update_with(ng)
-        .ok_or_else(|| error!(format!("group {}: failed to update", self.name)));
+        self.eval(eval_ts, &mut e);
 
-    // ensure that staleness is tracked for existing rules only
-    e.purge_stale_results(g.Rules);
-    e.notifier_headers = self.notifier_headers.clone();
-
-    g.infof("re-started");
-    case <-t.C:
-        let mut missed = (time.since(eval_ts) / self.interval) - 1;
-        if missed < 0 {
-            // missed can become < 0 due to irregular delays during evaluation
-            // which can result in time.Since(eval_ts) < g.Interval
-            missed = 0;
+        let t = time.NewTicker(g.Interval);
+        defer!{
+          t.stop();
         }
-        if missed > 0 {
-            self.metrics.iteration_missed.inc()
-        }
-        eval_ts = eval_ts.add(Duration::from_millis((missed + 1) * self.interval));
 
-        eval(evalCtx, eval_ts)
-    }
-    }
+        // restore the rules state after the first evaluation
+        // so only active alerts can be restored.
+        if let Some(rr) = rr {
+            if let Err(err) = self.restore(rr, eval_ts, remoteReadLookBack) {
+                error!("error while restoring ruleState for group {}: {:?}", self.name, err)
+            }
+        }
     }
 
     //////////////////////////////////////////////
-
-    pub fn interrupt_eval(&self) {
-        self.cancelled.store(true, Ordering::SeqCst);
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
-    }
 
     pub fn close(&mut self) {
         self.interrupt_eval();
@@ -456,7 +399,8 @@ impl Group {
         let settings = get_global_settings();
         let eval_ts = current_time_millis();
 
-        let mut e = Executor::new(nts, &self.notifier_headers, write_queue);
+        let querier = self.createQuerier(qb);
+        let mut e = Executor::new(nts, &self.notifier_headers, write_queue, querier);
 
         // restore the rules state after the first evaluation so only active alerts can be restored.
         // todo: i doubt we need atomics here
@@ -483,14 +427,52 @@ impl Group {
         if missed > 0 {
             self.metrics.iteration_missed.fetch_add(missed as u64, Ordering::Relaxed);
         }
-        let eval_ts = eval_ts.add(((missed + 1) * self.interval.as_millis());
+        let eval_ts = eval_ts.add((missed + 1) * self.interval.as_millis());
         self.eval(&mut e, eval_ts)
+    }
+
+    pub(super) fn on_tick(&mut self, e: &mut Executor, eval_ts: Timestamp) {
+        self.metrics.iteration_interval.fetch_add(1, Ordering::Relaxed);
+        let current = current_time_millis();
+        let elapsed = eval_ts - self.last_evaluation;
+        let mut missed = elapsed / (self.interval.as_millis() - 1) as u64 as i64;
+        if missed < 0 {
+            // missed can become < 0 due to irregular delays during evaluation
+            // which can result in time.since(eval_ts) < g.interval
+            missed = 0;
+        }
+        if missed > 0 {
+            self.metrics.iteration_missed.fetch_add(missed as u64, Ordering::Relaxed);
+        }
+        let eval_ts = current.add((missed + 1) * self.interval.as_millis());
+        self.eval(e, eval_ts)
+    }
+
+    pub(super) fn on_update(&mut self, ng: &Group, e: &mut Executor) -> AlertsResult<()> {
+        // g.mu.Lock();
+
+        // it is expected that g.evalCancel will be evoked
+        // somewhere else to unblock group from the rules evaluation.
+
+        self.update_with(ng).map_err(|_| {
+            return AlertsError::Generic(format!("group {}: failed to update", self.name))
+        })?;
+
+        // ensure that staleness is tracked for existing rules only
+        e.purge_stale_results(&self.alerting_rules);
+        e.purge_stale_series(&self.recording_rules);
+
+        e.notifier_headers = self.notifier_headers.clone();
+
+        info!("group re-started");
+        Ok(())
     }
 
     pub(super) fn resolve_duration(&self) -> Duration {
         let settings = get_global_settings();
         get_resolve_duration(
-            self.interval, &settings.resend_delay,
+            self.interval,
+            &settings.resend_delay,
             &settings.max_resolve_duration)
     }
 
@@ -560,7 +542,7 @@ fn get_resolve_duration(group_interval: Duration, delta: &Duration,
 /// delay_before_start returns a duration on the interval between [ts..ts+interval].
 /// delay_before_start accounts for `offset`, so returned duration should be always
 /// bigger than the `offset`.
-fn delay_before_start(ts: Timestamp, key: u64, interval: Duration, offset: Option<Duration>) -> Duration {
+fn delay_before_start(ts: Timestamp, key: u64, interval: Duration, offset: Option<&Duration>) -> Duration {
     let mut rand_sleep = interval * (key / (1 << 64)) as u32;
     let sleep_offset = Duration::from_millis((ts % interval.as_millis() as u64) as u64);
     if rand_sleep < sleep_offset {

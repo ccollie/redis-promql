@@ -17,7 +17,7 @@ mod function_add;
 mod function_alter;
 mod function_get;
 pub mod arg_parse;
-
+mod aggregation;
 
 pub mod commands {
     pub(crate) use super::function_add::*;

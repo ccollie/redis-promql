@@ -4,7 +4,7 @@ use metricsql_common::hash::IntMap;
 use metricsql_engine::prelude::{Context as QueryContext};
 use crate::index::{TimeSeriesIndex};
 use crate::provider::TsdbDataProvider;
-use redis_module::{Context, RedisModule_GetSelectedDb};
+use redis_module::{raw, Context, RedisModule_GetSelectedDb};
 
 pub type TimeSeriesIndexMap = IntMap<u32, TimeSeriesIndex>;
 
@@ -32,13 +32,13 @@ pub(crate) fn set_query_context(ctx: QueryContext) {
     }
 }
 
-pub unsafe fn get_current_db(ctx: &Context) -> u32 {
-    let db = RedisModule_GetSelectedDb.unwrap()(ctx.ctx);
+pub unsafe fn get_current_db(ctx: *mut raw::RedisModuleCtx) -> u32 {
+    let db = RedisModule_GetSelectedDb.unwrap()(ctx);
     db as u32
 }
 
 pub fn get_timeseries_index(ctx: &Context) -> &'static mut TimeSeriesIndex {
     let mut map = TIMESERIES_INDEX.get_or_init(|| TimeSeriesIndexMap::new());
-    let db = unsafe { get_current_db(ctx) };
+    let db = unsafe { get_current_db(ctx.ctx) };
     map.entry(db).or_insert_with(TimeSeriesIndex::new)
 }

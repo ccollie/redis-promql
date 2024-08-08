@@ -1,19 +1,17 @@
-use regex::Regex;
 use crate::relabel::actions::Action;
-use crate::relabel::actions::utils::filter_labels;
-use crate::relabel::IfExpression;
 use crate::relabel::submatch_replacer::SubmatchReplacer;
 use crate::relabel::utils::{concat_label_values, set_label_value};
 use crate::storage::Label;
+use regex::Regex;
+use serde::{Deserialize, Serialize};
 
 /// Replace all the occurrences of `regex` at `source_labels` joined with `separator` with the `replacement`
 /// and store the result at `target_label`
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplaceAllAction {
     pub source_labels: Vec<String>,
     pub target_label: String,
     pub separator: String,
-    pub if_expr: Option<IfExpression>,
     submatch_replacer: SubmatchReplacer,
 }
 
@@ -22,9 +20,7 @@ impl ReplaceAllAction {
                target_label: String,
                separator: String,
                regex: Option<Regex>,
-               replacement: String,
-               if_expression: Option<IfExpression>
-    ) -> Result<Self, String> {
+               replacement: String) -> Result<Self, String> {
         if source_labels.is_empty() {
             return Err("missing `source_labels` for `action=replace_all`".to_string());
         }
@@ -36,7 +32,6 @@ impl ReplaceAllAction {
             target_label,
             separator,
             submatch_replacer,
-            if_expr: if_expression,
         })
     }
 
@@ -52,9 +47,5 @@ impl Action for ReplaceAllAction {
         if value_str != buf {
             set_label_value(labels, label_offset, &self.target_label, value_str)
         }
-    }
-
-    fn filter(&self, labels: &[Label]) -> bool {
-        filter_labels(&self.if_expr, labels)
     }
 }

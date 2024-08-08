@@ -78,7 +78,7 @@ pub fn add(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         };
     }
 
-    let mut ts = create_series(&key, options)?;
+    let mut ts = create_series(&key, options, ctx)?;
     ts.add(timestamp, value, None)?;
 
     let redis_key = RedisKeyWritable::open(ctx.ctx, &key);

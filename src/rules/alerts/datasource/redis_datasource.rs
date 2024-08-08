@@ -7,11 +7,11 @@ use crate::rules::alerts::{
     AlertsError, AlertsResult, DataSourceType, Querier, QuerierBuilder, QuerierParams, QueryResult,
 };
 use crate::storage::Timestamp;
-use metricsql_engine::execution::query::{
+use metricsql_runtime::execution::query::{
     query as engine_query, query_range as engine_query_range,
 };
-use metricsql_engine::prelude::query::QueryParams;
-use metricsql_engine::TimestampTrait;
+use metricsql_runtime::prelude::query::QueryParams;
+use metricsql_runtime::TimestampTrait;
 
 /// RedisDatasource represents entity with ability to read and write metrics
 #[derive(Clone, Debug)]

@@ -23,18 +23,21 @@ pub fn alter(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         series.chunk_size_bytes = chunk_size;
     }
 
+    let mut labels_changed = false;
     if let Some(labels) = options.labels {
-        let ts_index = get_timeseries_index(ctx);
-        let key = parsed_key.to_string();
-
-        ts_index.remove_series_by_key(&key);
-        ts_index.index_time_series(&mut series, key);
         for (k,v) in labels.iter() {
             series.labels.push( Label{
                 name: k.to_string(),
                 value: v.to_string(),
             });
+            labels_changed = true;
         }
+    }
+
+    if labels_changed {
+        let key = parsed_key.to_string();
+        let ts_index = get_timeseries_index(ctx);
+        ts_index.reindex_timeseries(&mut series, key);
     }
 
     ctx.replicate_verbatim();

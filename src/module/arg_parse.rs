@@ -10,12 +10,13 @@ use crate::common::current_time_millis;
 use crate::common::types::Timestamp;
 use crate::error::{TsdbError, TsdbResult};
 use crate::storage::{MAX_CHUNK_SIZE, MAX_TIMESTAMP, MIN_CHUNK_SIZE};
+use crate::storage::time_series::TimeSeries;
 
-
-#[derive(Clone, Debug, PartialEq, Copy)]
+#[derive(Clone, Debug, PartialEq, Copy, Default)]
 pub enum TimestampRangeValue {
     Earliest,
     Latest,
+    #[default]
     Now,
     Value(Timestamp),
 }
@@ -25,6 +26,15 @@ impl TimestampRangeValue {
         match self {
             TimestampRangeValue::Earliest => 0,
             TimestampRangeValue::Latest => MAX_TIMESTAMP,
+            TimestampRangeValue::Now => Timestamp::now(),
+            TimestampRangeValue::Value(ts) => *ts,
+        }
+    }
+
+    pub fn to_series_timestamp(&self, series: &TimeSeries) -> Timestamp {
+        match self {
+            TimestampRangeValue::Earliest => series.first_timestamp,
+            TimestampRangeValue::Latest => series.last_timestamp,
             TimestampRangeValue::Now => Timestamp::now(),
             TimestampRangeValue::Value(ts) => *ts,
         }

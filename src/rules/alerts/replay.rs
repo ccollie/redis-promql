@@ -1,6 +1,6 @@
 use crate::rules::alerts::{AlertsError, AlertsResult, Group, Metric, WriteQueue};
 use crate::rules::{EvalContext, Rule};
-use metricsql_engine::{Timestamp, TimestampTrait};
+use metricsql_runtime::{Timestamp, TimestampTrait};
 use std::thread;
 use std::time::Duration;
 use crate::common::humanize::humanize_duration;
@@ -87,9 +87,10 @@ fn replay_group<'a>(
     } = options;
 
     let mut total: usize = 0;
-    let step = Duration::from_millis((group.interval.as_millis() * max_data_points as u64) as u64);
+    let step_millis = (group.interval.as_millis() * *max_data_points as u128) as u64;
+    let step = Duration::from_millis(step_millis);
     let start = group.adjust_req_timestamp(*start);
-    let iterations = ((end - start) / step) + 1;
+    let iterations = ((end - start) / step_millis) + 1;
     let msg = format!(
         "\nGroup {}\ninterval: \t{}\nrequests to make: \t{}\nmax range per request: \t{}\n",
         group.name,

@@ -11,6 +11,7 @@ mod config;
 mod recording_rule;
 mod replay;
 mod executor;
+mod group_processor;
 
 pub use alert::*;
 pub use notifier::*;

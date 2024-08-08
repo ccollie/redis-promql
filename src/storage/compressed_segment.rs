@@ -2,7 +2,7 @@ use std::io::Write;
 
 use get_size::GetSize;
 use metricsql_common::pool::{get_pooled_buffer, get_pooled_vec_f64, get_pooled_vec_i64};
-use metricsql_engine::{RuntimeError, Timestamp};
+use metricsql_runtime::{RuntimeError, Timestamp};
 use pco::data_types::NumberLike;
 use pco::errors::PcoError;
 use rand_distr::num_traits::Zero;
