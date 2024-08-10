@@ -3,7 +3,6 @@ use std::io::Write;
 use get_size::GetSize;
 use metricsql_common::pool::{get_pooled_buffer, get_pooled_vec_f64, get_pooled_vec_i64};
 use metricsql_runtime::{RuntimeError, Timestamp};
-use pco::data_types::NumberLike;
 use pco::errors::PcoError;
 use rand_distr::num_traits::Zero;
 
@@ -80,7 +79,7 @@ impl CompressedSegment {
 
         read_data_segment(&mut compressed, &mut timestamps, &mut values)?;
 
-        let ofs = block.as_ptr() as usize - buf.as_ptr() as usize;
+        let ofs = block.as_ptr() as usize - self.buf.as_ptr() as usize;
         let block_size = compressed.as_ptr() as usize - block.as_ptr() as usize;
 
         let mut size = timestamps.len();

@@ -1,15 +1,12 @@
-use crate::storage::time_series::TimeSeries;
-use metricsql_runtime::provider::MetricDataProvider;
-use metricsql_runtime::{
-    Deadline, MetricName, QueryResult, QueryResults, RuntimeResult, SearchQuery,
-};
-use rayon::iter::IntoParallelRefIterator;
-use rayon::iter::ParallelIterator;
-use redis_module::Context;
 use crate::common::types::Timestamp;
 use crate::globals::get_timeseries_index;
 use crate::index::TimeSeriesIndex;
+use crate::storage::time_series::TimeSeries;
 use crate::storage::Label;
+use metricsql_runtime::{Deadline, MetricName, MetricStorage, QueryResult, QueryResults, RuntimeResult, SearchQuery};
+use rayon::iter::IntoParallelRefIterator;
+use rayon::iter::ParallelIterator;
+use redis_module::Context;
 
 pub struct TsdbDataProvider {}
 
@@ -18,12 +15,12 @@ impl TsdbDataProvider {
         &self,
         ctx: &Context,
         index: &TimeSeriesIndex,
-        search_query: &SearchQuery,
+        search_query: SearchQuery,
     ) -> Vec<QueryResult> {
         index
             .series_by_matchers(
                 ctx,
-                &search_query.matchers,
+                &[search_query.matchers],
                 search_query.start,
                 search_query.end,
             )
@@ -45,8 +42,8 @@ impl TsdbDataProvider {
     }
 }
 
-impl MetricDataProvider for TsdbDataProvider {
-    fn search(&self, sq: &SearchQuery, _deadline: &Deadline) -> RuntimeResult<QueryResults> {
+impl MetricStorage for TsdbDataProvider {
+    fn search(&self, sq: SearchQuery, _deadline: Deadline) -> RuntimeResult<QueryResults> {
         // see: https://github.com/RedisLabsModules/redismodule-rs/blob/master/examples/call.rs#L144
         let ctx_guard = redis_module::MODULE_CONTEXT.lock();
         let index = get_timeseries_index(&ctx_guard);

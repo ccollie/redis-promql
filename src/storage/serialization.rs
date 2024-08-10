@@ -1,6 +1,5 @@
 use std::error::Error;
 use std::fmt::Display;
-use std::io::Write;
 use std::mem::size_of;
 use std::str::FromStr;
 
@@ -13,7 +12,7 @@ use metricsql_encoding::encoders::{
 use metricsql_encoding::marshal::{marshal_var_i64, unmarshal_var_i64};
 use metricsql_runtime::Timestamp;
 use pco::ChunkConfig;
-use pco::data_types::NumberLike;
+use pco::errors::PcoError;
 use pco::standalone::{simple_compress, simple_decompress_into};
 use rand_distr::num_traits::Zero;
 use serde::{Deserialize, Serialize};
@@ -31,7 +30,6 @@ const OVERFLOW_THRESHOLD: f64 = 0.2;
 #[non_exhaustive]
 #[derive(GetSize)]
 pub enum ValueEncoding {
-    #[default]
     Pco = 0x01,
     Gorilla = 0x02,
 }
@@ -82,10 +80,9 @@ impl Default for ValueEncoding {
     }
 }
 
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[derive(GetSize)]
 pub enum TimestampEncoding {
-    #[default]
     Basic = 0x01,
     Pco = 0x02,
 }
@@ -207,6 +204,9 @@ pub(super) fn get_segment_meta(buf: &[u8]) -> TsdbResult<(Timestamp, Timestamp, 
             compressed = &save_buf[data_size..];
         }
     }
+    let first_ts = first_timestamp.ok_or(TsdbError::CannotDeserialize("no data segments found".to_string()))?;
+    let last_ts = last_timestamp.ok_or(TsdbError::CannotDeserialize("no data segments found".to_string()))?;
+
     Ok((first_ts, last_ts, count, last_segment_offset))
 }
 
@@ -238,7 +238,7 @@ pub(super) fn write_data_segment(
     let data_size_start_offset = dest.len();
 
     // 3.
-    write_usize(dest, *page_size);
+    write_usize(dest, page_size);
 
     // 4
     write_timestamp_data(dest, timestamps, &config)?;
@@ -419,7 +419,7 @@ pub(crate) fn compress_data(
         let value_slice = &values[value_offset..value_offset + page_size];
         write_data_segment(buf, ts_slice, value_slice, options)?;
 
-        value_offset += *page_size;
+        value_offset += page_size;
     }
 
     Ok(())
@@ -513,7 +513,11 @@ pub fn compress_timestamps(
         TimestampEncoding::Pco => {
             write_timestamp_compression_type(dst, TimestampEncoding::Pco);
             let compressor_config = get_pco_compressor_config(config, true);
-            let vec = simple_compress(src, &compressor_config).map_err(handle_err)?;
+            let vec = simple_compress(src, &compressor_config)
+                .map_err(|e| {
+                    //
+                    TsdbError::CannotSerialize("timestamps".to_string())
+                })?;
             dst.extend_from_slice(&vec);
         }
     }
@@ -561,7 +565,10 @@ pub fn compress_values(
 
     let compressor_config = get_pco_compressor_config(&option, false);
     write_value_compression_type(dst, ValueEncoding::Pco);
-    let vec = simple_compress(src, &compressor_config).map_err(handle_err)?;
+    let vec = simple_compress(src, &compressor_config)
+        .map_err(|e|
+            TsdbError::CannotSerialize(e.to_string())
+        )?;
     dst.extend_from_slice(&vec);
 
     Ok(())
@@ -582,7 +589,8 @@ pub fn decompress_values(src: &[u8], dst: &mut Vec<f64>) -> TsdbResult<()> {
             gorilla_decompress(&src[1..], dst).map_err(handle_err)?
         }
         encoding if encoding == ValueEncoding::Pco as u8 => {
-            simple_decompress_into(&src[1..], dst).map_err(handle_err)?;
+            simple_decompress_into(&src[1..], dst)
+                .map_err(|arg0: PcoError| handle_err(/* Box<(dyn StdError + 'static)> */))?;
         }
         _ => {
             return Err(TsdbError::CannotDeserialize(
@@ -621,7 +629,7 @@ pub fn gorilla_decompress_(src: &[u8], timestamps: &mut Vec<i64>, values: &mut V
                 values.push(dp.get_value());
             },
             Err(err) => {
-                if err == Error::EndOfStream {
+                if err == <dyn Error>::EndOfStream {
                     done = true;
                 } else {
                     panic!("Received an error from decoder: {:?}", err);

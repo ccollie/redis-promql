@@ -81,7 +81,6 @@ pub(crate) fn label_names(ctx: &Context, args: Vec<RedisString>) -> RedisResult 
     Ok(RedisValue::Map(map))
 }
 
-/// https://prometheus.io/docs/prometheus/latest/querying/api/#querying-label-values
 // MS.LABEL_VALUES <label_name> [MATCH <match>] [START <timestamp_ms>] [END <timestamp_ms>]
 // https://prometheus.io/docs/prometheus/latest/querying/api/#querying-label-values
 pub(crate) fn label_values(ctx: &Context, args: Vec<RedisString>) -> RedisResult {

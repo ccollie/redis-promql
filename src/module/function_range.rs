@@ -41,9 +41,9 @@ pub enum BucketTimestamp {
 impl BucketTimestamp {
     pub fn calculate(&self, ts: Timestamp, time_delta: i64) -> Timestamp {
         match self {
-            Start => ts,
-            Mid => ts + time_delta / 2,
-            End => ts + time_delta,
+            Self::Start => ts,
+            Self::Mid => ts + time_delta / 2,
+            Self::End => ts + time_delta,
         }
     }
 

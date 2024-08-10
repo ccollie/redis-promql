@@ -1,10 +1,12 @@
 #[cfg(not(test))]
 use redis_module::alloc::RedisAlloc;
-use redis_module::{redis_module, Context as RedisContext, NotifyEvent};
+use redis_module::{redis_module, Context as RedisContext, NotifyEvent, RedisString};
+use redis_module::key::RedisKey;
 use redis_module_macros::config_changed_event_handler;
 
 extern crate get_size;
 extern crate redis_module_macros;
+extern crate tinyvec;
 
 mod aggregators;
 mod common;
@@ -14,19 +16,17 @@ mod globals;
 mod index;
 mod module;
 mod provider;
-mod rules;
 mod storage;
 
 #[cfg(test)]
 mod tests;
-pub mod relabel;
 
 
 use crate::globals::get_timeseries_index;
 use module::*;
 pub const REDIS_PROMQL_VERSION: i32 = 1;
-pub const MODULE_NAME: &str = "redis_promql";
-pub const MODULE_TYPE: &str = "RedisMetricsQLTimeseries";
+pub const MODULE_NAME: &str = "valkey_promql";
+pub const MODULE_TYPE: &str = "vktseries";
 
 #[config_changed_event_handler]
 fn config_changed_event_handler(ctx: &RedisContext, changed_configs: &[&str]) {
@@ -35,11 +35,12 @@ fn config_changed_event_handler(ctx: &RedisContext, changed_configs: &[&str]) {
 
 fn remove_key_from_cache(ctx: &RedisContext, key: &[u8]) {
     let ts_index = get_timeseries_index(ctx);
-    let key = String::from_utf8_lossy(key).to_string();
-    ts_index.remove_series_by_key(&key);
+    let key: RedisString = key.into();
+    ts_index.remove_series_by_key(ctx, &key);
 }
 
 fn on_event(ctx: &RedisContext, _event_type: NotifyEvent, event: &str, key: &[u8]) {
+    // todo: AddPostNotificationJob(ctx, event, key);
     match event {
         "del" | "set" | "expired" | "evict" | "evicted" | "expire" | "trimmed" => {
             remove_key_from_cache(ctx, key);

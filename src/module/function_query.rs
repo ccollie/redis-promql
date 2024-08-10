@@ -3,11 +3,11 @@ use crate::config::get_global_settings;
 use crate::globals::get_query_context;
 use crate::module::result::to_matrix_result;
 use crate::module::{normalize_range_args, parse_timestamp_arg};
-use metricsql_engine::execution::query::{
+use metricsql_runtime::execution::query::{
     query as engine_query, query_range as engine_query_range,
 };
-use metricsql_engine::prelude::query::QueryParams;
-use metricsql_engine::{QueryResult, RuntimeResult};
+use metricsql_runtime::prelude::query::QueryParams;
+use metricsql_runtime::{QueryResult, RuntimeResult};
 use redis_module::{Context, NextArg, RedisError, RedisResult, RedisString};
 use crate::module::arg_parse::{parse_duration_arg, TimestampRangeValue};
 
@@ -123,11 +123,11 @@ pub fn prom_query(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 }
 
 fn parse_step(arg: &RedisString) -> RedisResult<chrono::Duration> {
-    return if let Ok(duration) = parse_duration_arg(arg) {
+    if let Ok(duration) = parse_duration_arg(arg) {
         Ok(duration_to_chrono(duration))
     } else {
         Err(RedisError::Str("ERR invalid STEP duration"))
-    };
+    }
 }
 
 fn normalize_step(step: Option<chrono::Duration>) -> RedisResult<chrono::Duration> {
@@ -154,7 +154,7 @@ fn handle_query_result(result: RuntimeResult<Vec<QueryResult>>) -> RedisResult {
         Ok(result) => Ok(to_matrix_result(result)),
         Err(e) => {
             let err_msg = format!("PROM: Error: {:?}", e);
-            return Err(RedisError::String(err_msg.to_string()));
+            Err(RedisError::String(err_msg.to_string()))
         }
     }
 }

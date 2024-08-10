@@ -1,6 +1,6 @@
 use crate::common::types::Timestamp;
 use crate::storage::time_series::TimeSeries;
-use metricsql_engine::{MetricName, QueryResult, Tag, METRIC_NAME_LABEL};
+use metricsql_runtime::{MetricName, QueryResult, Tag, METRIC_NAME_LABEL};
 use redis_module::redisvalue::RedisValueKey;
 use redis_module::RedisValue;
 use std::collections::HashMap;

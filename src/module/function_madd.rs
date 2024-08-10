@@ -28,8 +28,8 @@ pub(crate) fn madd(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
             let timestamp = parse_timestamp(args.next_str()?)?;
             let value = args.next_f64()?;
             // Safety: we checked above that the key exists
-            let series = res.unwrap().unwrap();
-            if let Ok(res) = series.add( timestamp, value, Some(policy)) {
+            let series = res.unwrap();
+            if series.add( timestamp, value, Some(policy)).is_ok() {
                 values.push(RedisValue::from(timestamp));
             } else {
                 // todo !!!!!

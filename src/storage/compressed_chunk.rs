@@ -1,7 +1,3 @@
-use std::error::Error;
-use std::fmt::Display;
-use std::str::FromStr;
-
 use get_size::GetSize;
 use metricsql_common::pool::{get_pooled_vec_f64, get_pooled_vec_i64};
 use serde::{Deserialize, Serialize};

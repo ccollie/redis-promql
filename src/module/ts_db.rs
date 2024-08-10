@@ -82,14 +82,12 @@ unsafe extern "C" fn copy(
 ) -> *mut c_void {
     let sm = &*(value as *mut TimeSeries);
     let mut new_series = sm.clone();
-    let ts_index = get_timeseries_index(ctx);
-    // ???? How to handle failure ??
-    match RedisString::from_ptr(tokey) {
-        Ok(key) => {
-            ts_index.index_time_series(&mut new_series, key.to_string())
-        },
-        Err(_) => {}
-    }
+
+    let guard = redis_module::MODULE_CONTEXT.lock();
+    let ts_index = get_timeseries_index(&guard);
+    new_series.id = ts_index.next_id();
+    ts_index.index_time_series(&mut new_series, tokey.into());
+
     Box::into_raw(Box::new(new_series)).cast::<c_void>()
 }
 
@@ -98,7 +96,8 @@ unsafe extern "C" fn unlink(_key: *mut RedisModuleString, value: *const c_void) 
     if value.is_null() {
         return;
     }
-    let ts_index = get_timeseries_index();
+    let guard = redis_module::MODULE_CONTEXT.lock();
+    let ts_index = get_timeseries_index(&guard);
     ts_index.remove_series(series)
 }
 

@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::fmt::Display;
 use std::time::Duration;
 use chrono::DateTime;
-use metricsql_engine::{parse_metric_selector, TimestampTrait};
+use metricsql_runtime::{parse_metric_selector, TimestampTrait};
 use metricsql_parser::prelude::Matchers;
 use metricsql_parser::parser::{parse_duration_value, parse_number};
 use redis_module::{RedisError, RedisResult, RedisString};
@@ -12,7 +12,7 @@ use crate::error::{TsdbError, TsdbResult};
 use crate::storage::{MAX_CHUNK_SIZE, MAX_TIMESTAMP, MIN_CHUNK_SIZE};
 use crate::storage::time_series::TimeSeries;
 
-#[derive(Clone, Debug, PartialEq, Copy, Default)]
+#[derive(Clone, Default, Debug, PartialEq, Copy)]
 pub enum TimestampRangeValue {
     Earliest,
     Latest,
@@ -299,8 +299,6 @@ pub fn parse_number_with_unit(arg: &str) -> TsdbResult<f64> {
 pub fn parse_series_selector(arg: &str) -> TsdbResult<Matchers> {
     parse_metric_selector(arg).map_err(|_e| {
         TsdbError::InvalidSeriesSelector(arg.to_string())
-    }).and_then(|m| {
-        Ok(Matchers::new(m))
     })
 }
 

@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicU64;
 use redis_module::{Context, NextArg, REDIS_OK, RedisError, RedisResult, RedisString};
 use ahash::AHashMap;
 use redis_module::key::RedisKeyWritable;
@@ -16,7 +17,6 @@ const CMD_ARG_DEDUPE_INTERVAL: &str = "DEDUPE_INTERVAL";
 const CMD_ARG_LABELS: &str = "LABELS";
 const CMD_ARG_METRIC_NAME: &str = "METRIC_NAME";
 
-
 pub fn create(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let (parsed_key, options) = parse_create_options(args)?;
     let key = RedisKeyWritable::open(ctx.ctx, &parsed_key);
@@ -26,7 +26,7 @@ pub fn create(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     }
 
     let ts = create_series(&parsed_key, options, ctx)
-        .map_err(|e| RedisError::Str(&format!("TSDB: failed to create series: {:?}", e)))?;
+        .map_err(|_| RedisError::Str("TSDB: failed to create series"))?;
 
     key.set_value(&REDIS_PROMQL_SERIES_TYPE, ts)?;
 
@@ -106,7 +106,7 @@ pub(crate) fn create_series(
     let mut ts = TimeSeries::with_options(options)?;
     // todo: we need to have a default retention value
     let ts_index = get_timeseries_index(ctx);
-    ts_index.index_time_series(&mut ts, key.to_string());
+    ts_index.index_time_series(&mut ts, key);
     Ok(ts)
 }
 

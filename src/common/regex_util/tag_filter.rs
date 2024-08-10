@@ -213,7 +213,7 @@ impl TagFilter {
         if !ok {
             return self.is_negative;
         }
-        return !self.is_negative;
+        !self.is_negative
     }
 
     #[inline]
@@ -234,7 +234,7 @@ impl TagFilter {
         if self.is_regexp {
             return "=~";
         }
-        return "=";
+        "="
     }
 }
 
@@ -329,7 +329,7 @@ pub fn get_regexp_from_cache(expr: &str) -> Result<Arc<RegexpCacheValue>, String
 fn new_match_func_for_or_suffixes(or_values: Vec<String>) -> (StringMatchHandler, usize) {
     let re_cost = or_values.len() * LITERAL_MATCH_COST;
     let matcher = get_match_func_for_or_suffixes(or_values);
-    return (matcher, re_cost);
+    (matcher, re_cost)
 }
 
 const DEFAULT_MAX_REGEXP_CACHE_SIZE: usize = 2048;
@@ -377,7 +377,6 @@ pub fn get_prefix_cache() -> &'static PrefixCache {
 pub fn simplify_regexp(expr: &str) -> Result<(String, String), RegexError> {
     let cache = get_prefix_cache();
     if let Some(ps) = cache.get(expr) {
-        let cached = ps.as_ref();
         // Fast path - the simplified expr is found in the cache.
         return Ok((ps.prefix.clone(), ps.suffix.clone()));
     }

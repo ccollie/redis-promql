@@ -125,9 +125,9 @@ fn filter_samples(samples: &mut SeriesSlice, by_ts_args: &[Timestamp], ts_filter
     }
 
     let last_ts = samples.timestamps[samples.timestamps.len() - 1];
-    let mut first_ts = samples.timestamps[0];
+    let first_ts = samples.timestamps[0];
 
-    if first_ts > by_ts_args[last_index] {
+    if first_ts > by_ts_args[*last_index] {
         *ts_filter_index = *last_index;
         return 0;
     }
@@ -136,7 +136,7 @@ fn filter_samples(samples: &mut SeriesSlice, by_ts_args: &[Timestamp], ts_filter
         return 0;
     }
 
-    while by_ts_args[ts_filter_index] < first_ts && *ts_filter_index < *last_index {
+    while by_ts_args[*ts_filter_index] < first_ts && *ts_filter_index < *last_index {
         *ts_filter_index += 1;
     }
 
@@ -154,8 +154,8 @@ fn filter_samples(samples: &mut SeriesSlice, by_ts_args: &[Timestamp], ts_filter
         if sample_ts == filter_ts {
             // samples.timestamps[count] = sample_ts;
             // samples.values[count] = samples.values[i];
-            todo!("implement");
             count += 1;
+            todo!("implement");
         }
         *ts_filter_index += 1;
         i += 1;

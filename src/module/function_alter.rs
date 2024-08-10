@@ -35,9 +35,8 @@ pub fn alter(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     }
 
     if labels_changed {
-        let key = parsed_key.to_string();
         let ts_index = get_timeseries_index(ctx);
-        ts_index.reindex_timeseries(&mut series, key);
+        ts_index.reindex_timeseries(&mut series, &parsed_key);
     }
 
     ctx.replicate_verbatim();
