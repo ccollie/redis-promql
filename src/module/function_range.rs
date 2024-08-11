@@ -65,7 +65,7 @@ impl TryFrom<&str> for BucketTimestamp {
             value if value.eq_ignore_ascii_case("mid") => return Ok(BucketTimestamp::Mid),
             _ => {}
         }
-        return Err(RedisError::Str("TSDB: invalid BUCKETTIMESTAMP parameter"))
+        Err(RedisError::Str("TSDB: invalid BUCKETTIMESTAMP parameter"))
     }
 }
 

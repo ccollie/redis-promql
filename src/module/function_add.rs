@@ -5,6 +5,7 @@ use redis_module::key::RedisKeyWritable;
 use redis_module::{Context, NextArg, RedisError, RedisResult, RedisString, RedisValue};
 use ahash::AHashMap;
 use crate::arg_parse::{parse_duration_arg, parse_number_with_unit, parse_timestamp};
+use crate::storage::time_series::TimeSeries;
 
 const CMD_ARG_RETENTION: &str = "RETENTION";
 const CMD_ARG_DUPLICATE_POLICY: &str = "DUPLICATE_POLICY";
@@ -20,7 +21,15 @@ pub fn add(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let timestamp = parse_timestamp(args.next_str()?)?;
     let value = args.next_f64()?;
 
-    let mut options = TimeSeriesOptions::default();
+    let redis_key = ctx.open_key_writable(&key);
+    let series = redis_key.get_value::<TimeSeries>(&REDIS_PROMQL_SERIES_TYPE)?;
+    if let Some(series) = series {
+        args.done()?;
+        if series.add(timestamp, value, None).is_ok() {
+            return Ok(RedisValue::Integer(timestamp));
+        }
+        todo!("handle error");
+    }
 
     let series = get_timeseries_mut(ctx, &key, false)?;
     if let Some(series) = series {
@@ -28,6 +37,8 @@ pub fn add(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         series.add(timestamp, value, None)?;
         return Ok(RedisValue::Integer(timestamp));
     }
+
+    let mut options = TimeSeriesOptions::default();
 
     while let Ok(arg) = args.next_str() {
         match arg {
@@ -84,5 +95,5 @@ pub fn add(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let redis_key = RedisKeyWritable::open(ctx.ctx, &key);
     redis_key.set_value(&REDIS_PROMQL_SERIES_TYPE, ts)?;
 
-    return Ok(RedisValue::Integer(timestamp));
+    Ok(RedisValue::Integer(timestamp))
 }

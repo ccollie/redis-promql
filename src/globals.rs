@@ -1,19 +1,16 @@
-use crate::index::TimeSeriesIndex;
+use crate::index::{TimeSeriesIndex, TimeSeriesIndexMap};
 use crate::provider::TsdbDataProvider;
-use ahash::HashMapExt;
 use metricsql_runtime::prelude::Context as QueryContext;
-use papaya::HashMap;
+use papaya::Guard;
 use redis_module::{raw, Context, RedisModule_GetSelectedDb};
-use std::sync::{Arc, OnceLock};
 use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, LazyLock, RwLock};
 
-pub type TimeSeriesIndexMap = HashMap<u32, TimeSeriesIndex>;
-
-static TIMESERIES_INDEX: OnceLock<TimeSeriesIndexMap> = OnceLock::new();
-static QUERY_CONTEXT: OnceLock<QueryContext> = OnceLock::new();
+static TIMESERIES_INDEX: LazyLock<TimeSeriesIndexMap> = LazyLock::new(|| TimeSeriesIndexMap::new());
+static QUERY_CONTEXT: LazyLock<QueryContext> = LazyLock::new(create_query_context);
 
 pub fn get_query_context() -> &'static QueryContext {
-    QUERY_CONTEXT.get_or_init(create_query_context)
+    &QUERY_CONTEXT
 }
 
 fn create_query_context() -> QueryContext {
@@ -21,16 +18,6 @@ fn create_query_context() -> QueryContext {
     let provider = Arc::new(TsdbDataProvider{});
     let ctx = QueryContext::new();
     ctx.with_metric_storage(provider)
-}
-
-pub(crate) fn set_query_context(ctx: QueryContext) {
-    match QUERY_CONTEXT.set(ctx) {
-        Ok(_) => {}
-        Err(_) => {
-            // how to do this in redis context ?
-            panic!("set query context failed");
-        }
-    }
 }
 
 pub unsafe fn get_current_db(ctx: *mut raw::RedisModuleCtx) -> u32 {
@@ -45,13 +32,32 @@ pub fn next_timeseries_id() -> u64 {
     TIMESERIES_ID_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
 }
 
-pub fn get_timeseries_index(ctx: &Context) -> &'static mut TimeSeriesIndex {
-    let mut map = TIMESERIES_INDEX.get_or_init(|| TimeSeriesIndexMap::new());
+/// https://docs.rs/papaya/latest/papaya/#advanced-lifetimes
+fn get_timeseries_index<'guard>(ctx: &Context, guard: &'guard impl Guard) -> &'guard  RwLock<TimeSeriesIndex> {
     let db = unsafe { get_current_db(ctx.ctx) };
-    let inner = map.pin();
-    if let Some(index) = inner.get(&db) {
-        index
-    } else {
-        *inner.get_or_insert(db, TimeSeriesIndex::new(), 1)
-    }
+    TIMESERIES_INDEX.get_or_insert_with(db, || RwLock::new(TimeSeriesIndex::new()), guard)
+}
+
+pub fn with_timeseries_index<F, R>(ctx: &Context, f: F) -> R
+where
+    F: FnOnce(&TimeSeriesIndex) -> R,
+{
+    let db = unsafe { get_current_db(ctx.ctx) };
+    let guard = TIMESERIES_INDEX.guard();
+    let index = TIMESERIES_INDEX.get_or_insert_with(db, || RwLock::new(TimeSeriesIndex::new()), &guard);
+    let res = f(index.read().as_ref().unwrap());
+    drop(guard);
+    res
+}
+
+pub fn with_writable_timeseries_index<F, R>(ctx: &Context, f: F) -> R
+where
+    F: FnMut(&TimeSeriesIndex) -> R,
+{
+    let db = unsafe { get_current_db(ctx.ctx) };
+    let guard = TIMESERIES_INDEX.guard();
+    let index = TIMESERIES_INDEX.update_or_insert_with(db, |v| {
+
+    }, || RwLock::new(TimeSeriesIndex::new()), &guard);
+    f(w)
 }

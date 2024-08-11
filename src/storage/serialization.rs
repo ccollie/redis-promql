@@ -12,11 +12,11 @@ use metricsql_encoding::encoders::{
 use metricsql_encoding::marshal::{marshal_var_i64, unmarshal_var_i64};
 use metricsql_runtime::Timestamp;
 use pco::ChunkConfig;
-use pco::errors::PcoError;
 use pco::standalone::{simple_compress, simple_decompress_into};
 use rand_distr::num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use tsz::{DataPoint, Decode, Encode, StdDecoder, StdEncoder};
+use tsz::decode::Error::EndOfStream;
 use tsz::stream::{BufferedReader, BufferedWriter};
 
 use crate::error::{TsdbError, TsdbResult};
@@ -263,13 +263,13 @@ pub(super) fn read_date_range(compressed: &mut &[u8]) -> TsdbResult<Option<(i64,
     Ok(Some((first_ts, last_ts)))
 }
 
-pub fn find_data_page<'a>(compressed: &mut &[u8], timestamp: i64) -> TsdbResult<(bool, &'a [u8])> {
+pub fn find_data_page<'a>(compressed: &'a mut &[u8], timestamp: i64) -> TsdbResult<(bool, &'a [u8])> {
     let mut found = false;
-    let mut block_start = compressed;
-    let compressed = &mut *compressed;
+    let mut block_start = *compressed;
+    let mut compressed = *compressed;
 
     while !compressed.is_empty() {
-        if let Some((start_ts, end_ts)) = read_date_range(compressed)? {
+        if let Some((start_ts, end_ts)) = read_date_range(&mut compressed)? {
             if timestamp >= start_ts && timestamp <= end_ts {
                 found = true;
                 break;
@@ -278,8 +278,8 @@ pub fn find_data_page<'a>(compressed: &mut &[u8], timestamp: i64) -> TsdbResult<
                 block_start = compressed;
                 break;
             }
-            let data_size = read_usize(compressed, "data segment length")?;
-            *compressed = &compressed[data_size..];
+            let data_size = read_usize(&mut compressed, "data segment length")?;
+            compressed = &compressed[data_size..];
         } else {
             break;
         }
@@ -425,10 +425,10 @@ pub(crate) fn compress_data(
     Ok(())
 }
 
-pub(super) fn read_timestamp(compressed: &mut [u8]) -> TsdbResult<i64> {
+pub(super) fn read_timestamp(compressed: &mut &[u8]) -> TsdbResult<i64> {
     let (value, remaining) = unmarshal_var_i64(compressed)
         .map_err(|e| TsdbError::CannotDeserialize(format!("timestamp: {}", e.to_string())))?;
-    *compressed = *remaining;
+    *compressed = remaining;
     Ok(value)
 }
 
@@ -514,7 +514,7 @@ pub fn compress_timestamps(
             write_timestamp_compression_type(dst, TimestampEncoding::Pco);
             let compressor_config = get_pco_compressor_config(config, true);
             let vec = simple_compress(src, &compressor_config)
-                .map_err(|e| {
+                .map_err(|_e| {
                     //
                     TsdbError::CannotSerialize("timestamps".to_string())
                 })?;
@@ -536,7 +536,7 @@ pub fn decompress_timestamps(src: &[u8], dst: &mut Vec<i64>) -> TsdbResult<()> {
     }
 
     let encoding = &src[0] >> 4;
-    return match encoding {
+    match encoding {
         encoding if encoding == TimestampEncoding::Basic as u8 => {
             timestamp_decompress(&src[1..], dst).map_err(handle_err)
         }
@@ -590,7 +590,7 @@ pub fn decompress_values(src: &[u8], dst: &mut Vec<f64>) -> TsdbResult<()> {
         }
         encoding if encoding == ValueEncoding::Pco as u8 => {
             simple_decompress_into(&src[1..], dst)
-                .map_err(|arg0: PcoError| handle_err(/* Box<(dyn StdError + 'static)> */))?;
+                .map_err(|_| TsdbError::CannotDeserialize("Error decompressing data".to_string()))?;
         }
         _ => {
             return Err(TsdbError::CannotDeserialize(
@@ -614,7 +614,7 @@ pub fn gorilla_compress(dst: &mut Vec<u8>, timestamps: &[Timestamp], values: &[f
 }
 
 pub fn gorilla_decompress_(src: &[u8], timestamps: &mut Vec<i64>, values: &mut Vec<f64>) -> TsdbResult<()> {
-    let r = BufferedReader::new(src);
+    let r = BufferedReader::new(src.into());
     let mut decoder = StdDecoder::new(r);
 
     let mut done = false;
@@ -629,7 +629,7 @@ pub fn gorilla_decompress_(src: &[u8], timestamps: &mut Vec<i64>, values: &mut V
                 values.push(dp.get_value());
             },
             Err(err) => {
-                if err == <dyn Error>::EndOfStream {
+                if err == EndOfStream {
                     done = true;
                 } else {
                     panic!("Received an error from decoder: {:?}", err);

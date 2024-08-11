@@ -12,9 +12,13 @@ use roaring::{MultiOps, RoaringTreemap};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::RwLock;
+use papaya::HashMap;
 
 pub type RedisContext = Context;
 
+/// Map from db to TimeseriesIndex
+pub type TimeSeriesIndexMap = HashMap<u32, RwLock<TimeSeriesIndex>>;
 
 /// A type mapping a label name to a bitmap of ids of timeseries having that label.
 /// Note that we use `BtreeMap` specifically for it's `range()` method, so a regular HashMap won't work.
@@ -25,7 +29,7 @@ pub type LabelsBitmap = BTreeMap<String, RoaringTreemap>;
 #[derive(Default)]
 pub(crate) struct TimeSeriesIndex {
     /// Map from timeseries id to timeseries key.
-    id_to_key: IntMap<u64, RedisString>,
+    id_to_key: IntMap<u64, String>, // todo: have a feature to use something like compact_str
     /// Map from label name to set of timeseries ids.
     label_to_ts: LabelsBitmap,
     /// Map from label name + label value to set of timeseries ids.
@@ -66,7 +70,7 @@ impl TimeSeriesIndex {
     pub(crate) fn index_time_series(&mut self, ts: &TimeSeries, key: &RedisString) {
         debug_assert!(ts.id != 0);
 
-        self.id_to_key.insert(ts.id, key.clone());
+        self.id_to_key.insert(ts.id, key.to_string());
 
         if !ts.metric_name.is_empty() {
             index_series_by_label_internal(
@@ -100,6 +104,15 @@ impl TimeSeriesIndex {
         self.id_to_key.remove(&ts.id);
     }
 
+    fn remove_label(&self, bitmap: &mut LabelsBitmap, label: &str, id: u64) {
+        if let Some(ts_by_label) = bitmap.get_mut(label) {
+            ts_by_label.remove(id);
+            if ts_by_label.is_empty() {
+                bitmap.remove(label);
+            }
+        }
+    }
+
     fn remove_series_by_id(&mut self, id: u64, metric_name: &str, labels: &[Label]) {
         self.id_to_key.remove(&id);
         let should_delete = !metric_name.is_empty() || !labels.is_empty();
@@ -107,57 +120,44 @@ impl TimeSeriesIndex {
             return;
         }
 
-        let mut to_delete = Vec::with_capacity(labels.len() + 1);
-        // todo: borrow from label
-        {
-            if !metric_name.is_empty() {
-                if let Some(ts_by_label) = self.label_to_ts.get_mut(METRIC_NAME_LABEL) {
-                    ts_by_label.remove(id);
-                    if ts_by_label.is_empty() {
-                        to_delete.push(METRIC_NAME_LABEL.to_string());
-                    }
+        if !metric_name.is_empty() {
+            if let Some(map) = self.label_to_ts.get_mut(METRIC_NAME_LABEL) {
+                map.remove(id);
+                if map.is_empty() {
+                    self.label_to_ts.remove(METRIC_NAME_LABEL);
                 }
             }
-            for Label { name, .. } in labels.iter() {
-                if let Some(ts_by_label) = self.label_to_ts.get_mut(name) {
-                    ts_by_label.remove(id);
-                    if ts_by_label.is_empty() {
-                        to_delete.push(name.to_string());
-                    }
-                }
-            }
-            if !to_delete.is_empty() {
-                for key in &to_delete {
-                    self.label_to_ts.remove(key);
-                }
-            }
-            to_delete.clear();
         }
-        {
-            if !metric_name.is_empty() {
-                let key = format!("{}={}", METRIC_NAME_LABEL, metric_name);
-                if let Some(ts_by_label) = self.label_kv_to_ts.get_mut(&key) {
-                    ts_by_label.remove(id);
-                    if ts_by_label.is_empty() {
-                        to_delete.push(key);
-                    }
+
+        for Label { name, .. } in labels.iter() {
+            if let Some(bitmap) = self.label_to_ts.get_mut(name) {
+                bitmap.remove(id);
+                if bitmap.is_empty() {
+                    self.label_to_ts.remove(name);
                 }
             }
-            for Label { name, value} in labels.iter() {
-                let key = format!("{}={}", name, value);
-                if let Some(ts_by_label_value) = self.label_kv_to_ts.get_mut(&key) {
-                    ts_by_label_value.remove(id);
-                    if ts_by_label_value.is_empty() {
-                        to_delete.push(key);
-                    }
-                }
-            }
-            if !to_delete.is_empty() {
-                for key in to_delete {
+        }
+
+        if !metric_name.is_empty() {
+            let key = format!("{}={}", METRIC_NAME_LABEL, metric_name);
+            if let Some(bitmap) = self.label_kv_to_ts.get_mut(&key) {
+                bitmap.remove(id);
+                if bitmap.is_empty() {
                     self.label_kv_to_ts.remove(&key);
                 }
             }
         }
+
+        for Label { name, value} in labels.iter() {
+            let key = format!("{}={}", name, value);
+            if let Some(bitmap) = self.label_kv_to_ts.get_mut(&key) {
+                bitmap.remove(id);
+                if bitmap.is_empty() {
+                    self.label_kv_to_ts.remove(&key);
+                }
+            }
+        }
+
     }
 
     fn index_series_by_metric_name(&mut self, ts_id: u64, metric_name: &str) {
@@ -199,27 +199,11 @@ impl TimeSeriesIndex {
         RoaringTreemap::new()
     }
 
-    pub(crate) fn get_series_by_metric_name(
-        &self,
-        ctx: &Context,
-        metric: &str,
-        res: &mut Vec<&TimeSeries>,
-    ) {
-        let key = format!("{}={}", METRIC_NAME_LABEL, metric);
-        if let Some(ts_ids) = self.label_kv_to_ts.get(&key) {
-            let iter = ts_ids
-                .iter()
-                .map(|id| get_series_by_id(ctx, &self.id_to_key, id));
-
-            res.extend(iter);
-        }
-    }
-
-    pub fn rename_series(&mut self, ctx: &Context, new_key: &RedisString) -> bool {
+    pub(crate) fn rename_series(&mut self, ctx: &Context, new_key: &RedisString) -> bool {
         // get ts by new key
         if let Some(series) = get_timeseries(ctx, new_key) {
             let id = series.id;
-            self.id_to_key.insert(id, new_key.clone());
+            self.id_to_key.insert(id, new_key.to_string());
             return true;
         }
         false
@@ -254,13 +238,14 @@ impl TimeSeriesIndex {
 
     /// Returns a list of all series matching `matchers` while having samples in the range
     /// [`start`, `end`]
-    pub(crate) fn series_by_matchers(
-        &self,
-        ctx: &Context,
-        matchers: &[Matchers],
-        start: Timestamp,
-        end: Timestamp,
-    ) -> Vec<&TimeSeries> {
+    pub(crate) fn series_ids_by_matchers<'ctx>(&self, matchers: &[Matchers]) -> RoaringTreemap {
+        if matchers.is_empty() {
+            return Default::default();
+        }
+        if matchers.len() == 1 {
+            let filter = &matchers[0];
+            return find_ids_by_matchers(&self.label_kv_to_ts, filter);
+        }
         // todo: if we get a None from get_series_by_id, we should log an error
         // and remove the id from the index
         matchers
@@ -268,10 +253,52 @@ impl TimeSeriesIndex {
             .map(|filter| find_ids_by_matchers(&self.label_kv_to_ts, filter))
             .collect::<Vec<_>>()
             .intersection()
+    }
+
+    /// Returns a list of all series matching `matchers` while having samples in the range
+    /// [`start`, `end`]
+    pub(crate) fn series_keys_by_matchers(
+        &self,
+        matchers: &[Matchers],
+    ) -> Vec<&String> {
+        let bitmap = self.series_ids_by_matchers(matchers);
+        bitmap
+            .into_iter()
+            .filter_map(|id| self.id_to_key.get(&id))
+            .collect()
+    }
+
+
+    /// Returns a list of all series matching `matchers` while having samples in the range
+    /// [`start`, `end`]
+    pub(crate) fn series_by_matchers<'ctx>(
+        &self,
+        ctx: &'ctx Context,
+        matchers: &[Matchers],
+        start: Timestamp,
+        end: Timestamp,
+    ) -> Vec<&'ctx TimeSeries> {
+        let bitmap = self.series_ids_by_matchers(matchers);
+        // todo: if we get a None from get_series_by_id, we should log an error
+        // and remove the id from the index
+        bitmap
             .into_iter()
             .filter_map(|id| get_series_by_id(ctx, &self.id_to_key, id))
             .filter(|ts| ts.overlaps(start, end))
             .collect()
+    }
+
+    /// Returns a list of all series matching `matchers` while having samples in the range
+    /// [`start`, `end`]
+    pub(crate) fn cardinality(
+        &self,
+        ctx: &Context,
+        matchers: &[Matchers],
+        start: Timestamp,
+        end: Timestamp,
+    ) -> usize {
+        let series = self.series_by_matchers(ctx, matchers, start, end);
+        series.len()
     }
 
     /// Returns a list of all label names used by series matching `matchers` and having samples in
@@ -344,7 +371,7 @@ fn index_series_by_label_internal(
 #[inline]
 fn get_series_by_id<'a>(
     ctx: &'a Context,
-    id_to_key: &IntMap<u64, RedisString>,
+    id_to_key: &IntMap<u64, String>,
     id: u64,
 ) -> Option<&'a TimeSeries> {
     if let Some(key) = id_to_key.get(&id) {
@@ -355,7 +382,7 @@ fn get_series_by_id<'a>(
 
 fn get_multi_series_by_id<'a>(
     ctx: &'a Context,
-    id_to_key: &IntMap<u64, RedisString>,
+    id_to_key: &IntMap<u64, String>,
     ids: &[u64],
 ) -> Result<Vec<Option<&'a TimeSeries>>, RedisError> {
     ids.iter()

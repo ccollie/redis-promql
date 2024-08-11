@@ -1,5 +1,3 @@
-use std::io::Write;
-
 use get_size::GetSize;
 use metricsql_common::pool::{get_pooled_buffer, get_pooled_vec_f64, get_pooled_vec_i64};
 use metricsql_runtime::{RuntimeError, Timestamp};
@@ -8,7 +6,16 @@ use rand_distr::num_traits::Zero;
 
 use crate::error::{TsdbError, TsdbResult};
 use crate::storage::{Chunk, DuplicatePolicy, Sample, SeriesSlice};
-use crate::storage::serialization::{compress_data, CompressionOptions, find_data_page, read_data_segment, read_date_range, read_timestamp, read_usize, write_data_segment};
+use super::serialization::{
+    compress_data,
+    CompressionOptions,
+    find_data_page,
+    read_data_segment,
+    read_date_range,
+    read_timestamp,
+    read_usize,
+    write_data_segment
+};
 use crate::storage::utils::trim_to_date_range;
 
 // todo: move elsewhere
@@ -57,9 +64,9 @@ impl CompressedSegment {
         }
 
         let mut compressed = self.buf.as_slice();
-        let (found, block) = find_data_page(&mut compressed, ts)?;
+        let (_found, block) = find_data_page(&mut compressed, ts)?;
 
-        compressed = &block;
+        compressed = &block[0..];
 
         // size of data segment (timestamps and values)
         let segment_length = read_usize(&mut compressed, "data segment length")?;
@@ -95,7 +102,8 @@ impl CompressedSegment {
             }
         };
 
-        let out_buf = get_pooled_buffer(block_size + 16).as_mut();
+        let mut binding = get_pooled_buffer(block_size + 16);
+        let out_buf = binding.as_mut();
         write_data_segment(out_buf, &timestamps, &values, &self.options)?;
 
         self.buf.splice(ofs..ofs + block_size, out_buf.iter().cloned());
@@ -149,7 +157,7 @@ impl CompressedSegment {
                 }
 
                 let len = timestamps.len();
-                let mut start_index = len;
+                let start_index = len;
                 let new_len = len + sample_count;
 
                 timestamps.resize(new_len, 0);
@@ -157,7 +165,7 @@ impl CompressedSegment {
 
                 let count = read_data_segment(&mut compressed, timestamps, values)?;
                 if count != sample_count {
-                    return Err(TsdbResult::SerializationError("incomplete data page".to_string()));
+                    return Err(TsdbError::CannotDeserialize("incomplete data page".to_string()));
                 }
 
                 if count.is_zero() {
@@ -191,6 +199,16 @@ impl CompressedSegment {
             }
         }
 
+        Ok(())
+    }
+
+    fn compress(&mut self, timestamps: &[i64], values: &[f64]) -> TsdbResult<()> {
+        let mut buf = Vec::with_capacity(1024);
+        write_data_segment(&mut buf, timestamps, values, &self.options)?;
+        self.buf.extend_from_slice(&buf);
+        self.count += timestamps.len();
+        self.min_time = timestamps[0];
+        self.max_time = timestamps[timestamps.len() - 1];
         Ok(())
     }
 
@@ -228,7 +246,7 @@ impl CompressedSegment {
         let mut values = get_pooled_vec_f64(self.count);
 
         self.get_range(start, end, &mut timestamps, &mut values)?;
-        return f(state, &timestamps, &values);
+        f(state, &timestamps, &values)
     }
 
     pub fn remove_range<'a>(
@@ -242,10 +260,8 @@ impl CompressedSegment {
             return Ok(0);
         }
 
-        let compressed = &mut self.buf;
-
         let ofs = start_offset.unwrap_or(0);
-        let mut cursor = &compressed[ofs..];
+        let mut cursor = &self.buf[ofs..];
 
         let mut first_ts: Option<Timestamp> = Some(self.min_time);
         let mut last_ts: Timestamp = self.max_time;
@@ -263,7 +279,7 @@ impl CompressedSegment {
 
         while !cursor.is_empty() {
 
-            let start_offset = cursor.as_ptr() as usize - compressed.as_ptr() as usize;
+            let start_offset = cursor.as_ptr() as usize - self.buf.as_ptr() as usize;
 
             let mut segment_start_ts = read_timestamp(&mut cursor)?;
 
@@ -301,8 +317,8 @@ impl CompressedSegment {
                 // if we are completely within the range, we can skip this page
                 if segment_start_ts >= start_ts && segment_end_ts <= end_ts {
                     let saved_size = self.buf.len();
-                    let _ = compressed.drain(start_offset..start_offset + data_size);
-                    cursor = &compressed[start_offset..];
+                    let _ = self.buf.drain(start_offset..start_offset + data_size);
+                    cursor = &self.buf[start_offset..];
                     delete_count += sample_count;
                     bytes_shifted += self.buf.len() - saved_size;
                     last_ts = prev_ts;
@@ -337,8 +353,8 @@ impl CompressedSegment {
                     let mut buf = Vec::with_capacity(data_size);
                     let bytes_written = write_data_segment(&mut buf, ts_slice, value_slice, &self.options)?;
 
-                    compressed.splice(start_offset..start_offset + data_size, buf.iter());
-                    cursor = &compressed[start_offset + bytes_written..];
+                    self.buf.splice(start_offset..start_offset + data_size, buf.into_iter());
+                    cursor = &self.buf[start_offset + bytes_written..];
 
                     let count = page_t.len() - ts_slice.len();
                     delete_count += count;
@@ -413,8 +429,8 @@ impl CompressedSegment {
             let mut right_buf = Vec::new();
 
             // todo: rayon.join
-            compress_data(&mut left_buf, left.timestamps, left.values, None)?;
-            compress_data(&mut right_buf, right.timestamps, right.values, None)?;
+            compress_data(&mut left_buf, left.timestamps, left.values, self.page_size, &self.options)?;
+            compress_data(&mut right_buf, right.timestamps, right.values, self.page_size, &self.options)?;
 
             self.max_time = left.last_timestamp();
             self.count = left.len();
@@ -455,11 +471,11 @@ impl CompressedSegment {
 }
 
 impl Chunk for CompressedSegment {
-    fn first_timestamp(&self) -> crate::common::types::Timestamp {
+    fn first_timestamp(&self) -> Timestamp {
         self.min_time
     }
 
-    fn last_timestamp(&self) -> crate::common::types::Timestamp {
+    fn last_timestamp(&self) -> Timestamp {
         self.max_time
     }
 
@@ -475,8 +491,8 @@ impl Chunk for CompressedSegment {
         self.get_size()
     }
 
-    fn remove_range(&mut self, start_ts: crate::common::types::Timestamp, end_ts: crate::common::types::Timestamp) -> TsdbResult<usize> {
-        todo!()
+    fn remove_range(&mut self, start_ts: Timestamp, end_ts: Timestamp) -> TsdbResult<usize> {
+       self.remove_range(start_ts, end_ts, None)
     }
 
     fn add_sample(&mut self, sample: &Sample) -> TsdbResult<()> {
@@ -498,46 +514,17 @@ impl Chunk for CompressedSegment {
     }
 
     fn get_range(&self, start: crate::common::types::Timestamp, end: crate::common::types::Timestamp, timestamps: &mut Vec<i64>, values: &mut Vec<f64>) -> TsdbResult<()> {
-        todo!()
+        self.get_range(start, end, timestamps, values)
     }
 
     fn upsert_sample(&mut self, sample: &mut Sample, dp_policy: DuplicatePolicy) -> TsdbResult<usize> {
-        todo!()
+        self.upsert_sample(sample, dp_policy)
     }
 
     fn split(&mut self) -> TsdbResult<Self> {
-        todo!()
+        self.split(None)
     }
 }
-fn get_meta(buf: &[u8]) -> TsdbResult<(Timestamp, Timestamp, usize, usize)> {
-    let mut compressed = buf;
-    let mut first_timestamp: Option<Timestamp> = None;
-    let mut last_timestamp: Option<Timestamp> = None;
-    let mut count = 0;
-    let mut first = true;
-    let mut last_segment_offset: usize = 0;
-
-    while !compressed.is_empty() {
-        if let Some((start_ts, end_ts)) = read_date_range(&mut compressed)? {
-            let save_buf = compressed;
-            let data_size = read_usize(&mut compressed, "data segment length")?;
-            let sample_count = read_usize(&mut compressed, "sample count")?;
-
-            if first {
-                first_timestamp = Some(start_ts);
-                first = false;
-            }
-            last_timestamp = Some(end_ts);
-
-            last_segment_offset = save_buf.as_ptr() as usize - buf.as_ptr() as usize;
-            count += sample_count;
-
-            compressed = &save_buf[data_size..];
-        }
-    }
-    Ok((first_ts, last_ts, count, last_segment_offset))
-}
-
 
 fn map_err(e: PcoError) -> RuntimeError {
     RuntimeError::SerializationError(e.to_string())

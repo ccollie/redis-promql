@@ -1,12 +1,10 @@
-#[cfg(not(test))]
-use redis_module::alloc::RedisAlloc;
-use redis_module::{redis_module, Context as RedisContext, NotifyEvent, RedisString};
-use redis_module::key::RedisKey;
-use redis_module_macros::config_changed_event_handler;
-
 extern crate get_size;
 extern crate redis_module_macros;
 extern crate tinyvec;
+extern crate async_trait;
+
+use redis_module::{redis_module, Context as RedisContext, NotifyEvent, RedisString};
+use redis_module_macros::config_changed_event_handler;
 
 mod aggregators;
 mod common;
@@ -22,7 +20,7 @@ mod storage;
 mod tests;
 
 
-use crate::globals::get_timeseries_index;
+use crate::globals::{with_writable_timeseries_index};
 use module::*;
 pub const REDIS_PROMQL_VERSION: i32 = 1;
 pub const MODULE_NAME: &str = "valkey_promql";
@@ -34,9 +32,10 @@ fn config_changed_event_handler(ctx: &RedisContext, changed_configs: &[&str]) {
 }
 
 fn remove_key_from_cache(ctx: &RedisContext, key: &[u8]) {
-    let ts_index = get_timeseries_index(ctx);
-    let key: RedisString = key.into();
-    ts_index.remove_series_by_key(ctx, &key);
+    with_writable_timeseries_index(ctx, |ts_index| {
+        let key: RedisString = key.into();
+        ts_index.remove_series_by_key(ctx, key);
+    });
 }
 
 fn on_event(ctx: &RedisContext, _event_type: NotifyEvent, event: &str, key: &[u8]) {
@@ -58,7 +57,7 @@ fn on_event(ctx: &RedisContext, _event_type: NotifyEvent, event: &str, key: &[u8
 #[cfg(not(test))]
 macro_rules! get_allocator {
     () => {
-        RedisAlloc
+        redis_module::alloc::RedisAlloc
     };
 }
 

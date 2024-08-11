@@ -1,14 +1,13 @@
-use std::sync::atomic::AtomicU64;
-use redis_module::{Context, NextArg, REDIS_OK, RedisError, RedisResult, RedisString};
-use ahash::AHashMap;
-use redis_module::key::RedisKeyWritable;
 use crate::arg_parse::{parse_chunk_size, parse_duration_arg};
 use crate::error::TsdbResult;
-use crate::globals::get_timeseries_index;
-use crate::module::{REDIS_PROMQL_SERIES_TYPE};
-use crate::storage::{DuplicatePolicy, TimeSeriesOptions};
+use crate::globals::{with_writable_timeseries_index};
+use crate::module::REDIS_PROMQL_SERIES_TYPE;
 use crate::storage::time_series::TimeSeries;
+use crate::storage::{DuplicatePolicy, TimeSeriesOptions};
+use ahash::AHashMap;
+use redis_module::key::RedisKeyWritable;
 use redis_module::NotifyEvent;
+use redis_module::{Context, NextArg, RedisError, RedisResult, RedisString, REDIS_OK};
 
 const CMD_ARG_RETENTION: &str = "RETENTION";
 const CMD_ARG_DUPLICATE_POLICY: &str = "DUPLICATE_POLICY";
@@ -104,10 +103,11 @@ pub(crate) fn create_series(
     ctx: &Context,
 ) -> TsdbResult<TimeSeries> {
     let mut ts = TimeSeries::with_options(options)?;
-    // todo: we need to have a default retention value
-    let ts_index = get_timeseries_index(ctx);
-    ts_index.index_time_series(&mut ts, key);
-    Ok(ts)
+    with_writable_timeseries_index(ctx, |index| {
+        ts.id = index.next_id();
+        index.index_time_series(&mut ts, key);
+        Ok(ts)
+    })
 }
 
 pub(crate) fn create_series_ex(ctx: &Context, key: &RedisString, options: TimeSeriesOptions) -> RedisResult<()> {

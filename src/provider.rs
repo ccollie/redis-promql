@@ -1,5 +1,5 @@
+use async_trait::async_trait;
 use crate::common::types::Timestamp;
-use crate::globals::get_timeseries_index;
 use crate::index::TimeSeriesIndex;
 use crate::storage::time_series::TimeSeries;
 use crate::storage::Label;
@@ -42,13 +42,14 @@ impl TsdbDataProvider {
     }
 }
 
+#[async_trait]
 impl MetricStorage for TsdbDataProvider {
-    fn search(&self, sq: SearchQuery, _deadline: Deadline) -> RuntimeResult<QueryResults> {
+    async fn search(&self, sq: SearchQuery, _deadline: Deadline) -> RuntimeResult<QueryResults> {
         // see: https://github.com/RedisLabsModules/redismodule-rs/blob/master/examples/call.rs#L144
         let ctx_guard = redis_module::MODULE_CONTEXT.lock();
-        let index = get_timeseries_index(&ctx_guard);
+        let index = get_timeseries_index_readable(&ctx_guard);
 
-        let data = self.get_series_data(&ctx_guard, index, sq);
+        let data = self.get_series_data(&ctx_guard, &index, sq);
         let result = QueryResults::new(data);
         Ok(result)
     }

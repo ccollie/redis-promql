@@ -27,7 +27,6 @@ use crate::error::{TsdbError, TsdbResult};
 pub(super) use chunk::*;
 pub(crate) use constants::*;
 pub(crate) use slice::*;
-pub(crate) use series_data::*;
 pub(crate) use defrag::*;
 
 pub type Timestamp = metricsql_runtime::prelude::Timestamp;

@@ -18,6 +18,7 @@ mod function_alter;
 mod function_get;
 pub mod arg_parse;
 mod aggregation;
+mod macros;
 
 pub mod commands {
     pub(crate) use super::function_add::*;
@@ -38,6 +39,24 @@ pub(crate) fn get_timeseries<'a>(ctx: &'a Context, key: &'a RedisString, must_ex
         return Err(RedisError::Str("ERR TSDB: the key is not a timeseries"));
     }
     Ok(result)
+}
+
+pub(crate) fn with_timeseries(ctx: &Context, key: &RedisString, f: impl FnOnce(&TimeSeries) -> RedisResult) -> RedisResult {
+    let redis_key = ctx.open_key(key);
+    let series = redis_key.get_value::<TimeSeries>(&REDIS_PROMQL_SERIES_TYPE)?;
+    match series {
+        Some(series) => f(series),
+        None => Err(RedisError::Str("ERR TSDB: the key is not a timeseries")),
+    }
+}
+
+pub(crate) fn with_timeseries_mut(ctx: &Context, key: &RedisString, f: impl FnOnce(&mut TimeSeries) -> RedisResult) -> RedisResult {
+    let redis_key = ctx.open_key_writable(key);
+    let series = redis_key.get_value::<TimeSeries>(&REDIS_PROMQL_SERIES_TYPE)?;
+    match series {
+        Some(series) => f(series),
+        None => Err(RedisError::Str("ERR TSDB: the key is not a timeseries")),
+    }
 }
 
 pub(crate) fn get_timeseries_mut<'a>(ctx: &'a Context, key: &RedisString, must_exist: bool) -> RedisResult<Option<&'a mut TimeSeries>> {

@@ -207,7 +207,7 @@ pub fn to_success_result(data: RedisValue, response_type: ResultType) -> RedisVa
 }
 
 pub fn std_duration_to_redis_value(duration: &std::time::Duration) -> RedisValue {
-    return RedisValue::Integer(duration.as_secs() as i64 * 1000 + duration.subsec_millis() as i64);
+    RedisValue::Integer(duration.as_secs() as i64 * 1000 + duration.subsec_millis() as i64)
 }
 pub fn string_hash_map_to_redis_value(map: &HashMap<String, String>) -> RedisValue {
     RedisValue::from(map.clone())

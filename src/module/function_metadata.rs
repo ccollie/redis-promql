@@ -1,106 +1,85 @@
-use crate::common::types::{Timestamp};
+use crate::common::types::Timestamp;
 use crate::common::METRIC_NAME_LABEL;
-use crate::globals::get_timeseries_index;
+use crate::globals::with_timeseries_index;
+use crate::module::arg_parse::{parse_series_selector, TimestampRangeValue};
 use crate::module::result::get_ts_metric_selector;
-use crate::module::{normalize_range_args, parse_timestamp_arg};
+use crate::module::{normalize_range_args, parse_timestamp_arg, REDIS_PROMQL_SERIES_TYPE};
+use crate::storage::time_series::TimeSeries;
+use metricsql_parser::label::Matchers;
 use redis_module::redisvalue::RedisValueKey;
 use redis_module::{
     Context as RedisContext, Context, NextArg, RedisError, RedisResult, RedisString, RedisValue,
 };
-use std::collections::HashMap;
-use metricsql_parser::label::Matchers;
-use crate::module::arg_parse::{parse_series_selector, TimestampRangeValue};
-
+use std::collections::{BTreeSet, HashMap};
 // todo: series count
 
 /// https://prometheus.io/docs/prometheus/latest/querying/api/#finding-series-by-label-matchers
 pub(crate) fn series(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let label_args = parse_metadata_command_args(ctx, args, true)?;
-    let ts_index = get_timeseries_index(ctx);
 
-    let series =
-        ts_index.series_by_matchers(ctx, &label_args.matchers, label_args.start, label_args.end);
+    let values = with_matched_series(ctx, Vec::new(), label_args, |mut acc, ts| {
+        acc.push(get_ts_metric_selector(ts));
+        acc
+    })?;
 
-    let values: RedisValue = series
-        .into_iter()
-        .map(|ts| get_ts_metric_selector(ts))
-        .collect::<Vec<_>>()
-        .into();
-
-    let map: HashMap<RedisValueKey, RedisValue> = [
-        (
-            RedisValueKey::String("status".into()),
-            RedisValue::SimpleStringStatic("success"),
-        ),
-        (RedisValueKey::String("data".into()), values),
-    ]
-    .into_iter()
-    .collect();
-
-    Ok(RedisValue::Map(map))
+    Ok(format_array_result(values))
 }
 
 pub(crate) fn cardinality(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let label_args = parse_metadata_command_args(ctx, args, true)?;
-    let ts_index = get_timeseries_index(ctx);
+    let count = with_matched_series(ctx, 0, label_args, |acc, _| acc + 1)?;
 
-    let series =
-        ts_index.series_by_matchers(ctx, &label_args.matchers, label_args.start, label_args.end);
-
-    Ok(RedisValue::Integer(series.len() as i64))
+    Ok(RedisValue::from(count as i64))
 }
 
 /// https://prometheus.io/docs/prometheus/latest/querying/api/#getting-label-names
 pub(crate) fn label_names(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    // todo: this does a lot of cloning :-(
     let label_args = parse_metadata_command_args(ctx, args, false)?;
-    let ts_index = get_timeseries_index(ctx);
+    let mut acc: BTreeSet<String> = BTreeSet::new();
+    acc.insert(METRIC_NAME_LABEL.to_string());
 
-    let labels =
-        ts_index.labels_by_matchers(ctx, &label_args.matchers, label_args.start, label_args.end);
-    let mut labels_result = Vec::with_capacity(labels.len());
-    if !labels.is_empty() {
-        labels_result.push(RedisValue::from(METRIC_NAME_LABEL.to_string()));
-        for label in labels {
-            labels_result.push(RedisValue::from(label));
+    let names = with_matched_series(ctx, acc, label_args, |mut acc, ts| {
+        for label in ts.labels.iter() {
+            acc.insert(label.name.clone());
         }
-    }
+        acc
+    })?;
 
-    let map: HashMap<RedisValueKey, RedisValue> = [
-        (
-            RedisValueKey::String("status".into()),
-            RedisValue::SimpleStringStatic("success"),
-        ),
-        (
-            RedisValueKey::String("data".into()),
-            RedisValue::Array(labels_result),
-        ),
-    ]
-    .into_iter()
-    .collect();
+    let labels = names
+        .iter()
+        .map(|v| RedisValue::from(v.clone()))
+        .collect::<Vec<_>>();
 
-    Ok(RedisValue::Map(map))
+    Ok(format_array_result(labels))
 }
 
 // MS.LABEL_VALUES <label_name> [MATCH <match>] [START <timestamp_ms>] [END <timestamp_ms>]
 // https://prometheus.io/docs/prometheus/latest/querying/api/#querying-label-values
 pub(crate) fn label_values(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
-    let mut args = args;
-    if args.len() < 2 {
-        return Err(RedisError::WrongArity);
-    }
-    let label_name = args.remove(1).try_as_str()?;
     let label_args = parse_metadata_command_args(ctx, args, true)?;
-    let ts_index = get_timeseries_index(ctx);
 
-    let mut series =
-        ts_index.series_by_matchers(ctx, &label_args.matchers, label_args.start, label_args.end);
+    let acc: BTreeSet<String> = BTreeSet::new();
+    let names = with_matched_series(ctx, acc, label_args, |mut acc, ts| {
+        for label in ts.labels.iter() {
+            acc.insert(label.value.clone());
+        }
+        acc
+    })?;
 
-    let arr_values = series
-        .drain(..)
-        .filter_map(|series| series.get_label_value(label_name))
-        .map(|v| RedisValue::from(v))
+    let label_values = names.iter()
+        .map(|v| RedisValue::from(v.clone()))
         .collect::<Vec<_>>();
 
+    Ok(format_array_result(label_values))
+}
+
+fn format_string_array_result(arr: &[String]) -> RedisValue {
+    let converted = arr.into_iter().map(|v| RedisValue::from(v)).collect();
+    format_array_result(converted)
+}
+
+fn format_array_result(arr: Vec<RedisValue>) -> RedisValue {
     let map: HashMap<RedisValueKey, RedisValue> = [
         (
             RedisValueKey::String("status".into()),
@@ -108,13 +87,43 @@ pub(crate) fn label_values(ctx: &Context, args: Vec<RedisString>) -> RedisResult
         ),
         (
             RedisValueKey::String("data".into()),
-            RedisValue::Array(arr_values),
+            RedisValue::Array(arr),
         ),
     ]
-    .into_iter()
-    .collect();
+        .into_iter()
+        .collect();
 
-    Ok(RedisValue::Map(map))
+    RedisValue::Map(map)
+}
+
+fn with_matched_series<F, R>(ctx: &Context, mut acc: R, args: MetadataFunctionArgs, mut f: F) -> RedisResult<R>
+where
+    F: FnMut(R, &TimeSeries) -> R,
+{
+    with_timeseries_index(ctx, move |index| {
+        let keys = index.series_keys_by_matchers(&args.matchers);
+        if keys.is_empty() {
+            return Err(RedisError::Str("ERR no series found"));
+        }
+        for key in keys {
+            // yet another copy
+            let rkey = RedisString::create_from_slice(ctx.ctx, key.as_bytes());
+            let redis_key = ctx.open_key(&rkey);
+            // get series from redis
+            match redis_key.get_value::<TimeSeries>(&REDIS_PROMQL_SERIES_TYPE) {
+                Ok(Some(series)) => {
+                    if series.overlaps(args.start, args.end) {
+                        acc = f(acc, &series)
+                    }
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+                _ => {}
+            }
+        }
+        Ok(acc)
+    })
 }
 
 struct MetadataFunctionArgs {
@@ -148,7 +157,7 @@ fn parse_metadata_command_args(
             }
             arg if arg.eq_ignore_ascii_case(CMD_ARG_END) => {
                 let next = args.next_str()?;
-                end_value = Some(parse_timestamp_arg( &next, "END")?);
+                end_value = Some(parse_timestamp_arg(&next, "END")?);
             }
             arg if arg.eq_ignore_ascii_case(CMD_ARG_MATCH) => {
                 while let Ok(matcher) = args.next_str() {
