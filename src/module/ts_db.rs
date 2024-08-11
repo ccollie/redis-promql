@@ -2,7 +2,7 @@ use redis_module::RedisModuleTypeMethods;
 use redis_module::REDISMODULE_AUX_BEFORE_RDB;
 use redis_module::{native_types::RedisType, RedisModuleDefragCtx, RedisModuleString, RedisString};
 
-use crate::globals::{with_writable_timeseries_index};
+use crate::globals::{with_timeseries_index};
 use crate::storage::time_series::TimeSeries;
 use redis_module::raw;
 use std::os::raw::{c_int, c_void};
@@ -81,11 +81,12 @@ unsafe extern "C" fn copy(
     value: *const c_void,
 ) -> *mut c_void {
     let guard = redis_module::MODULE_CONTEXT.lock();
-    with_writable_timeseries_index(&guard, |index| {
+    with_timeseries_index(&guard, |index| {
         let sm = &*(value as *mut TimeSeries);
         let mut new_series = sm.clone();
         new_series.id = index.next_id();
-        index.index_time_series(&mut new_series, tokey.into());
+        let key = RedisString::from_redis_module_string(guard.ctx, tokey);
+        index.index_time_series(&mut new_series, &key);
         Box::into_raw(Box::new(new_series)).cast::<c_void>()
     })
 }
@@ -96,7 +97,7 @@ unsafe extern "C" fn unlink(_key: *mut RedisModuleString, value: *const c_void) 
         return;
     }
     let guard = redis_module::MODULE_CONTEXT.lock();
-    with_writable_timeseries_index(&guard, |ts_index| {
+    with_timeseries_index(&guard, |ts_index| {
         ts_index.remove_series(series);
     });
 }

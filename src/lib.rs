@@ -20,21 +20,21 @@ mod storage;
 mod tests;
 
 
-use crate::globals::{with_writable_timeseries_index};
+use crate::globals::{with_timeseries_index};
 use module::*;
 pub const REDIS_PROMQL_VERSION: i32 = 1;
 pub const MODULE_NAME: &str = "valkey_promql";
 pub const MODULE_TYPE: &str = "vktseries";
 
 #[config_changed_event_handler]
-fn config_changed_event_handler(ctx: &RedisContext, changed_configs: &[&str]) {
+fn config_changed_event_handler(ctx: &RedisContext, _changed_configs: &[&str]) {
     ctx.log_notice("config changed")
 }
 
 fn remove_key_from_cache(ctx: &RedisContext, key: &[u8]) {
-    with_writable_timeseries_index(ctx, |ts_index| {
-        let key: RedisString = key.into();
-        ts_index.remove_series_by_key(ctx, key);
+    with_timeseries_index(ctx, |ts_index| {
+        let key: RedisString = ctx.create_string(key);
+        ts_index.remove_series_by_key(ctx, &key);
     });
 }
 

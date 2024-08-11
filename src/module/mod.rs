@@ -18,7 +18,6 @@ mod function_alter;
 mod function_get;
 pub mod arg_parse;
 mod aggregation;
-mod macros;
 
 pub mod commands {
     pub(crate) use super::function_add::*;
@@ -30,15 +29,6 @@ pub mod commands {
     pub(crate) use super::function_metadata::*;
     pub(crate) use super::function_query::*;
     pub(crate) use super::function_range::*;
-}
-
-pub(crate) fn get_timeseries<'a>(ctx: &'a Context, key: &'a RedisString, must_exist: bool) -> RedisResult<Option<&'a TimeSeries>> {
-    let redis_key = ctx.open_key(key);
-    let result = redis_key.get_value::<TimeSeries>(&REDIS_PROMQL_SERIES_TYPE)?;
-    if must_exist && result.is_none() {
-        return Err(RedisError::Str("ERR TSDB: the key is not a timeseries"));
-    }
-    Ok(result)
 }
 
 pub(crate) fn with_timeseries(ctx: &Context, key: &RedisString, f: impl FnOnce(&TimeSeries) -> RedisResult) -> RedisResult {

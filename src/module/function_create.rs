@@ -1,6 +1,6 @@
 use crate::arg_parse::{parse_chunk_size, parse_duration_arg};
 use crate::error::TsdbResult;
-use crate::globals::{with_writable_timeseries_index};
+use crate::globals::{with_timeseries_index};
 use crate::module::REDIS_PROMQL_SERIES_TYPE;
 use crate::storage::time_series::TimeSeries;
 use crate::storage::{DuplicatePolicy, TimeSeriesOptions};
@@ -103,7 +103,7 @@ pub(crate) fn create_series(
     ctx: &Context,
 ) -> TsdbResult<TimeSeries> {
     let mut ts = TimeSeries::with_options(options)?;
-    with_writable_timeseries_index(ctx, |index| {
+    with_timeseries_index(ctx, |index| {
         ts.id = index.next_id();
         index.index_time_series(&mut ts, key);
         Ok(ts)
