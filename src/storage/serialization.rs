@@ -414,9 +414,14 @@ pub(crate) fn compress_data(
         }
         count -= page_size;
 
-
-        let ts_slice = &timestamps[value_offset..value_offset + page_size];
-        let value_slice = &values[value_offset..value_offset + page_size];
+        let end_offset = value_offset + if count < threshold {
+            count = 0;
+            page_size + remainder
+        } else {
+            page_size
+        };
+        let ts_slice = &timestamps[value_offset..end_offset];
+        let value_slice = &values[value_offset..end_offset];
         write_data_segment(buf, ts_slice, value_slice, options)?;
 
         value_offset += page_size;

@@ -1,44 +1,61 @@
-use async_trait::async_trait;
 use crate::common::types::Timestamp;
+use crate::globals::with_timeseries_index;
 use crate::index::TimeSeriesIndex;
+use crate::module::REDIS_PROMQL_SERIES_TYPE;
 use crate::storage::time_series::TimeSeries;
 use crate::storage::Label;
+use async_trait::async_trait;
 use metricsql_runtime::{Deadline, MetricName, MetricStorage, QueryResult, QueryResults, RuntimeResult, SearchQuery};
-use rayon::iter::IntoParallelRefIterator;
-use rayon::iter::ParallelIterator;
-use redis_module::Context;
+use redis_module::{Context, RedisString};
 
 pub struct TsdbDataProvider {}
 
 impl TsdbDataProvider {
+
+    fn get_series(&self, ctx: &Context, key: &RedisString, start_ts: Timestamp, end_ts: Timestamp) -> Option<QueryResult> {
+        let redis_key = ctx.open_key(&key);
+        match redis_key.get_value::<TimeSeries>(&REDIS_PROMQL_SERIES_TYPE) {
+            Ok(Some(series)) => {
+                if series.overlaps(start_ts, end_ts) {
+                    let mut timestamps: Vec<Timestamp> = Vec::new();
+                    let mut values: Vec<f64> = Vec::new();
+                    let res = series.select_raw(
+                        start_ts,
+                        end_ts,
+                        &mut timestamps,
+                        &mut values,
+                    );
+                    // what do wee do in case of error ?
+                    let metric = to_metric_name(&series);
+                    return Some(QueryResult::new(metric, timestamps, values));
+                }
+            }
+            Err(e) => {
+                ctx.log_warning(&format!("PROMQL: Error: {:?}", e));
+            }
+            _ => {}
+        }
+        None
+    }
+
     fn get_series_data(
         &self,
         ctx: &Context,
         index: &TimeSeriesIndex,
         search_query: SearchQuery,
     ) -> Vec<QueryResult> {
-        index
-            .series_by_matchers(
-                ctx,
-                &[search_query.matchers],
-                search_query.start,
-                search_query.end,
-            )
-            .par_iter()
-            .map(|ts| {
-                let mut timestamps: Vec<Timestamp> = Vec::new();
-                let mut values: Vec<f64> = Vec::new();
-                let res = ts.select_raw(
-                    search_query.start,
-                    search_query.end,
-                    &mut timestamps,
-                    &mut values,
-                );
-                // what do wee do in case of error ?
-                let metric = to_metric_name(ts);
-                QueryResult::new(metric, timestamps, values)
-            })
-            .collect()
+        let map = index.series_keys_by_matchers(ctx, &[search_query.matchers]);
+        let mut results: Vec<QueryResult> = Vec::with_capacity(map.len());
+        let start_ts = search_query.start;
+        let end_ts = search_query.end;
+
+        // use rayon ?
+        for key in map.iter() {
+            if let Some(result) = self.get_series(ctx, key, start_ts, end_ts) {
+                results.push(result);
+            }
+        }
+        results
     }
 }
 
@@ -47,11 +64,11 @@ impl MetricStorage for TsdbDataProvider {
     async fn search(&self, sq: SearchQuery, _deadline: Deadline) -> RuntimeResult<QueryResults> {
         // see: https://github.com/RedisLabsModules/redismodule-rs/blob/master/examples/call.rs#L144
         let ctx_guard = redis_module::MODULE_CONTEXT.lock();
-        let index = get_timeseries_index_readable(&ctx_guard);
-
-        let data = self.get_series_data(&ctx_guard, &index, sq);
-        let result = QueryResults::new(data);
-        Ok(result)
+        with_timeseries_index(&ctx_guard, |index| {
+            let data = self.get_series_data(&ctx_guard, &index, sq);
+            let result = QueryResults::new(data);
+            Ok(result)
+        })
     }
 }
 

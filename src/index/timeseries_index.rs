@@ -322,13 +322,14 @@ impl TimeSeriesIndex {
 
     /// Returns a list of all series matching `matchers` while having samples in the range
     /// [`start`, `end`]
-    pub(crate) fn series_keys_by_matchers<'a>(&'a self, matchers: &[Matchers]) -> Vec<&'a String> {
+    pub(crate) fn series_keys_by_matchers<'a>(&'a self, ctx: &Context, matchers: &[Matchers]) -> Vec<RedisString> {
         let inner = self.inner.read().unwrap();
         let bitmap = inner.series_ids_by_matchers(matchers);
-        let mut result = Vec::with_capacity(bitmap.len() as usize);
+        let mut result: Vec<RedisString> = Vec::with_capacity(bitmap.len() as usize);
         for id in bitmap.iter() {
             if let Some(value) = inner.id_to_key.get(&id) {
-                result.push(value)
+                let key = ctx.create_string(value);
+                result.push(key)
             }
         }
         result

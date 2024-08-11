@@ -66,7 +66,7 @@ impl CompressedSegment {
         let mut compressed = self.buf.as_slice();
         let (_found, block) = find_data_page(&mut compressed, ts)?;
 
-        compressed = &block[0..];
+        let mut compressed = &block[0..];
 
         // size of data segment (timestamps and values)
         let segment_length = read_usize(&mut compressed, "data segment length")?;
@@ -212,6 +212,15 @@ impl CompressedSegment {
         Ok(())
     }
 
+    fn decompress(&self, timestamps: &mut Vec<i64>, values: &mut Vec<f64>) -> TsdbResult<()> {
+        let mut compressed = &self.buf[..];
+        while !compressed.is_empty() {
+            let _ = read_date_range(compressed)?;
+            let _ = read_data_segment(compressed, timestamps, values)?;
+        }
+        Ok(())
+    }
+
     pub fn get_all(
         &self,
         timestamps: &mut Vec<i64>,
@@ -281,7 +290,7 @@ impl CompressedSegment {
 
             let start_offset = cursor.as_ptr() as usize - self.buf.as_ptr() as usize;
 
-            let mut segment_start_ts = read_timestamp(&mut cursor)?;
+            let segment_start_ts = read_timestamp(&mut cursor)?;
 
             if segment_start_ts > end_ts {
                 break;

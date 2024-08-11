@@ -96,19 +96,17 @@ fn format_array_result(arr: Vec<RedisValue>) -> RedisValue {
     RedisValue::Map(map)
 }
 
-fn with_matched_series<F, R>(ctx: &Context, mut acc: R, args: MetadataFunctionArgs, mut f: F) -> RedisResult<R>
+pub(crate) fn with_matched_series<F, R>(ctx: &Context, mut acc: R, args: MetadataFunctionArgs, mut f: F) -> RedisResult<R>
 where
     F: FnMut(R, &TimeSeries) -> R,
 {
     with_timeseries_index(ctx, move |index| {
-        let keys = index.series_keys_by_matchers(&args.matchers);
+        let keys = index.series_keys_by_matchers(ctx, &args.matchers);
         if keys.is_empty() {
             return Err(RedisError::Str("ERR no series found"));
         }
         for key in keys {
-            // yet another copy
-            let rkey = RedisString::create_from_slice(ctx.ctx, key.as_bytes());
-            let redis_key = ctx.open_key(&rkey);
+            let redis_key = ctx.open_key(&key);
             // get series from redis
             match redis_key.get_value::<TimeSeries>(&REDIS_PROMQL_SERIES_TYPE) {
                 Ok(Some(series)) => {
