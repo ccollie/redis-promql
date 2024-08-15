@@ -4,21 +4,17 @@ pub mod types;
 pub mod regex_util;
 pub(crate) mod humanize;
 mod utils;
-pub(crate) mod constants;
 
-use std::sync::OnceLock;
-use regex::Regex;
 pub use humanize::*;
+use regex::Regex;
+use std::sync::LazyLock;
 pub use utils::*;
-pub(crate) use bytes_util::*;
 
 
 // todo: move elsewhere
 pub static METRIC_NAME_LABEL: &str = "__name__";
-pub static METRIC_NAME_RE: OnceLock<Regex> = OnceLock::new();
+pub static METRIC_NAME_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-zA-Z_:][a-zA-Z0-9_:]*$").unwrap());
 
 pub fn get_metric_name_regex() -> &'static str {
-    METRIC_NAME_RE.get_or_init(|| {
-        Regex::new(r"^[a-zA-Z_:][a-zA-Z0-9_:]*$").unwrap()
-    }).as_str()
+    METRIC_NAME_REGEX.as_str()
 }

@@ -4,8 +4,8 @@ use lru_time_cache::LruCache;
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct PrefixSuffix {
-    pub(crate) prefix: String,
-    pub(crate) suffix: String
+    pub prefix: String,
+    pub suffix: String
 }
 impl PrefixSuffix {
     pub fn new(prefix: String, suffix: String) -> Self {

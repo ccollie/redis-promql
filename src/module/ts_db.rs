@@ -1,13 +1,13 @@
-use redis_module::RedisModuleTypeMethods;
 use redis_module::REDISMODULE_AUX_BEFORE_RDB;
 use redis_module::{native_types::RedisType, RedisModuleDefragCtx, RedisModuleString, RedisString};
+use redis_module::RedisModuleTypeMethods;
 
-use crate::globals::{with_timeseries_index};
+use crate::globals::with_timeseries_index;
+use crate::storage::defrag_series;
 use crate::storage::time_series::TimeSeries;
 use redis_module::raw;
 use std::os::raw::{c_int, c_void};
 use std::ptr::null_mut;
-use crate::storage::defrag_series;
 
 // see https://github.com/redis/redis/blob/unstable/tests/modules
 

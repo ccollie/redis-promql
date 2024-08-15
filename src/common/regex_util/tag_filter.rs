@@ -258,7 +258,7 @@ impl PartialOrd for TagFilter {
         if self.is_negative != other.is_negative {
             return Some(self.is_negative.cmp(&other.is_negative));
         }
-        return Some(self.prefix.cmp(&other.prefix));
+        Some(self.prefix.cmp(&other.prefix))
     }
 }
 

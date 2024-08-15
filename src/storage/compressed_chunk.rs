@@ -280,7 +280,7 @@ impl Chunk for CompressedChunk {
             self.values.clear();
             self.min_time = 0;
             self.max_time = 0;
-            return Ok(0);
+            Ok(0)
         }
     }
     fn add_sample(&mut self, sample: &Sample) -> TsdbResult<()> {
@@ -394,10 +394,11 @@ mod tests {
     use rand::Rng;
 
     use crate::error::TsdbError;
-    use crate::storage::{DuplicatePolicy, Sample, SeriesData};
+    use crate::storage::{DuplicatePolicy, Sample};
     use crate::storage::chunk::Chunk;
     use crate::storage::compressed_chunk::{CompressedChunk, decompress_timestamps};
     use crate::storage::serialization::{compress_timestamps, CompressionOptimization, CompressionOptions};
+    use crate::storage::series_data::SeriesData;
     use crate::tests::generators::{create_rng, generate_series_data, generate_timestamps, GeneratorOptions, RandAlgo};
 
     fn decompress(chunk: &CompressedChunk) -> SeriesData {
@@ -471,16 +472,20 @@ mod tests {
     #[test]
     fn test_compress_timestamps_size_optimization() {
 
-        fn compress(option: Option<CompressionOptimization>) -> Vec<u8> {
+        fn compress(option: CompressionOptimization) -> Vec<u8> {
             let timestamps: Vec<i64> = generate_timestamps(1000, 1000, Duration::from_secs(5));
             let mut dst: Vec<u8> = Vec::with_capacity(1000);
-            assert!(compress_timestamps(option, &timestamps, &mut dst).is_ok());
+            let options = CompressionOptions {
+                optimization: option,
+                ..Default::default()
+            };
+            assert!(compress_timestamps(&mut dst, &timestamps, &options).is_ok());
             dst
         }
 
-        let normal = compress(None);
-        let speed = compress(Some(CompressionOptimization::Speed));
-        let size = compress(Some(CompressionOptimization::Size));
+        let normal = compress(CompressionOptimization::default());
+        let speed = compress(CompressionOptimization::Speed);
+        let size = compress(CompressionOptimization::Size);
 
         assert!(size.len() < normal.len());
         assert!(size.len() < speed.len());
@@ -505,7 +510,7 @@ mod tests {
     #[test]
     fn test_compress_decompress() {
         let mut chunk = CompressedChunk::default();
-        let mut timestamps = generate_timestamps(1000, 1000, Duration::from_secs(5));
+        let timestamps = generate_timestamps(1000, 1000, Duration::from_secs(5));
         let values = timestamps.iter().map(|x| *x as f64).collect::<Vec<f64>>();
 
         chunk.set_data(&timestamps, &values).unwrap();

@@ -149,7 +149,7 @@ fn dot_plus(_: &str, candidate: &str) -> bool {
 // prefix + '.*'
 fn prefix_dot_star(prefix: &str, candidate: &str) -> bool {
     // Fast path - the pr contains "prefix.*"
-    return candidate.starts_with(prefix);
+    candidate.starts_with(prefix)
 }
 
 fn not_prefix_dot_star(prefix: &str, candidate: &str) -> bool {

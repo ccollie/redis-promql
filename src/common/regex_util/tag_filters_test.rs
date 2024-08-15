@@ -89,7 +89,7 @@ mod tests {
     }
 
     fn tv_no_trailing_tag_separator(s: &str) -> String {
-        return s.to_string();
+        s.to_string()
     }
 
     #[test]
@@ -163,7 +163,7 @@ mod tests {
         let expected_prefix = tv_no_trailing_tag_separator("http");
         let tf = init_tf(value, is_negative, is_regexp, &expected_prefix);
 
-// Must match any suffix
+        // Must match any suffix
         matches_suffix(&tf, "");
         matches_suffix(&tf, "x");
         matches_suffix(&tf, "http");

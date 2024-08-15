@@ -76,7 +76,7 @@ impl TryFrom<&RedisString> for TimestampRangeValue {
                 _ => {}
             }
         }
-        return if let Ok(int_val) = value.parse_integer() {
+        if let Ok(int_val) = value.parse_integer() {
             if int_val < 0 {
                 return Err(RedisError::Str(
                     "TSDB: invalid timestamp, must be a non-negative integer",
@@ -88,7 +88,7 @@ impl TryFrom<&RedisString> for TimestampRangeValue {
             let ts =
                 parse_timestamp(&date_str).map_err(|_| RedisError::Str("invalid timestamp"))?;
             Ok(TimestampRangeValue::Value(ts))
-        };
+        }
     }
 }
 
@@ -305,7 +305,7 @@ pub fn parse_series_selector(arg: &str) -> TsdbResult<Matchers> {
 pub fn parse_chunk_size(arg: &str) -> RedisResult<usize> {
     fn get_error_result() -> RedisResult<usize> {
         let msg = format!("TSDB: CHUNK_SIZE value must be an integer multiple of 2 in the range [{MIN_CHUNK_SIZE} .. {MAX_CHUNK_SIZE}]");
-        return Err(RedisError::String(msg));
+        Err(RedisError::String(msg))
     }
 
     let chunk_size = parse_number_with_unit(arg).map_err(|_e| {

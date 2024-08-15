@@ -10,7 +10,7 @@ const CACHE_EXPIRE_DURATION: Duration = Duration::from_secs(5 * 60);
 fn is_skip_cache(s: &str) -> bool {
     // Skip caching for short strings, since they are usually used only once.
     // This reduces memory usage.
-    return s.len() < 16;
+    s.len() < 16
 }
 
 /// StringTransformCache implements fast transformer for strings.
@@ -44,10 +44,10 @@ impl<R: Clone> StringTransformCache<R> {
             last_cleanup_time: current_time_millis(),
             map: AHashMap::new(),
         };
-        return Self {
+        Self {
             inner: Mutex::new(inner),
             transform_func,
-        };
+        }
     }
 
     /// Match applies transform to s and returns the result.
@@ -88,7 +88,7 @@ impl<R: Clone> StringTransformCache<R> {
             inner.map.retain(|_k, v| v.last_access_time >= deadline);
         }
 
-        return value;
+        value
     }
 }
 

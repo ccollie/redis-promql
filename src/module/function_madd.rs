@@ -1,12 +1,11 @@
-use redis_module::{Context, NextArg, REDIS_OK, RedisError, RedisResult, RedisString, RedisValue};
 use crate::arg_parse::parse_timestamp;
-use crate::module::get_timeseries_mut;
+use crate::module::with_timeseries_mut;
+use crate::storage::Timestamp;
+use redis_module::{Context, NextArg, RedisError, RedisResult, RedisString, RedisValue};
 
 pub(crate) fn madd(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let arg_count = args.len() - 1;
     let mut args = args.into_iter().skip(1);
-
-    let key = args.next_arg()?;
 
     if arg_count < 3 {
         return Err(RedisError::WrongArity);
@@ -18,27 +17,32 @@ pub(crate) fn madd(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 
     let sample_count = arg_count / 3;
 
-    if let Some(series) = get_timeseries_mut(ctx, &key, true)? {
-        let policy = series.duplicate_policy;
+    let mut values: Vec<RedisValue> = Vec::with_capacity(sample_count);
+    let mut inputs: Vec<(RedisString, Timestamp, f64)> = Vec::with_capacity(sample_count);
 
-        let mut values: Vec<RedisValue> = Vec::with_capacity(sample_count);
-
-        while let Some(arg) = args.next() {
-            let res = get_timeseries_mut(ctx, &arg, true)?;
-            let timestamp = parse_timestamp(args.next_str()?)?;
-            let value = args.next_f64()?;
-            // Safety: we checked above that the key exists
-            let series = res.unwrap();
-            if series.add( timestamp, value, Some(policy)).is_ok() {
-                values.push(RedisValue::from(timestamp));
-            } else {
-                // todo !!!!!
-                values.push(RedisValue::SimpleString("ERR".to_string()));
-            }
-        }
-
-        return Ok(RedisValue::Array(values));
+    while let Some(key) = args.next() {
+        let timestamp = parse_timestamp(args.next_str()?)?;
+        let value = args.next_f64()?;
+        inputs.push((key, timestamp, value));
     }
 
-    REDIS_OK
+    for (key, timestamp, value) in inputs {
+        let value = with_timeseries_mut(ctx, &key, |series| {
+            if series.add(timestamp, value, None).is_ok() {
+                Ok(RedisValue::from(timestamp))
+            } else {
+                // todo !!!!!
+                Ok(RedisValue::SimpleString("ERR".to_string()))
+            }
+        });
+        match value {
+            Ok(value) => values.push(value),
+            Err(err) => values.push(
+                RedisValue::SimpleString(format!("ERR TSDB: {}", err.to_string())),
+            ),
+        }
+    }
+
+    Ok(RedisValue::Array(values))
+
 }

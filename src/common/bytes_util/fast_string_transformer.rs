@@ -13,7 +13,7 @@ impl FastStringTransformer {
     ///
     /// transform_func must return the same result for the same input.
     pub fn new(transform_func: fn(s: &str) -> String) -> FastStringTransformer {
-        return FastStringTransformer{
+        FastStringTransformer{
             inner: StringTransformCache::new(transform_func),
         }
     }

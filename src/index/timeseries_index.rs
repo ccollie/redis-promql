@@ -171,10 +171,14 @@ impl IndexInner {
             .collect::<Vec<_>>()
             .intersection()
     }
+
+    pub fn is_key_indexed(&self, key: &str) -> bool {
+        let key = format!("{}={}", METRIC_NAME_LABEL, key);
+        self.label_kv_to_ts.get(&key).is_some()
+    }
 }
 
 /// Index for quick access to timeseries by label, label value or metric name.
-/// TODO: do we need to have one per db ?
 #[derive(Default)]
 pub(crate) struct TimeSeriesIndex {
     inner: RwLock<IndexInner>,
@@ -214,29 +218,17 @@ impl TimeSeriesIndex {
     pub(crate) fn index_time_series(&self, ts: &TimeSeries, key: &RedisString) {
         debug_assert!(ts.id != 0);
         let mut inner = self.inner.write().unwrap();
-
-        inner.id_to_key.insert(ts.id, key.to_string());
-
-        if !ts.metric_name.is_empty() {
-            inner.index_series_by_label(ts.id, METRIC_NAME_LABEL, &ts.metric_name);
-        }
-
-        for Label { name, value } in ts.labels.iter() {
-            inner.index_series_by_label(ts.id, &name, &value);
-        }
+        inner.index_time_series(ts, key);
     }
 
     pub fn reindex_timeseries(&self, ts: &TimeSeries, key: &RedisString) {
         let mut inner = self.inner.write().unwrap();
-        // todo: may cause race ?
-        inner.remove_series_by_id(ts.id, &ts.metric_name, &ts.labels);
-        inner.index_time_series(ts, key);
+        inner.reindex_timeseries(ts, key);
     }
 
     pub(crate) fn remove_series(&self, ts: &TimeSeries) {
         let mut inner = self.inner.write().unwrap();
-        inner.remove_series_by_id(ts.id, &ts.metric_name, &ts.labels);
-        inner.id_to_key.remove(&ts.id);
+        inner.remove_series(ts);
     }
 
     pub fn remove_series_by_id(&self, id: u64, metric_name: &str, labels: &[Label]) {
@@ -328,7 +320,7 @@ impl TimeSeriesIndex {
         let mut result: Vec<RedisString> = Vec::with_capacity(bitmap.len() as usize);
         for id in bitmap.iter() {
             if let Some(value) = inner.id_to_key.get(&id) {
-                let key = ctx.create_string(value);
+                let key = ctx.create_string(&value[0..]);
                 result.push(key)
             }
         }
@@ -421,10 +413,8 @@ fn find_ids_by_multiple_filters<'a>(
     label_kv_to_ts: &'a LabelsBitmap,
     filters: &Vec<LabelFilter>,
     bitmaps: &mut Vec<RoaringTreemap>,
-    key_buf: &mut String,
+    key_buf: &mut String, // used to minimize allocations
 ) {
-    //bitmaps.clear();
-
     let mut equal_bitmap: RoaringTreemap = RoaringTreemap::new();
     let mut has_equal = false;
     for filter in filters.iter() {
@@ -433,7 +423,7 @@ fn find_ids_by_multiple_filters<'a>(
             // according to https://github.com/rust-lang/rust/blob/1.47.0/library/alloc/src/string.rs#L2414-L2427
             // write! will not return an Err, so the unwrap is safe
             write!(key_buf, "{}={}", filter.label, filter.value).unwrap();
-            if let Some(map) = label_kv_to_ts.get(&key_buf.to_string()) {
+            if let Some(map) = label_kv_to_ts.get(key_buf.as_str()) {
                 equal_bitmap &= map;
                 has_equal = true;
             }
@@ -452,27 +442,33 @@ fn find_ids_by_matchers(
     label_kv_to_ts: &LabelsBitmap,
     matchers: &Matchers,
 ) -> RoaringTreemap {
-    let mut bitmaps: Vec<RoaringTreemap> = Vec::new();
+
     let mut key_buf = String::with_capacity(64);
 
     let mut or_bitmap: Option<RoaringTreemap> = None;
-    {
-        if !matchers.or_matchers.is_empty() {
-            for filter in matchers.or_matchers.iter() {
-                find_ids_by_multiple_filters(label_kv_to_ts, filter, &mut bitmaps, &mut key_buf);
-            }
-            or_bitmap = Some(bitmaps.union());
+    let mut and_bitmap: Option<RoaringTreemap> = None;
+    if !matchers.or_matchers.is_empty() {
+        let mut bitmaps: Vec<RoaringTreemap> = Vec::new();
+        for filter in matchers.or_matchers.iter() {
+            find_ids_by_multiple_filters(label_kv_to_ts, filter, &mut bitmaps, &mut key_buf);
         }
+        or_bitmap = Some(bitmaps.union());
     }
 
     if !matchers.matchers.is_empty() {
+        let mut bitmaps: Vec<RoaringTreemap> = Vec::new();
         find_ids_by_multiple_filters(label_kv_to_ts, &matchers.matchers, &mut bitmaps, &mut key_buf);
         if let Some(or_bitmap) = or_bitmap {
             bitmaps.push(or_bitmap);
         }
+        and_bitmap = Some(bitmaps.intersection());
     }
 
-    bitmaps.intersection()
+    if let Some(and_bitmap) = and_bitmap {
+        and_bitmap
+    } else {
+        RoaringTreemap::new()
+    }
 }
 
 #[cfg(test)]

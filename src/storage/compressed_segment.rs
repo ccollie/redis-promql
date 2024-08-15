@@ -64,30 +64,24 @@ impl CompressedSegment {
         }
 
         let mut compressed = self.buf.as_slice();
-        let (_found, block) = find_data_page(&mut compressed, ts)?;
+        let meta = find_data_page(&mut compressed, ts)?;
 
-        let mut compressed = &block[0..];
+        let mut compressed = &meta.start[0..];
 
         // size of data segment (timestamps and values)
-        let segment_length = read_usize(&mut compressed, "data segment length")?;
-        if segment_length.is_zero() {
+        if meta.data_size.is_zero() {
             return Ok(0);
         }
 
-        let sample_count = read_usize(&mut compressed, "sample count")?;
-
-        if sample_count == 0 {
+        if meta.count == 0 {
             return Ok(0);
         }
 
         // accumulate all the samples in a new chunk and then swap it with the old one
-        let mut timestamps = get_pooled_vec_i64(sample_count);
-        let mut values = get_pooled_vec_f64(sample_count);
+        let mut timestamps = get_pooled_vec_i64(meta.count);
+        let mut values = get_pooled_vec_f64(meta.count);
 
         read_data_segment(&mut compressed, &mut timestamps, &mut values)?;
-
-        let ofs = block.as_ptr() as usize - self.buf.as_ptr() as usize;
-        let block_size = compressed.as_ptr() as usize - block.as_ptr() as usize;
 
         let mut size = timestamps.len();
         match timestamps.binary_search(&ts) {
@@ -102,6 +96,8 @@ impl CompressedSegment {
             }
         };
 
+        let ofs = meta.offset;
+        let block_size = compressed.as_ptr() as usize -  ofs;
         let mut binding = get_pooled_buffer(block_size + 16);
         let out_buf = binding.as_mut();
         write_data_segment(out_buf, &timestamps, &values, &self.options)?;
@@ -132,7 +128,14 @@ impl CompressedSegment {
             return self.get_all(timestamps, values);
         }
 
+        fn trim_end(end_ts: i64, ts: &mut Vec<i64>, values: &mut Vec<f64>) {
+            let end_index = ts.binary_search(&end_ts).unwrap_or_else(|x| x);
+            ts.truncate(end_index);
+            values.truncate(end_index);
+        }
+
         let mut compressed = &self.buf[..];
+
         while !compressed.is_empty() {
 
             let mut ts = read_timestamp(&mut compressed)?;
@@ -173,27 +176,25 @@ impl CompressedSegment {
                 }
 
                 let stamps = &timestamps[start_index..];
-                if stamps[0] > end_ts {
+                let first_ts = stamps[0];
+                if first_ts > end_ts {
+                    // new chunk is outside the range, so drain it
+                    timestamps.truncate(start_index);
+                    values.truncate(start_index);
                     break;
                 }
 
-                let start_ofs = stamps.binary_search(&start_ts).unwrap_or(start_index);
-                if start_ofs != 0 {
-                    let end_index = start_index + start_ofs;
-                    timestamps.drain(start_index..end_index);
-                    values.drain(start_index..end_index);
+                let last_ts = stamps[count - 1];
+
+                if first_ts < start_ts {
+                    // trim the start
+                    let start_ofs = timestamps.binary_search(&start_ts).unwrap_or_else(|pos| pos);
+                    timestamps.drain(start_index..start_ofs);
+                    values.drain(start_index..start_ofs);
                 }
 
-                // remove out of range items from the right
-                // todo: binary search
-                let end_index = timestamps.iter().rposition(|ts| *ts <= end_ts);
-                if let Some(end_index) = end_index {
-                    timestamps.truncate(end_index + 1);
-                    values.truncate(end_index + 1);
-                }
-
-                let end = timestamps[timestamps.len() - 1];
-                if end > end_ts {
+                if last_ts > end_ts {
+                    trim_end(end_ts, timestamps, values);
                     break;
                 }
             }
@@ -209,15 +210,6 @@ impl CompressedSegment {
         self.count += timestamps.len();
         self.min_time = timestamps[0];
         self.max_time = timestamps[timestamps.len() - 1];
-        Ok(())
-    }
-
-    fn decompress(&self, timestamps: &mut Vec<i64>, values: &mut Vec<f64>) -> TsdbResult<()> {
-        let mut compressed = &self.buf[..];
-        while !compressed.is_empty() {
-            let _ = read_date_range(compressed)?;
-            let _ = read_data_segment(compressed, timestamps, values)?;
-        }
         Ok(())
     }
 
@@ -336,7 +328,6 @@ impl CompressedSegment {
                     continue;
                 }
 
-
                 page_v.resize(sample_count, 0.0);
                 page_t.resize(sample_count, 0);
 
@@ -427,7 +418,7 @@ impl CompressedSegment {
             let mut timestamp_buf = get_pooled_vec_i64(count);
             let mut value_buf = get_pooled_vec_f64(count);
 
-            let mut ts_vec = timestamp_buf.as_ref();
+            let mut ts_vec = &mut timestamp_buf;
             let mut value_vec = &mut value_buf;
             self.get_all(&mut ts_vec, &mut value_vec)?;
 
@@ -475,7 +466,7 @@ impl CompressedSegment {
             return Ok(right_result);
         }
 
-        Ok(result)
+        Err(TsdbError::EmptyTimeSeriesBlock())
     }
 }
 
@@ -506,23 +497,27 @@ impl Chunk for CompressedSegment {
 
     fn add_sample(&mut self, sample: &Sample) -> TsdbResult<()> {
         // add to the last page
-        if self.is_full() {
-            return Err(TsdbError::CapacityFull(self.max_size));
-        }
+        // if self.is_full() {
+        //     return Err(TsdbError::CapacityFull(self.max_size));
+        // }
         if self.is_empty() {
             let timestamps = vec![sample.timestamp];
             let values = vec![sample.value];
             return self.compress(&timestamps, &values);
         }
-        let mut timestamps = get_pooled_vec_i64(self.count.min(4));
-        let mut values = get_pooled_vec_f64(self.count.min(4));
-        self.decompress(&mut timestamps, &mut values)?;
+        let mut compressed = self.buf.as_slice();
+        let meta = find_data_page(&mut compressed, sample.timestamp)?;
+        let count = meta.count.min(4);
+        let mut timestamps = get_pooled_vec_i64(count);
+        let mut values = get_pooled_vec_f64(count);
+        let mut compressed = &meta.start[0..];
+        read_data_segment(&mut compressed, &mut timestamps, &mut values)?;
         timestamps.push(sample.timestamp);
         values.push(sample.value);
         self.compress(&timestamps, &values)
     }
 
-    fn get_range(&self, start: crate::common::types::Timestamp, end: crate::common::types::Timestamp, timestamps: &mut Vec<i64>, values: &mut Vec<f64>) -> TsdbResult<()> {
+    fn get_range(&self, start: Timestamp, end: Timestamp, timestamps: &mut Vec<i64>, values: &mut Vec<f64>) -> TsdbResult<()> {
         self.get_range(start, end, timestamps, values)
     }
 

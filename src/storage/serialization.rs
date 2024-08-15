@@ -263,29 +263,61 @@ pub(super) fn read_date_range(compressed: &mut &[u8]) -> TsdbResult<Option<(i64,
     Ok(Some((first_ts, last_ts)))
 }
 
-pub fn find_data_page<'a>(compressed: &'a mut &[u8], timestamp: i64) -> TsdbResult<(bool, &'a [u8])> {
+
+pub(super) struct BlockMeta<'a> {
+    pub start_ts: i64,
+    pub end_ts: i64,
+    pub count: usize,
+    pub offset: usize,
+    pub data_size: usize,
+    pub start: &'a [u8],
+}
+
+pub fn find_data_page<'a>(compressed: &'a mut &[u8], timestamp: i64) -> TsdbResult<BlockMeta<'a>> {
     let mut found = false;
     let mut block_start = *compressed;
     let mut compressed = *compressed;
+    let mut count: usize = 0;
+    let mut start_timestamp: i64 = 0;
+    let mut end_timestamp: i64 = 0;
+    let mut data_size: usize = 0;
 
     while !compressed.is_empty() {
         if let Some((start_ts, end_ts)) = read_date_range(&mut compressed)? {
-            if timestamp >= start_ts && timestamp <= end_ts {
-                found = true;
+            if timestamp >= start_ts {
+                start_timestamp = start_ts;
+                end_timestamp = end_ts;
+                found = timestamp <= end_ts;
                 break;
             }
             if timestamp > end_ts {
+                start_timestamp = start_ts;
+                end_timestamp = end_ts;
                 block_start = compressed;
                 break;
             }
-            let data_size = read_usize(&mut compressed, "data segment length")?;
-            compressed = &compressed[data_size..];
+
+
+            data_size = read_usize(&mut compressed, "data segment length")?;
+            let saved = &compressed[data_size..];
+            // we want to return sample count, but also the start of the block that contains the timestamp
+            count = read_usize(&mut compressed, "sample count")?;
+            compressed = saved;
         } else {
             break;
         }
     }
 
-    Ok((found, block_start))
+    let meta = BlockMeta {
+        start_ts: start_timestamp,
+        end_ts: end_timestamp,
+        count,
+        offset: block_start.as_ptr() as usize - compressed.as_ptr() as usize,
+        start: block_start,
+        data_size
+    };
+
+    Ok(meta)
 }
 
 
@@ -403,7 +435,7 @@ pub(crate) fn compress_data(
 
 
     // todo: use rayon if the number of samples is large
-    let page_count = count / page_size + 1;
+    // let page_count = count / page_size + 1;
 
     // write out value chunk metadata
     let mut value_offset = 0;
@@ -533,7 +565,7 @@ pub fn compress_timestamps(
 pub fn decompress_timestamps(src: &[u8], dst: &mut Vec<i64>) -> TsdbResult<()> {
     fn handle_err(_e: Box<dyn Error>) -> TsdbError {
         let msg = _e.to_string();
-        TsdbError::CannotDeserialize("timestamps".to_string())
+        TsdbError::CannotDeserialize(msg)
     }
 
     if src.is_empty() {

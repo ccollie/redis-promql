@@ -21,7 +21,7 @@ impl FastRegexMatcher {
     ///
     /// match_func must return the same result for the same input.
     pub fn new(regex: Regex) -> Self {
-        return Self{
+        Self{
             regex,
             cache: Mutex::new(LruCache::with_expiry_duration_and_capacity(DEFAULT_CACHE_EXPIRE_DURATION, DEFAULT_CACHE_SIZE)),
         }

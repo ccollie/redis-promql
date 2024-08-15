@@ -1,5 +1,4 @@
 use crate::common::types::Timestamp;
-use crate::storage::SeriesSlice;
 
 trait ModuloSignedExt {
     fn modulo(&self, n: Self) -> Self;
@@ -83,7 +82,7 @@ pub(crate) fn trim_to_date_range<'a>(timestamps: &'a [i64], values: &'a [f64], s
 }
 
 // todo: needs test
-
+// todo: this looks slow : need to optimize
 pub fn trim_vec_data<'a>(timestamps: &mut Vec<i64>, values: &mut Vec<f64>, start_ts: Timestamp, end_ts: Timestamp) {
     if timestamps.is_empty() {
         return;
@@ -116,52 +115,55 @@ pub fn trim_vec_data<'a>(timestamps: &mut Vec<i64>, values: &mut Vec<f64>, start
 
 
 // returns the number of matches
-fn filter_samples(samples: &mut SeriesSlice, by_ts_args: &[Timestamp], ts_filter_index: &mut usize, last_index: &mut usize) -> usize {
+pub(crate) fn filter_samples_by_ts<'a>(
+    timestamps: &mut Vec<i64>,
+    values: &mut Vec<f64>,
+    by_ts_args: &'a [Timestamp]
+) -> (usize, &'a [Timestamp]) {
     let mut count = 0;
 
-    let ts_slice = &by_ts_args[*ts_filter_index..];
-    if ts_slice.is_empty() {
-        return 0;
+    if by_ts_args.is_empty() {
+        return (0, by_ts_args);
     }
 
-    let last_ts = samples.timestamps[samples.timestamps.len() - 1];
-    let first_ts = samples.timestamps[0];
+    let last_ts = timestamps[timestamps.len() - 1];
+    let first_ts = timestamps[0];
 
-    if first_ts > by_ts_args[*last_index] {
-        *ts_filter_index = *last_index;
-        return 0;
+    let filters_len = by_ts_args.len();
+    let last_ts_filter = by_ts_args[filters_len - 1];
+
+    if first_ts > last_ts_filter {
+        return (0, &by_ts_args[filters_len - 1..]);
     }
 
-    if last_ts < by_ts_args[*ts_filter_index] {
-        return 0;
+    if last_ts < by_ts_args[0] {
+        return (0, by_ts_args);
     }
 
-    while by_ts_args[*ts_filter_index] < first_ts && *ts_filter_index < *last_index {
-        *ts_filter_index += 1;
-    }
+    let mut ts_filter_index = by_ts_args.binary_search(&first_ts).unwrap_or_else(|i| i);
 
     let mut i = 0;
-    let mut sample_ts = 0;
-    while i < samples.timestamps.len() {
-        let filter_ts = by_ts_args[*ts_filter_index];
-        for j in i ..samples.timestamps.len() {
-            sample_ts = samples.timestamps[i];
-            if sample_ts >= filter_ts {
-                break;
+    while i < timestamps.len() && ts_filter_index < filters_len {
+        let stamps = &timestamps[i..];
+        let filter_ts = by_ts_args[ts_filter_index];
+        if stamps[stamps.len() - 1] > filter_ts {
+            break;
+        }
+        match stamps.binary_search(&filter_ts) {
+            Ok(idx) => {
+                i += idx;
+                timestamps[count] = timestamps[idx];
+                values[count] = values[idx];
+                count += 1;
+            },
+            Err(idx) => {
+                i += idx;
             }
-            i = j;
         }
-        if sample_ts == filter_ts {
-            // samples.timestamps[count] = sample_ts;
-            // samples.values[count] = samples.values[i];
-            count += 1;
-            todo!("implement");
-        }
-        *ts_filter_index += 1;
-        i += 1;
+        ts_filter_index += 1;
     }
 
-    count
+    (count, &by_ts_args[ts_filter_index..])
 }
 
 #[cfg(test)]

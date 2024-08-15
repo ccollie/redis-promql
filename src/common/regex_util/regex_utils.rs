@@ -83,7 +83,7 @@ fn get_or_values_ext(sre: &Hir) -> Option<Vec<String>> {
         Empty => Some(vec!["".to_string()]),
         Capture(cap) => get_or_values_ext(cap.sub.as_ref()),
         Literal(literal) => {
-            return match String::from_utf8(literal.0.to_vec()) {
+            match String::from_utf8(literal.0.to_vec()) {
                 Ok(s) => Some(vec![s]),
                 Err(_) => None
             }
@@ -101,7 +101,7 @@ fn get_or_values_ext(sre: &Hir) -> Option<Vec<String>> {
                     return None;
                 }
             }
-            return Some(a)
+            Some(a)
         }
         Concat(concat) => {
             if concat.is_empty() {
@@ -130,7 +130,7 @@ fn get_or_values_ext(sre: &Hir) -> Option<Vec<String>> {
                     a.push(format!("{prefix}{suffix}"));
                 }
             }
-            return Some(a)
+            Some(a)
         }
         Class(class) => {
             if let Some(literal) = class.literal() {
@@ -141,7 +141,7 @@ fn get_or_values_ext(sre: &Hir) -> Option<Vec<String>> {
             }
 
             let mut a = Vec::with_capacity(32);
-            return match class {
+            match class {
                 Unicode(uni) => {
                     for urange in uni.iter() {
                         let start = urange.start();
@@ -254,7 +254,7 @@ pub fn simplify(expr: &str) -> Result<(String, String), RegexError> {
     s = s.replace( "(?:)", "");
     s = s.replace( "(?-s:.)", ".");
     s = s.replace("(?-m:$)", "$");
-    return Ok((prefix, s))
+    Ok((prefix, s))
 }
 
 fn simplify_regexp(sre: Hir, has_prefix: bool) -> Result<Hir, RegexError> {
@@ -278,7 +278,7 @@ fn simplify_regexp(sre: Hir, has_prefix: bool) -> Result<Hir, RegexError> {
 fn simplify_regexp_ext(sre: Hir, has_prefix: bool, has_suffix: bool) -> Hir {
     use HirKind::*;
 
-    return match sre.kind() {
+    match sre.kind() {
         Alternation(alternate) => {
             // avoid clone if its all literal
             if alternate.iter().all(|hir| is_literal(hir)) {
@@ -395,7 +395,6 @@ pub(crate) fn get_optimized_re_match_func(
     };
 
     // Prepare fast string matcher for re_match.
-
     if let Some((match_func, literal_suffix, re_cost)) =
         get_optimized_re_match_func_ext(re_match.clone(), &sre)
     {
@@ -541,7 +540,7 @@ fn hir_to_string(sre: &Hir) -> String {
             s
         }
         HirKind::Alternation(alternate) => {
-            // avoid extra allocation if its all literal
+            // avoid extra allocation if it's all literal
             if alternate.iter().all(|hir| is_literal(hir)) {
                 return alternate
                     .iter()

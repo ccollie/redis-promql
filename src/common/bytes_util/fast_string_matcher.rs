@@ -1,10 +1,11 @@
+use get_size::GetSize;
 use crate::common::bytes_util::string_transform_cacher::StringTransformCache;
 
 /// FastStringMatcher implements fast matcher for strings.
 ///
 /// It caches string match results and returns them back on the next calls
 /// without calling the match_func, which may be expensive.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, GetSize)]
 pub struct FastStringMatcher {
     inner: StringTransformCache<bool>,
 }
@@ -14,14 +15,14 @@ impl FastStringMatcher {
     ///
     /// match_func must return the same result for the same input.
     pub fn new(match_func: fn(s: &str) -> bool) -> Self {
-        return Self{
+        Self{
             inner: StringTransformCache::new(match_func),
         }
     }
 
     // Match applies match_func to s and returns the result.
     pub fn matches(&self, s: &str) -> bool {
-        return self.inner.transform(s);
+        self.inner.transform(s)
     }
 }
 
