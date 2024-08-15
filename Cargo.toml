@@ -19,14 +19,12 @@ gtmpl_value = "0.5"
 htmlescape = "0.3"
 linkme = "0.3"
 lru_time_cache = "0.11"
-metricsql_common = { git = "https://github.com/ccollie/metricsql", branch = "main" }
-metricsql_encoding = { git = "https://github.com/ccollie/metricsql", branch = "main" }
-metricsql_runtime = { git = "https://github.com/ccollie/metricsql", branch = "main" }
-metricsql_parser = { git = "https://github.com/ccollie/metricsql", branch = "main" }
+metricsql_common = { git = "https://github.com/ccollie/metricsql", branch = "dev" }
+metricsql_encoding = { git = "https://github.com/ccollie/metricsql", branch = "dev" }
+metricsql_runtime = { git = "https://github.com/ccollie/metricsql", branch = "dev" }
+metricsql_parser = { git = "https://github.com/ccollie/metricsql", branch = "dev" }
 papaya = "0.1"
 pco = "0.3"
-redis-module = "2.0"
-redis-module-macros = "2.0.7"
 scopeguard = "1.2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

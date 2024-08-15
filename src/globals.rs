@@ -2,7 +2,7 @@ use crate::index::{TimeSeriesIndex, TimeSeriesIndexMap};
 use crate::provider::TsdbDataProvider;
 use metricsql_runtime::prelude::Context as QueryContext;
 use papaya::Guard;
-use redis_module::{raw, Context, RedisModule_GetSelectedDb};
+use valkey_module::{raw, Context, RedisModule_GetSelectedDb};
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, LazyLock};
 

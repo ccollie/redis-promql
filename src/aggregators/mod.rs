@@ -2,7 +2,7 @@
 // https://github.com/cryptorelay/redis-aggregation/tree/master
 // License: Apache License 2.0
 
-use redis_module::{RedisError, RedisString};
+use valkey_module::{ValkeyError, ValkeyString};
 
 type Time = i64;
 type Value = f64;
@@ -368,24 +368,6 @@ impl AggOp for AggStdS {
     }
 }
 
-pub fn parse_agg_type(name: &str) -> Option<Box<dyn AggOp>> {
-    match name {
-        "first" => Some(Box::new(AggFirst::default())),
-        "last" => Some(Box::new(AggLast::default())),
-        "min" => Some(Box::new(AggMin::default())),
-        "max" => Some(Box::new(AggMax::default())),
-        "avg" => Some(Box::new(AggAvg::default())),
-        "sum" => Some(Box::new(AggSum::default())),
-        "count" => Some(Box::new(AggCount::default())),
-        "range" => Some(Box::new(AggRange::default())),
-        "stds" => Some(Box::new(AggStdS::default())),
-        "stdp" => Some(Box::new(AggStdP::default())),
-        "vars" => Some(Box::new(AggVarS::default())),
-        "varp" => Some(Box::new(AggVarP::default())),
-        _ => None
-    }
-}
-
 
 #[derive(Clone, Debug)]
 pub enum Aggregator {
@@ -403,23 +385,23 @@ pub enum Aggregator {
     VarP(AggVarP),
 }
 
-impl TryFrom<&RedisString> for Aggregator {
-    type Error = RedisError;
+impl TryFrom<&ValkeyString> for Aggregator {
+    type Error = ValkeyError;
 
-    fn try_from(value: &RedisString) -> Result<Self, Self::Error> {
+    fn try_from(value: &ValkeyString) -> Result<Self, Self::Error> {
         let str = value.to_string_lossy();
         str.as_str().try_into()
     }
 }
 
 impl TryFrom<&str> for Aggregator {
-    type Error = RedisError;
+    type Error = ValkeyError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         if let Some(agg) = Self::new(value) {
             return Ok(agg);
         }
-        Err(RedisError::Str("TSDB: unknown AGGREGATION type"))
+        Err(ValkeyError::Str("TSDB: unknown AGGREGATION type"))
     }
 }
 

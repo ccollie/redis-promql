@@ -1,4 +1,4 @@
-use redis_module::{Context, RedisError, RedisResult, RedisString};
+use valkey_module::{Context, ValkeyError, ValkeyResult, ValkeyString};
 pub(crate) use ts_db::*;
 pub(crate) use utils::*;
 use crate::storage::time_series::TimeSeries;
@@ -18,6 +18,7 @@ mod function_alter;
 mod function_get;
 pub mod arg_parse;
 mod aggregation;
+mod range_utils;
 
 pub mod commands {
     pub(crate) use super::function_add::*;
@@ -31,20 +32,20 @@ pub mod commands {
     pub(crate) use super::function_range::*;
 }
 
-pub(crate) fn with_timeseries(ctx: &Context, key: &RedisString, f: impl FnOnce(&TimeSeries) -> RedisResult) -> RedisResult {
+pub(crate) fn with_timeseries(ctx: &Context, key: &ValkeyString, f: impl FnOnce(&TimeSeries) -> ValkeyResult) -> ValkeyResult {
     let redis_key = ctx.open_key(key);
-    let series = redis_key.get_value::<TimeSeries>(&REDIS_PROMQL_SERIES_TYPE)?;
+    let series = redis_key.get_value::<TimeSeries>(&VALKEY_PROMQL_SERIES_TYPE)?;
     match series {
         Some(series) => f(series),
-        None => Err(RedisError::Str("ERR TSDB: the key is not a timeseries")),
+        None => Err(ValkeyError::Str("ERR TSDB: the key is not a timeseries")),
     }
 }
 
-pub(crate) fn with_timeseries_mut(ctx: &Context, key: &RedisString, f: impl FnOnce(&mut TimeSeries) -> RedisResult) -> RedisResult {
+pub(crate) fn with_timeseries_mut(ctx: &Context, key: &ValkeyString, f: impl FnOnce(&mut TimeSeries) -> ValkeyResult) -> ValkeyResult {
     let redis_key = ctx.open_key_writable(key);
-    let series = redis_key.get_value::<TimeSeries>(&REDIS_PROMQL_SERIES_TYPE)?;
+    let series = redis_key.get_value::<TimeSeries>(&VALKEY_PROMQL_SERIES_TYPE)?;
     match series {
         Some(series) => f(series),
-        None => Err(RedisError::Str("ERR TSDB: the key is not a timeseries")),
+        None => Err(ValkeyError::Str("ERR TSDB: the key is not a timeseries")),
     }
 }

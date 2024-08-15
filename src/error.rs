@@ -55,10 +55,10 @@ pub enum TsdbError {
 pub type TsdbResult<T> = Result<T, TsdbError>;
 
 /*
-impl Into<RedisError> for TsdbError {
-  fn into(self) -> RedisError {
+impl Into<ValkeyError> for TsdbError {
+  fn into(self) -> ValkeyError {
     let msg = format!("TSDB: {}", self.to_string());
-    RedisError::String(msg)
+    ValkeyError::String(msg)
   }
 }
  */

@@ -532,7 +532,6 @@ pub struct SampleIterator<'a> {
     end: Timestamp,
     err: bool,
     first_iter: bool,
-    start_cursor: Timestamp
 }
 
 impl<'a> SampleIterator<'a> {
@@ -563,7 +562,6 @@ impl<'a> SampleIterator<'a> {
             end,
             err: false,
             first_iter: false,
-            start_cursor: 0,
         }
     }
 

@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use ahash::AHashMap;
-use redis_module::{RedisError, RedisString};
+use valkey_module::{ValkeyError, ValkeyString};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::str::FromStr;
@@ -22,7 +22,6 @@ mod defrag;
 mod serialization;
 mod compressed_segment;
 mod types;
-mod aggregations;
 mod timestamps_filter_iterator;
 
 use crate::error::{TsdbError, TsdbResult};
@@ -30,7 +29,6 @@ pub(super) use chunk::*;
 pub(crate) use constants::*;
 pub(crate) use slice::*;
 pub(crate) use defrag::*;
-pub(crate) use series_data::*;
 use crate::aggregators::Aggregator;
 use crate::module::arg_parse::TimestampRangeValue;
 
@@ -284,7 +282,7 @@ pub struct TimeSeriesOptions {
 }
 
 impl TimeSeriesOptions {
-    pub fn new(key: &RedisString) -> Self {
+    pub fn new(key: &ValkeyString) -> Self {
         Self {
             metric_name: Some(key.to_string()),
             encoding: None,
@@ -386,7 +384,7 @@ impl BucketTimestamp {
 
 }
 impl TryFrom<&str> for BucketTimestamp {
-    type Error = RedisError;
+    type Error = ValkeyError;
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         if value.len() == 1 {
             let c = value.chars().next().unwrap();
@@ -402,13 +400,13 @@ impl TryFrom<&str> for BucketTimestamp {
             value if value.eq_ignore_ascii_case("mid") => return Ok(BucketTimestamp::Mid),
             _ => {}
         }
-        Err(RedisError::Str("TSDB: invalid BUCKETTIMESTAMP parameter"))
+        Err(ValkeyError::Str("TSDB: invalid BUCKETTIMESTAMP parameter"))
     }
 }
 
-impl TryFrom<&RedisString> for BucketTimestamp {
-    type Error = RedisError;
-    fn try_from(value: &RedisString) -> Result<Self, Self::Error> {
+impl TryFrom<&ValkeyString> for BucketTimestamp {
+    type Error = ValkeyError;
+    fn try_from(value: &ValkeyString) -> Result<Self, Self::Error> {
         value.to_string_lossy().as_str().try_into()
     }
 }

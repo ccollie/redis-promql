@@ -1,7 +1,7 @@
 use crate::module::{parse_timestamp_arg, with_timeseries_mut};
-use redis_module::{Context, NextArg, RedisError, RedisResult, RedisString, RedisValue};
+use valkey_module::{Context, NextArg, ValkeyError, ValkeyResult, ValkeyString, ValkeyValue};
 
-pub fn del_range(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+pub fn del_range(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
     let mut args = args.into_iter().skip(1);
     let key = args.next_arg()?;
     with_timeseries_mut(ctx, &key, |series| {
@@ -14,11 +14,11 @@ pub fn del_range(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         let end = to.to_timestamp();
 
         if start > end {
-            return Err(RedisError::Str("ERR invalid range"));
+            return Err(ValkeyError::Str("ERR invalid range"));
         }
 
         let sample_count = series.remove_range(start, end)?;
 
-        Ok(RedisValue::from(sample_count))
+        Ok(ValkeyValue::from(sample_count))
     })
 }

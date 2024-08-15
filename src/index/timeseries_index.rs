@@ -1,4 +1,4 @@
-use crate::module::{with_timeseries, REDIS_PROMQL_SERIES_TYPE};
+use crate::module::{with_timeseries, VALKEY_PROMQL_SERIES_TYPE};
 use crate::storage::time_series::TimeSeries;
 use crate::storage::Label;
 use metricsql_common::hash::IntMap;
@@ -6,14 +6,12 @@ use metricsql_parser::prelude::{LabelFilter, LabelFilterOp, Matchers};
 use metricsql_runtime::METRIC_NAME_LABEL;
 use papaya::HashMap;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use redis_module::{Context, RedisString, RedisValue};
+use valkey_module::{Context, ValkeyString, ValkeyValue};
 use roaring::{MultiOps, RoaringTreemap};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
-
-pub type RedisContext = Context;
 
 /// Map from db to TimeseriesIndex
 pub type TimeSeriesIndexMap = HashMap<u32, TimeSeriesIndex>;
@@ -53,7 +51,7 @@ impl IndexInner {
         self.series_sequence.store(1, Ordering::Relaxed);
     }
 
-    fn index_time_series(&mut self, ts: &TimeSeries, key: &RedisString) {
+    fn index_time_series(&mut self, ts: &TimeSeries, key: &ValkeyString) {
         debug_assert!(ts.id != 0);
 
         self.id_to_key.insert(ts.id, key.to_string());
@@ -79,7 +77,7 @@ impl IndexInner {
         }
     }
 
-    fn reindex_timeseries(&mut self, ts: &TimeSeries, key: &RedisString) {
+    fn reindex_timeseries(&mut self, ts: &TimeSeries, key: &ValkeyString) {
         // todo: may cause race ?
         self.remove_series_by_id(ts.id, &ts.metric_name, &ts.labels);
         self.index_time_series(ts, key);
@@ -215,13 +213,13 @@ impl TimeSeriesIndex {
         inner.series_sequence.fetch_add(1, Ordering::SeqCst)
     }
 
-    pub(crate) fn index_time_series(&self, ts: &TimeSeries, key: &RedisString) {
+    pub(crate) fn index_time_series(&self, ts: &TimeSeries, key: &ValkeyString) {
         debug_assert!(ts.id != 0);
         let mut inner = self.inner.write().unwrap();
         inner.index_time_series(ts, key);
     }
 
-    pub fn reindex_timeseries(&self, ts: &TimeSeries, key: &RedisString) {
+    pub fn reindex_timeseries(&self, ts: &TimeSeries, key: &ValkeyString) {
         let mut inner = self.inner.write().unwrap();
         inner.reindex_timeseries(ts, key);
     }
@@ -243,10 +241,10 @@ impl TimeSeriesIndex {
         }
     }
 
-    pub(crate) fn remove_series_by_key(&self, ctx: &Context, key: &RedisString) -> bool {
+    pub(crate) fn remove_series_by_key(&self, ctx: &Context, key: &ValkeyString) -> bool {
         let mut inner = self.inner.write().unwrap();
-        let redis_key = ctx.open_key(key);
-        match redis_key.get_value::<TimeSeries>(&REDIS_PROMQL_SERIES_TYPE) {
+        let valkey_key = ctx.open_key(key);
+        match valkey_key.get_value::<TimeSeries>(&VALKEY_PROMQL_SERIES_TYPE) {
             Ok(Some(ts)) => {
                 inner.remove_series(ts);
                 return true;
@@ -267,12 +265,12 @@ impl TimeSeriesIndex {
         RoaringTreemap::new()
     }
 
-    pub(crate) fn rename_series(&self, ctx: &Context, new_key: &RedisString) -> bool {
+    pub(crate) fn rename_series(&self, ctx: &Context, new_key: &ValkeyString) -> bool {
         let mut inner = self.inner.write().unwrap();
         with_timeseries(ctx, new_key, | series | {
             let id = series.id;
             inner.id_to_key.insert(id, new_key.to_string());
-            Ok(RedisValue::from(0i64))
+            Ok(ValkeyValue::from(0i64))
         }).is_ok()
     }
 
@@ -314,10 +312,10 @@ impl TimeSeriesIndex {
 
     /// Returns a list of all series matching `matchers` while having samples in the range
     /// [`start`, `end`]
-    pub(crate) fn series_keys_by_matchers<'a>(&'a self, ctx: &Context, matchers: &[Matchers]) -> Vec<RedisString> {
+    pub(crate) fn series_keys_by_matchers<'a>(&'a self, ctx: &Context, matchers: &[Matchers]) -> Vec<ValkeyString> {
         let inner = self.inner.read().unwrap();
         let bitmap = inner.series_ids_by_matchers(matchers);
-        let mut result: Vec<RedisString> = Vec::with_capacity(bitmap.len() as usize);
+        let mut result: Vec<ValkeyString> = Vec::with_capacity(bitmap.len() as usize);
         for id in bitmap.iter() {
             if let Some(value) = inner.id_to_key.get(&id) {
                 let key = ctx.create_string(&value[0..]);
@@ -406,8 +404,6 @@ fn find_ids_by_label_filter(
         }
     }
 }
-
-const MAX_EQUAL_MAP_SIZE: usize = 5;
 
 fn find_ids_by_multiple_filters<'a>(
     label_kv_to_ts: &'a LabelsBitmap,

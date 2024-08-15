@@ -3,7 +3,6 @@ use crate::storage::time_series::TimeSeries;
 use crate::storage::{AggregationOptions, BucketTimestamp, RangeAlignment, RangeOptions, Sample, Timestamp};
 
 pub(crate) struct AggrIterator {
-    iterator: Box<dyn Iterator<Item= Sample>>,
     aggregator: Aggregator,
     time_delta: i64,
     bucket_ts: BucketTimestamp,
@@ -61,14 +60,14 @@ impl AggrIterator {
         }
     }
 
-    pub fn calculate(&mut self) -> Vec<Sample> {
+    pub fn calculate(&mut self, mut iterator: impl Iterator<Item=Sample>) -> Vec<Sample> {
         let time_delta = self.time_delta;
         let mut bucket_right_ts = self.last_timestamp + time_delta;
         self.normalize_bucket_start();
         let mut buckets: Vec<Sample> = Default::default();
         let count = self.count.unwrap_or(usize::MAX - 1);
 
-        while let Some(sample) = self.iterator.next() {
+        while let Some(sample) = iterator.next() {
             let timestamp = sample.timestamp;
             let value = sample.value;
 
@@ -130,43 +129,26 @@ fn bucket_start_normalize(bucket_ts: Timestamp) -> Timestamp {
     bucket_ts.max(0)
 }
 
-pub(crate) fn get_range_iter_internal<'a>(
-    series: &'a TimeSeries,
-    args: &'a RangeOptions,
-    start_timestamp: Timestamp,
-    end_timestamp: Timestamp
-) -> Box<dyn Iterator<Item=Sample> + 'a> {
-    if let Some(filter) = &args.filter {
-        if let Some(timestamps) = &filter.timestamps {
-            return Box::new(series.timestamp_filter_iter(timestamps))
-        }
-    }
-    Box::new(series.iter_range(start_timestamp, end_timestamp))
-}
-
-pub(crate) fn get_range_iter<'a>(
-    series: &'a TimeSeries,
-    args: &'a RangeOptions,
-    check_retention: bool
-) -> impl Iterator<Item=Sample> + 'a  {
-    let (start_timestamp, end_timestamp) = get_date_range(series, args, check_retention);
-    get_range_iter_internal(series, args, start_timestamp, end_timestamp)
-}
-
-fn get_range_internal(
+pub(crate) fn get_range_internal(
     series: &TimeSeries,
     args: &RangeOptions,
     check_retention: bool
 ) -> Vec<Sample> {
-    let iterator = get_range_iter(series, args, check_retention);
-    let is_aggregation = args.aggregation.is_some();
-    let mut samples = if let Some(filter) = args.get_value_filter() {
-        iterator
-            .into_iter()
-            .filter(|s| s.value >= filter.min && s.value <= filter.max)
-            .collect::<Vec<_>>()
+    let (start_timestamp, end_timestamp) = get_date_range(series, args, check_retention);
+    let mut samples = if let Some(filter) = &args.filter {
+        // this is the most restrictive filter, so apply it first
+        if let Some(timestamps) = &filter.timestamps {
+            series.timestamp_filter_iter(timestamps)
+                .collect::<Vec<_>>()
+        } else {
+            series.iter_range(start_timestamp, end_timestamp).collect::<Vec<_>>()
+        }
     } else {
-        iterator.collect::<Vec<_>>()
+        series.iter_range(start_timestamp, end_timestamp).collect::<Vec<_>>()
+    };
+    let is_aggregation = args.aggregation.is_some();
+    if let Some(filter) = args.get_value_filter() {
+        samples.retain(|s| s.value >= filter.min && s.value <= filter.max);
     };
 
     if !is_aggregation {
@@ -177,7 +159,7 @@ fn get_range_internal(
     samples
 }
 
-fn get_date_range(series: &TimeSeries, args: &RangeOptions, check_retention: bool) -> (Timestamp, Timestamp) {
+pub fn get_date_range(series: &TimeSeries, args: &RangeOptions, check_retention: bool) -> (Timestamp, Timestamp) {
     // In case a retention is set shouldn't return chunks older than the retention
     let mut start_timestamp = args.start.to_series_timestamp(series);
     let end_timestamp = args.end.to_series_timestamp(series);
@@ -193,40 +175,14 @@ fn get_date_range(series: &TimeSeries, args: &RangeOptions, check_retention: boo
 pub(crate) fn get_range(series: &TimeSeries, args: &RangeOptions, check_retention: bool) -> Vec<Sample> {
     let range = get_range_internal(series, args, check_retention);
     if let Some(aggr_options) = &args.aggregation {
-        let (start_timestamp, end_timestamp) = get_date_range(series, args, check_retention);
-        let mut timestamp_alignment: Timestamp = 0;
-        if let Some(alignment) = &args.alignment {
-            timestamp_alignment = match alignment {
-                RangeAlignment::Default => 0,
-                RangeAlignment::Start => start_timestamp,
-                RangeAlignment::End => end_timestamp,
-                RangeAlignment::Timestamp(ts) => *ts,
-            }
-        }
-
-        let iterator = get_range_iter_internal(series, args, start_timestamp, end_timestamp);
-        let mut iter = AggrIterator {
-            iterator,
-            timestamp_alignment,
-            empty: aggr_options.empty,
-            aggregator: aggr_options.aggregator.clone(),
-            time_delta: aggr_options.time_delta,
-            bucket_ts: aggr_options.timestamp_output,
-            start_timestamp,
-            end_timestamp,
-            last_timestamp: 0,
-            count: args.count,
-        };
-
-        iter.calculate()
-
+        let mut aggr_iterator = get_series_aggregator(series, args, aggr_options, check_retention);
+        aggr_iterator.calculate(range.into_iter())
     } else {
         range
     }
 }
 pub(crate) fn get_series_aggregator(series: &TimeSeries, args: &RangeOptions, aggr_options: &AggregationOptions, check_retention: bool) -> AggrIterator {
     let (start_timestamp, end_timestamp) = get_date_range(series, args, check_retention);
-    let iterator = get_range_iter_internal(series, args, start_timestamp, end_timestamp);
 
     let mut timestamp_alignment: Timestamp = 0;
     if let Some(alignment) = &args.alignment {
@@ -239,7 +195,6 @@ pub(crate) fn get_series_aggregator(series: &TimeSeries, args: &RangeOptions, ag
     }
 
     AggrIterator {
-        iterator: Box::new(iterator),
         timestamp_alignment,
         empty: aggr_options.empty,
         aggregator: aggr_options.aggregator.clone(),

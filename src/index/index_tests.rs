@@ -1,16 +1,16 @@
 #[cfg(test)]
 mod tests {
-    use redis_module::RedisString;
+    use valkey_module::ValkeyString;
     use crate::index::TimeSeriesIndex;
     use crate::storage::Label;
     use crate::storage::time_series::TimeSeries;
 
-    fn create_redis_string(s: &str) -> RedisString {
-        RedisString::create(None, s.as_bytes())
+    fn create_valkey_string(s: &str) -> ValkeyString {
+        ValkeyString::create(None, s.as_bytes())
     }
 
     fn index_time_series(index: &mut TimeSeriesIndex, ts: &TimeSeries, name: &str) {
-        let key = create_redis_string(name);
+        let key = create_valkey_string(name);
         index.index_time_series(ts, &key);
     }
 

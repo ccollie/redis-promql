@@ -3,9 +3,9 @@ use crate::module::commands::parse_create_options;
 use crate::module::with_timeseries_mut;
 use crate::storage::time_series::TimeSeries;
 use crate::storage::{Label, TimeSeriesOptions};
-use redis_module::{Context, NotifyEvent, RedisResult, RedisString, REDIS_OK};
+use valkey_module::{Context, NotifyEvent, ValkeyResult, ValkeyString, VALKEY_OK};
 
-pub fn alter(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+pub fn alter(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
     let (parsed_key, options) = parse_create_options(args)?;
 
     with_timeseries_mut(ctx, &parsed_key, |series| {
@@ -20,7 +20,7 @@ pub fn alter(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 
         ctx.replicate_verbatim();
         ctx.notify_keyspace_event(NotifyEvent::MODULE, "PROM.ALTER", &parsed_key);
-        REDIS_OK
+        VALKEY_OK
     })
 }
 

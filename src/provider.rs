@@ -1,20 +1,20 @@
 use crate::common::types::Timestamp;
 use crate::globals::with_timeseries_index;
 use crate::index::TimeSeriesIndex;
-use crate::module::REDIS_PROMQL_SERIES_TYPE;
+use crate::module::VALKEY_PROMQL_SERIES_TYPE;
 use crate::storage::time_series::TimeSeries;
 use crate::storage::Label;
 use async_trait::async_trait;
 use metricsql_runtime::{Deadline, MetricName, MetricStorage, QueryResult, QueryResults, RuntimeError, RuntimeResult, SearchQuery};
-use redis_module::{Context, RedisString};
+use valkey_module::{Context, ValkeyString};
 
 pub struct TsdbDataProvider {}
 
 impl TsdbDataProvider {
 
-    fn get_series(&self, ctx: &Context, key: &RedisString, start_ts: Timestamp, end_ts: Timestamp) -> RuntimeResult<Option<QueryResult>> {
-        let redis_key = ctx.open_key(&key);
-        match redis_key.get_value::<TimeSeries>(&REDIS_PROMQL_SERIES_TYPE) {
+    fn get_series(&self, ctx: &Context, key: &ValkeyString, start_ts: Timestamp, end_ts: Timestamp) -> RuntimeResult<Option<QueryResult>> {
+        let valkey_key = ctx.open_key(&key);
+        match valkey_key.get_value::<TimeSeries>(&VALKEY_PROMQL_SERIES_TYPE) {
             Ok(Some(series)) => {
                 if series.overlaps(start_ts, end_ts) {
                     let mut timestamps: Vec<Timestamp> = Vec::new();
@@ -71,7 +71,7 @@ impl TsdbDataProvider {
 impl MetricStorage for TsdbDataProvider {
     async fn search(&self, sq: SearchQuery, _deadline: Deadline) -> RuntimeResult<QueryResults> {
         // see: https://github.com/RedisLabsModules/redismodule-rs/blob/master/examples/call.rs#L144
-        let ctx_guard = redis_module::MODULE_CONTEXT.lock();
+        let ctx_guard = valkey_module::MODULE_CONTEXT.lock();
         with_timeseries_index(&ctx_guard, |index| {
             let data = self.get_series_data(&ctx_guard, &index, sq)?;
             let result = QueryResults::new(data);
