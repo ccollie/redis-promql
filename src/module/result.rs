@@ -1,12 +1,11 @@
 use crate::common::types::Timestamp;
 use crate::storage::time_series::TimeSeries;
+use crate::storage::Label;
 use metricsql_runtime::{MetricName, QueryResult, Tag, METRIC_NAME_LABEL};
-use valkey_module::ValkeyValue;
 use std::collections::HashMap;
 use std::fmt::Display;
-use valkey_module::native_types::ValkeyType;
 use valkey_module::redisvalue::ValkeyValueKey;
-use crate::storage::Label;
+use valkey_module::ValkeyValue;
 
 pub static META_KEY_LABEL: &str = "__meta:key__";
 

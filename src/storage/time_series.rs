@@ -337,21 +337,21 @@ impl TimeSeries {
         Ok(())
     }
 
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item = Sample> + 'a {
+    pub fn iter(&self) -> impl Iterator<Item = Sample> + '_ {
         SampleIterator::new(self, self.first_timestamp, self.last_timestamp)
     }
 
-    pub fn iter_range<'a>(
-        &'a self,
+    pub fn iter_range(
+        &self,
         start: Timestamp,
         end: Timestamp,
-    ) -> impl Iterator<Item = Sample> + 'a {
+    ) -> impl Iterator<Item = Sample> + '_ {
         SampleIterator::new(self, start, end)
     }
 
     pub fn timestamp_filter_iter<'a>(
         &'a self,
-        timestamp_filters: &'a Vec<Timestamp>,
+        timestamp_filters: &'a [Timestamp],
     ) -> impl Iterator<Item = Sample> + 'a {
         TimestampsFilterIterator::new(self, timestamp_filters)
     }
@@ -598,10 +598,8 @@ impl<'a> SampleIterator<'a> {
 impl<'a> Iterator for SampleIterator<'a> {
     type Item = Sample;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.sample_index >= self.timestamps.len() || self.first_iter {
-            if !self.next_chunk() {
-                return None;
-            }
+        if (self.sample_index >= self.timestamps.len() || self.first_iter) && !self.next_chunk() {
+            return None;
         }
         let timestamp = self.timestamps[self.sample_index];
         let value = self.values[self.sample_index];

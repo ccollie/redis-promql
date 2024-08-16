@@ -85,7 +85,7 @@ unsafe extern "C" fn copy(
         let mut new_series = sm.clone();
         new_series.id = index.next_id();
         let key = ValkeyString::from_redis_module_string(guard.ctx, tokey);
-        index.index_time_series(&mut new_series, &key);
+        index.index_time_series(&new_series, &key);
         Box::into_raw(Box::new(new_series)).cast::<c_void>()
     })
 }
