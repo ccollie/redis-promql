@@ -21,7 +21,15 @@ pub type TimeSeriesIndexMap = HashMap<u32, TimeSeriesIndex>;
 pub type LabelsBitmap = BTreeMap<String, RoaringTreemap>;
 
 
-#[derive(Default)]
+// todo: in on_load, we need to set this to the last id + 1
+static TIMESERIES_ID_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+pub fn next_timeseries_id() -> u64 {
+    TIMESERIES_ID_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+}
+
+
+#[derive(Default, Debug)]
 struct IndexInner {
     /// Map from timeseries id to timeseries key.
     id_to_key: IntMap<u64, String>, // todo: have a feature to use something like compact_str
@@ -78,7 +86,6 @@ impl IndexInner {
     }
 
     fn reindex_timeseries(&mut self, ts: &TimeSeries, key: &ValkeyString) {
-        // todo: may cause race ?
         self.remove_series_by_id(ts.id, &ts.metric_name, &ts.labels);
         self.index_time_series(ts, key);
     }
@@ -208,9 +215,8 @@ impl TimeSeriesIndex {
         inner.id_to_key.len()
     }
 
-    pub(crate) fn next_id(&self) -> u64 {
-        let inner = self.inner.read().unwrap();
-        inner.series_sequence.fetch_add(1, Ordering::SeqCst)
+    pub(crate) fn next_id() -> u64 {
+        TIMESERIES_ID_SEQUENCE.fetch_add(1, Ordering::SeqCst)
     }
 
     pub(crate) fn index_time_series(&self, ts: &TimeSeries, key: &ValkeyString) {

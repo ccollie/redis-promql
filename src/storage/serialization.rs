@@ -626,6 +626,7 @@ pub fn gorilla_compress(dst: &mut Vec<u8>, timestamps: &[Timestamp], values: &[f
         encoder.encode(DataPoint::new(*ts as u64, *value));
     }
     let res = encoder.close();
+    dst.append(&mut res.to_vec());
     Ok(())
 }
 

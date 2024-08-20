@@ -18,9 +18,14 @@ use std::time::Duration;
 pub struct TimeSeries {
     /// internal id used in indexing
     pub id: u64,
-    pub metric_name: String,
 
+    /// Name of the metric
+    /// For example, given  http_requests_total{method="POST", status="500"}
+    /// the metric name is http_requests_total, and the labels are method="POST" and status="500"
+    /// Metric names must match the regex [a-zA-Z_:][a-zA-Z0-9_:]*
+    pub metric_name: String,
     pub labels: Vec<Label>,
+
     pub retention: Duration,
     pub dedupe_interval: Option<Duration>,
     pub duplicate_policy: DuplicatePolicy,
@@ -679,8 +684,6 @@ mod tests {
 
     #[test]
     fn test_last_chunk_overflow() {
-        let mut series = TimeSeries::new();
-        let start_ts = 10000;
         todo!();
 
     }

@@ -1,6 +1,7 @@
 use crate::arg_parse::{parse_chunk_size, parse_duration_arg};
 use crate::error::TsdbResult;
-use crate::globals::{with_timeseries_index};
+use crate::globals::with_timeseries_index;
+use crate::index::TimeSeriesIndex;
 use crate::module::VALKEY_PROMQL_SERIES_TYPE;
 use crate::storage::time_series::TimeSeries;
 use crate::storage::{DuplicatePolicy, TimeSeriesOptions};
@@ -104,7 +105,7 @@ pub(crate) fn create_series(
 ) -> TsdbResult<TimeSeries> {
     let mut ts = TimeSeries::with_options(options)?;
     with_timeseries_index(ctx, |index| {
-        ts.id = index.next_id();
+        ts.id = TimeSeriesIndex::next_id();
         index.index_time_series(&ts, key);
         Ok(ts)
     })

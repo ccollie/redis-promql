@@ -32,7 +32,7 @@ impl Display for ResultType {
     }
 }
 
-pub(crate) fn metric_name_to_redis_value(
+pub(crate) fn metric_name_to_valkey_value(
     metric_name: &MetricName,
     key: Option<&str>,
 ) -> ValkeyValue {
@@ -109,7 +109,7 @@ pub fn to_matrix_result(vals: Vec<QueryResult>) -> ValkeyValue {
     let map: Vec<ValkeyValue> = vals
         .into_iter()
         .map(|val| {
-            let metric_name = metric_name_to_redis_value(&val.metric, None);
+            let metric_name = metric_name_to_valkey_value(&val.metric, None);
             let samples = samples_to_result(&val.timestamps, &val.values);
             let map: HashMap<ValkeyValueKey, ValkeyValue> = vec![
                 (ValkeyValueKey::String("metric".to_string()), metric_name),
@@ -154,7 +154,7 @@ pub fn to_matrix_result(vals: Vec<QueryResult>) -> ValkeyValue {
 /// }
 /// ```
 pub fn to_instant_vector_result(metric: &MetricName, ts: Timestamp, value: f64) -> ValkeyValue {
-    let metric_name = metric_name_to_redis_value(metric, None);
+    let metric_name = metric_name_to_valkey_value(metric, None);
     let sample = sample_to_result(ts, value);
     let map: HashMap<ValkeyValueKey, ValkeyValue> = vec![
         (ValkeyValueKey::String("metric".to_string()), metric_name),
@@ -167,7 +167,7 @@ pub fn to_instant_vector_result(metric: &MetricName, ts: Timestamp, value: f64) 
 }
 
 fn to_single_vector_result(metric: &MetricName, ts: Timestamp, value: f64) -> ValkeyValue {
-    let metric_name = metric_name_to_redis_value(metric, None);
+    let metric_name = metric_name_to_valkey_value(metric, None);
     let sample = sample_to_result(ts, value);
     let map: HashMap<ValkeyValueKey, ValkeyValue> = vec![
         (ValkeyValueKey::String("metric".to_string()), metric_name),

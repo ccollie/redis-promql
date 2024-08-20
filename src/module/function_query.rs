@@ -18,7 +18,6 @@ const CMD_ARG_TIME: &str = "TIME";
 const CMD_ARG_STEP: &str = "STEP";
 const CMD_ARG_ROUNDING: &str = "ROUNDING";
 
-/// const CMD_ARG_CACHE: &str = "CACHE";
 
 ///
 /// PROM.QUERY_RANGE <query>
