@@ -5,6 +5,7 @@ pub mod regex_util;
 pub(crate) mod humanize;
 mod utils;
 pub(crate) mod constants;
+mod label_compressor;
 
 use std::sync::OnceLock;
 use regex::Regex;

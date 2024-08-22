@@ -372,7 +372,7 @@ impl ParsedRelabelConfig {
             return s.to_string();
         }
         // Slow path - handle the rest of cases.
-        return self.replace_string(s);
+        self.replace_string(s)
     }
 
     fn replace_string(&self, val: &str) -> String {
@@ -611,5 +611,5 @@ pub fn sanitize_label_name(name: &str) -> String {
 ///
 // See https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels
 pub fn sanitize_metric_name(value: &str) -> String {
-    return get_metric_name_sanitizer().transform(value);
+    get_metric_name_sanitizer().transform(value)
 }

@@ -157,7 +157,7 @@ pub struct RuleState(pub VecDeque<RuleStateEntry>);
 impl RuleState {
     pub fn new(size: usize) -> RuleState {
         let queue = VecDeque::with_capacity(size);
-        return RuleState(queue)
+        RuleState(queue)
     }
 
     pub fn get_last(&self) -> Option<&RuleStateEntry> {

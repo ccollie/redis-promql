@@ -6,7 +6,6 @@ use crate::relabel::{
 };
 use crate::storage::Label;
 use lazy_static::lazy_static;
-use metricsql_engine::METRIC_NAME_LABEL;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -14,6 +13,7 @@ use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
 use dynamic_lru_cache::DynamicCache;
+use crate::common::METRIC_NAME_LABEL;
 use crate::relabel::actions::RelabelActionType;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -215,7 +215,7 @@ impl Display for ParsedConfigs {
 pub fn parse_relabel_configs_data(data: &str) -> Result<ParsedConfigs, String> {
     let rcs: Vec<RelabelConfig> = serde_yaml::from_str(data)
         .map_err(|e| format!("cannot parse relabel configs from data: {:?}", e))?;
-    return parse_relabel_configs(rcs);
+    parse_relabel_configs(rcs)
 }
 
 /// parse_relabel_configs parses rcs to dst.

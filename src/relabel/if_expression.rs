@@ -129,7 +129,7 @@ fn match_label_filters(lfs: &[LabelFilter], labels: &[Label]) -> bool {
             return false;
         }
     }
-    return true;
+    true
 }
 
 fn metric_expr_to_label_filter_list(me: &MetricExpr) -> AlertsResult<Vec<LabelMatchers>> {

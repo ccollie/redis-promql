@@ -24,6 +24,7 @@ metricsql_common = { git = "https://github.com/ccollie/metricsql", branch = "mai
 metricsql_encoding = { git = "https://github.com/ccollie/metricsql", branch = "main" }
 metricsql_runtime = { git = "https://github.com/ccollie/metricsql", branch = "main" }
 metricsql_parser = { git = "https://github.com/ccollie/metricsql", branch = "main" }
+papaya = "0.1"
 pco = "0.3"
 redis-module = "2.0"
 redis-module-macros = "2.0.7"
@@ -45,5 +46,10 @@ rand_distr = "0.4.3"
 tracing = "0.1"
 valkey-module = "0.1"
 valkey-module-macros = "0.1"
+dashmap = "6.0.1"
+bytes = "1.7.1"
+tokio = "1.39.3"
+prometheus = "0.13.4"
+log = "0.4.22"
 [lib]
 crate-type=["rlib", "cdylib"]

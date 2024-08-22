@@ -20,7 +20,7 @@ mod storage;
 #[cfg(test)]
 mod tests;
 pub mod relabel;
-
+mod stream_aggregation;
 
 use crate::globals::get_timeseries_index;
 use module::*;
