@@ -24,6 +24,7 @@ mod compressed_segment;
 mod types;
 mod timestamps_filter_iterator;
 mod tsz_buffered_read;
+mod xor_chunk;
 
 use crate::error::{TsdbError, TsdbResult};
 pub(super) use chunk::*;

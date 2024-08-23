@@ -22,6 +22,7 @@ pub struct CompressedChunk {
     pub count: usize,
     pub timestamps: Vec<u8>,
     pub values: Vec<u8>,
+    buf: Vec<u8>,
 }
 
 impl Default for CompressedChunk {
@@ -35,6 +36,7 @@ impl Default for CompressedChunk {
             count: 0,
             timestamps: Vec::new(),
             values: Vec::new(),
+            buf: vec![],
         }
     }
 }

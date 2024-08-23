@@ -1,5 +1,3 @@
-use std::boxed::Box;
-
 use tsz::stream::{Error, Read};
 use tsz::Bit;
 
