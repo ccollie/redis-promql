@@ -1,3 +1,5 @@
+#![feature(lazy_cell)]
+
 #[cfg(not(test))]
 use redis_module::alloc::RedisAlloc;
 use redis_module::{redis_module, Context as RedisContext, NotifyEvent};

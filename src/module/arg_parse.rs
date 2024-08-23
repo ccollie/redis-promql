@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::fmt::Display;
 use std::time::Duration;
 use chrono::DateTime;
-use metricsql_engine::{parse_metric_selector, TimestampTrait};
+use metricsql_runtime::{parse_metric_selector, TimestampTrait};
 use metricsql_parser::prelude::Matchers;
 use metricsql_parser::parser::{parse_duration_value, parse_number};
 use redis_module::{RedisError, RedisResult, RedisString};
@@ -76,7 +76,7 @@ impl TryFrom<&RedisString> for TimestampRangeValue {
                 _ => {}
             }
         }
-        return if let Ok(int_val) = value.parse_integer() {
+        if let Ok(int_val) = value.parse_integer() {
             if int_val < 0 {
                 return Err(RedisError::Str(
                     "TSDB: invalid timestamp, must be a non-negative integer",
@@ -88,7 +88,7 @@ impl TryFrom<&RedisString> for TimestampRangeValue {
             let ts =
                 parse_timestamp(&date_str).map_err(|_| RedisError::Str("invalid timestamp"))?;
             Ok(TimestampRangeValue::Value(ts))
-        };
+        }
     }
 }
 

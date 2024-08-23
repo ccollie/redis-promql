@@ -1,4 +1,4 @@
-use metricsql_engine::parse_metric_selector;
+use metricsql_runtime::parse_metric_selector;
 use regex::Regex;
 use crate::common::regex_util::simplify;
 use crate::storage::Label;
@@ -17,7 +17,7 @@ pub fn new_labels_from_string(metric_with_labels: &str) -> Vec<Label> {
             value: tag.value.clone(),
         });
     }
-    return x
+    x
 }
 
 pub fn concat_label_values(labels: &[Label], label_names: &[String], separator: &str) -> String {
@@ -61,7 +61,7 @@ pub fn get_label_value<'a>(labels: &'a [Label], name: &str) -> &'a str {
             return &label.value;
         }
     }
-    return &EMPTY_STRING;
+    &EMPTY_STRING
 }
 
 /// returns label with the given name from labels.
@@ -71,7 +71,7 @@ pub fn get_label_by_name<'a>(labels: &'a mut [Label], name: &str) -> Option<&'a 
             return Some(label);
         }
     }
-    return None;
+    None
 }
 
 pub fn are_equal_label_values(labels: &[Label], label_names: &[String]) -> bool {
@@ -86,7 +86,7 @@ pub fn are_equal_label_values(labels: &[Label], label_names: &[String]) -> bool 
             return false;
         }
     }
-    return true;
+    true
 }
 
 pub fn contains_all_label_values(labels: &[Label], target_label: &str, source_labels: &[String]) -> bool {

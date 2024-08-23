@@ -17,6 +17,7 @@ pub struct PromRegex {
     /// prefix contains literal prefix for regex.
     /// For example, prefix="foo" for regex="foo(a|b)"
     pub prefix: String,
+    is_complete: bool,
     prefix_matcher: StringMatchHandler,
     suffix_matcher: StringMatchHandler,
 }
@@ -34,6 +35,7 @@ impl PromRegex {
             prefix: prefix.to_string(),
             prefix_matcher: get_prefix_matcher(&prefix),
             suffix_matcher: get_suffix_matcher(&suffix)?,
+            is_complete: suffix.is_empty(),
         };
         Ok(pr)
     }
@@ -49,5 +51,9 @@ impl PromRegex {
             }
         }
         false
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.is_complete
     }
 }

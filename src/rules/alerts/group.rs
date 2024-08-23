@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::default::Default;
 use std::hash::Hasher;
 use std::ops::Add;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use std::vec;
