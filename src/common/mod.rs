@@ -4,6 +4,7 @@ pub mod types;
 pub mod regex_util;
 pub(crate) mod humanize;
 mod utils;
+pub mod decimal;
 
 pub use humanize::*;
 pub use utils::*;
