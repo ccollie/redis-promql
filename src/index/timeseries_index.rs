@@ -11,10 +11,12 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use roaring::{MultiOps, RoaringTreemap};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
-use std::ops::ControlFlow;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{RwLock, RwLockReadGuard};
 use valkey_module::{Context, ValkeyString, ValkeyValue};
+
+/// Type for the key of the index. Use instead of `String` because Valkey keys are binary safe not utf8 safe.
+pub type IndexKeyType = Box<[u8]>;
 
 /// Map from db to TimeseriesIndex
 pub type TimeSeriesIndexMap = HashMap<u32, TimeSeriesIndex>;
@@ -28,7 +30,8 @@ pub type LabelsBitmap = BTreeMap<String, RoaringTreemap>;
 static TIMESERIES_ID_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub fn next_timeseries_id() -> u64 {
-    TIMESERIES_ID_SEQUENCE.fetch_add(1, Ordering::SeqCst)
+    // we use Relaxed here since we only need uniqueness, not monotonicity
+    TIMESERIES_ID_SEQUENCE.fetch_add(1, Ordering::Relaxed)
 }
 
 
@@ -41,7 +44,7 @@ pub struct NameBitmapPair<'a> {
 #[derive(Default, Debug)]
 pub(crate) struct IndexInner {
     /// Map from timeseries id to timeseries key.
-    pub id_to_key: IntMap<u64, String>, // todo: have a feature to use something like compact_str
+    pub id_to_key: IntMap<u64, IndexKeyType>, // todo: have a feature to use something like compact_str
     /// Map from label name to set of timeseries ids.
     pub label_to_ts: LabelsBitmap,
     /// Map from label name + label value to set of timeseries ids.
@@ -68,10 +71,11 @@ impl IndexInner {
         self.series_sequence.store(1, Ordering::Relaxed);
     }
 
-    fn index_time_series(&mut self, ts: &TimeSeries, key: &str) {
+    fn index_time_series(&mut self, ts: &TimeSeries, key: &[u8]) {
         debug_assert!(ts.id != 0);
 
-        self.id_to_key.insert(ts.id, key.to_string());
+        let boxed_key = key.to_vec().into_boxed_slice();
+        self.id_to_key.insert(ts.id, boxed_key);
 
         if !ts.metric_name.is_empty() {
             index_series_by_label_internal(
@@ -94,7 +98,7 @@ impl IndexInner {
         }
     }
 
-    fn reindex_timeseries(&mut self, ts: &TimeSeries, key: &str) {
+    fn reindex_timeseries(&mut self, ts: &TimeSeries, key: &[u8]) {
         self.remove_series_by_id(ts.id, &ts.metric_name, &ts.labels);
         self.index_time_series(ts, key);
     }
@@ -220,13 +224,13 @@ impl TimeSeriesIndex {
         TIMESERIES_ID_SEQUENCE.fetch_add(1, Ordering::SeqCst)
     }
 
-    pub(crate) fn index_time_series(&self, ts: &TimeSeries, key: &str) {
+    pub(crate) fn index_time_series(&self, ts: &TimeSeries, key: &[u8]) {
         debug_assert!(ts.id != 0);
         let mut inner = self.inner.write().unwrap();
         inner.index_time_series(ts, key);
     }
 
-    pub fn reindex_timeseries(&self, ts: &TimeSeries, key: &str) {
+    pub fn reindex_timeseries(&self, ts: &TimeSeries, key: &[u8]) {
         let mut inner = self.inner.write().unwrap();
         inner.reindex_timeseries(ts, key);
     }
@@ -291,7 +295,7 @@ impl TimeSeriesIndex {
         matches!(self.get_id_by_name_and_labels(metric, labels), Ok(Some(_)))
     }
 
-    pub fn get_key_by_name_and_labels(&self, metric: &str, labels: &[Label]) -> TsdbResult<Option<String>> {
+    pub fn get_key_by_name_and_labels(&self, metric: &str, labels: &[Label]) -> TsdbResult<Option<IndexKeyType>> {
         let possible_id = self.get_id_by_name_and_labels(metric, labels)?;
         match possible_id {
             Some(id) => {
@@ -317,7 +321,9 @@ impl TimeSeriesIndex {
         let mut inner = self.inner.write().unwrap();
         with_timeseries(ctx, new_key, | series | {
             let id = series.id;
-            inner.id_to_key.insert(id, new_key.to_string());
+            // slow, but we don't expect this to be called often
+            let key = new_key.as_slice().to_vec().into_boxed_slice();
+            inner.id_to_key.insert(id, key);
             Ok(ValkeyValue::from(0i64))
         }).is_ok()
     }
@@ -351,6 +357,10 @@ impl TimeSeriesIndex {
             }).collect()
     }
 
+    pub fn is_series_indexed(&self, id: u64) -> bool {
+        let inner = self.inner.read().unwrap();
+        inner.id_to_key.contains_key(&id)
+    }
     pub fn is_key_indexed(&self, key: &str) -> bool {
         let inner = self.inner.read().unwrap();
         let key = format!("{}={}", METRIC_NAME_LABEL, key);

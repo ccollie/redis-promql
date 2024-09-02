@@ -55,13 +55,12 @@ fn index_timeseries_by_key(ctx: &ValkeyContext, key: &[u8]) {
         let redis_key = ctx.open_key_writable(&_key);
         let series = redis_key.get_value::<TimeSeries>(&VALKEY_PROMQL_SERIES_TYPE);
         if let Ok(Some(series)) = series {
-            if ts_index.is_key_indexed(&_key) {
+            if ts_index.is_series_indexed(series.id) {
                 // todo: log warning
                 ts_index.remove_series_by_key(ctx, &_key);
                 return;
             }
-            let string_key = String::from_utf8_lossy(key);
-            ts_index.index_time_series(series, &string_key);
+            ts_index.index_time_series(series, key);
         }
     });
 }
