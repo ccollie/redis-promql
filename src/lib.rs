@@ -5,8 +5,8 @@ extern crate tinyvec;
 extern crate async_trait;
 
 use valkey_module::{valkey_module, Context as ValkeyContext, NotifyEvent, ValkeyString};
-use valkey_module::server_events::FlushSubevent;
-use valkey_module_macros::{config_changed_event_handler, flush_event_handler};
+use valkey_module::server_events::{FlushSubevent, LoadingSubevent};
+use valkey_module_macros::{config_changed_event_handler, flush_event_handler, loading_event_handler};
 
 mod aggregators;
 mod common;
@@ -24,6 +24,7 @@ mod gorilla;
 
 use crate::globals::{clear_timeseries_index, with_timeseries_index};
 use module::*;
+use crate::index::reset_timeseries_id_after_load;
 use crate::storage::time_series::TimeSeries;
 
 pub const VALKEY_PROMQL_VERSION: i32 = 1;
@@ -39,6 +40,21 @@ fn config_changed_event_handler(ctx: &ValkeyContext, _changed_configs: &[&str]) 
 fn flushed_event_handler(_ctx: &ValkeyContext, flush_event: FlushSubevent) {
     if let FlushSubevent::Ended = flush_event {
         clear_timeseries_index();
+    }
+}
+
+#[loading_event_handler]
+fn loading_event_handler(_ctx: &ValkeyContext, values: LoadingSubevent) {
+    match values {
+        LoadingSubevent::ReplStarted |
+        LoadingSubevent::AofStarted => {
+            // TODO!: limit to current db
+            clear_timeseries_index();
+        }
+        LoadingSubevent::Ended => {
+            reset_timeseries_id_after_load();
+        }
+        _ => {}
     }
 }
 

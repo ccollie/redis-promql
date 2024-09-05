@@ -27,19 +27,25 @@ pub type LabelsBitmap = BTreeMap<String, RoaringTreemap>;
 
 
 // todo: in on_load, we need to set this to the last id + 1
-static TIMESERIES_ID_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static TIMESERIES_ID_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+static TIMESERIES_ID_MAX: AtomicU64 = AtomicU64::new(1);
 
 pub fn next_timeseries_id() -> u64 {
     // we use Relaxed here since we only need uniqueness, not monotonicity
-    TIMESERIES_ID_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    let id = TIMESERIES_ID_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    TIMESERIES_ID_MAX.fetch_max(id, Ordering::Relaxed);
+    id
 }
 
-
-pub struct NameBitmapPair<'a> {
-    pub name: &'a str,
-    pub bitmap: &'a RoaringTreemap,
+pub fn reset_timeseries_id_sequence() {
+    TIMESERIES_ID_SEQUENCE.store(1, Ordering::SeqCst);
+    TIMESERIES_ID_MAX.store(1, Ordering::SeqCst);
 }
 
+pub fn reset_timeseries_id_after_load() {
+    let max = TIMESERIES_ID_MAX.load(Ordering::SeqCst);
+    TIMESERIES_ID_SEQUENCE.store(max + 1, Ordering::SeqCst);
+}
 
 #[derive(Default, Debug)]
 pub(crate) struct IndexInner {
@@ -221,7 +227,7 @@ impl TimeSeriesIndex {
     }
 
     pub(crate) fn next_id() -> u64 {
-        TIMESERIES_ID_SEQUENCE.fetch_add(1, Ordering::SeqCst)
+        next_timeseries_id()
     }
 
     pub(crate) fn index_time_series(&self, ts: &TimeSeries, key: &[u8]) {
