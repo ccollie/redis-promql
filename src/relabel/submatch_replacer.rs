@@ -1,6 +1,5 @@
 use dynamic_lru_cache::DynamicCache;
 use regex::Regex;
-use crate::common::regex_util::PromRegex;
 use crate::relabel::regex_parse::parse_regex;
 
 #[derive(Clone, Debug)]

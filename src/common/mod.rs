@@ -4,11 +4,15 @@ pub(crate) mod humanize;
 mod utils;
 pub(crate) mod constants;
 mod label_compressor;
+mod regex_util;
 
 use std::sync::OnceLock;
 use regex::Regex;
+
+
 pub use humanize::*;
 pub use utils::*;
+pub use regex_util::*;
 
 
 // todo: move elsewhere

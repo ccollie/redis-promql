@@ -11,7 +11,7 @@ fn test_template_funcs() {
         let flocal = funcs.get(func_name).unwrap();
         let result = (flocal)(vec![s].into()).unwrap();
         assert_eq!(result, result_expected,
-                   "unexpected result for {func_name}({s}); got\n{result}\nwant\n{result_expected}");
+                   "unexpected result for {func_name}({s}); got\n{}\nwant\n{result_expected}", result);
     }
 
 	f("title", "foo bar", "Foo Bar");
@@ -115,7 +115,7 @@ fn equal_templates(tmpls: &[Template]) -> bool {
 			}
 		}
 	}
-	return true
+	true
 }
 
 struct LoadTestCase<'a> {
