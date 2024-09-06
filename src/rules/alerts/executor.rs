@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use ahash::{AHashMap, AHashSet};
-use metricsql_engine::TimestampTrait;
-
+use metricsql_runtime::TimestampTrait;
+use valkey_module::Context;
 use crate::common::constants::STALE_NAN;
 use crate::common::types::Timestamp;
 use crate::config::get_global_settings;
@@ -17,12 +17,12 @@ pub type PreviouslySentSeries = HashMap<u64, HashMap<String, Vec<Label>>>;
 
 pub struct Executor {
     eval_ts: Timestamp,
-    pub notifiers: fn() -> Vec<Box<dyn Notifier>>,
+    pub notifiers: Arc<Vec<Box<dyn Notifier>>>,
     pub notifier_headers: AHashMap<String, String>,
     pub rw: Arc<WriteQueue>,
     pub querier: Arc<dyn Querier>,
 
-    /// previously_sent_series stores series sent to RW on previous iteration
+    /// `previously_sent_series` stores series sent to RW on previous iteration
     /// HashMap<RuleID, HashMap<ruleLabels, Vec<Label>>
     /// where `ruleID` is id of the Rule within a Group and `ruleLabels` is Vec<Label> marshalled
     /// to a string
@@ -35,7 +35,7 @@ static mut SKIP_RAND_SLEEP_ON_GROUP_START: bool = false;
 
 impl Executor {
     pub fn new(
-        notifiers: fn() -> Vec<Box<dyn Notifier>>,
+        notifiers: Arc<Vec<Box<dyn Notifier>>>,
         notifier_headers: &AHashMap<String, String>,
         rw: Arc<WriteQueue>,
         querier: impl Querier,
@@ -81,7 +81,7 @@ impl Executor {
         // set previous series to current
         map.insert(rid, rule_labels);
 
-        return stales;
+        stales
     }
 
     /// Deletes references in tracked previously_sent_series_to_rw list to rules
@@ -96,16 +96,18 @@ impl Executor {
     }
 
     pub(super) fn exec_concurrently(&mut self,
+                                    ctx: &Context,
                                     rules: &mut [impl Rule],
                                     ts: Timestamp,
                                     resolve_duration: Duration,
                                     limit: usize) -> AlertsResult<()> {
         rules
             .par_items_mut()
-            .try_for_each(|rule| self.exec(rule, ts, resolve_duration, limit))
+            .try_for_each(|rule| self.exec(ctx, rule, ts, resolve_duration, limit))
     }
 
     pub fn exec(&mut self,
+                ctx: &Context,
                 rule: &mut impl Rule,
                 ts: Timestamp,
                 resolve_duration: Duration,
@@ -121,7 +123,7 @@ impl Executor {
         if rule.rule_type() == RuleType::Alerting {
             let settings = get_global_settings();
             let alerting_rule = rule.downcast_ref::<AlertingRule>().unwrap();
-            return self.send_notifications(alerting_rule, ts, resolve_duration, settings.resend_delay);
+            return self.send_notifications(ctx, alerting_rule, ts, resolve_duration, settings.resend_delay);
         }
         Ok(())
     }
@@ -140,19 +142,24 @@ impl Executor {
         Ok(())
     }
 
-    fn send_notifications(&self, rule: &AlertingRule, ts: Timestamp, resolve_duration: Duration, resend_delay: Duration) -> AlertsResult<()> {
+    fn send_notifications(&self,
+                          ctx: &Context,
+                          rule: &AlertingRule,
+                          ts: Timestamp,
+                          resolve_duration: Duration,
+                          resend_delay: Duration) -> AlertsResult<()> {
         let mut alerts = rule.alerts_to_send(ts, resolve_duration, resend_delay);
         if alerts.is_empty() {
             return Ok(());
         }
         let mut err_gr: Vec<String> = Vec::with_capacity(4);
-        for nt in self.notifiers() {
-            if let Err(err) = nt.send(&alerts, &self.notifier_headers) {
+        for nt in self.notifiers.iter() {
+            if let Err(err) = nt.send(ctx, &alerts, &self.notifier_headers) {
                 let msg = format!("failed to send alerts to addr {}: {:?}", nt.addr(), err);
                 err_gr.push(msg);
             }
         }
-        return Ok(err_gr);
+        Ok(err_gr)
     }
 
     pub(super) fn on_tick(&mut self) {

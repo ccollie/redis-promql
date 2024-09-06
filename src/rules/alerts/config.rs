@@ -54,7 +54,7 @@ impl FromStr for DataSourceType {
 /// ValidateTplFn must validate the given annotations
 pub type ValidateTplFn = fn(annotations: &AHashMap<String, String>) -> AlertsResult<()>;
 
-/// Rule describes entity that represent either recording rule or alerting rule.
+/// `RuleConfig` describes entity that represent either recording rule or alerting rule.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RuleConfig {
     #[serde(skip)]
@@ -192,7 +192,7 @@ pub struct GroupConfig {
     /// Checksum stores the hash of yaml definition for this group.
     /// May be used to detect any changes like rules re-ordering etc.
     pub checksum: String,
-    /// Optional HTTP URL parameters added to each rule request
+    /// Optional parameters added to each rule request
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub params: Option<AHashMap<String, String>>,
@@ -209,9 +209,9 @@ pub struct GroupConfig {
 
 /// Header is a Key - Value struct for holding an HTTP header.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Header {
-    pub(crate) key: String,
-    pub(crate) value: String,
+pub(crate) struct Header {
+    pub key: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -283,7 +283,7 @@ impl GroupConfig {
 
         for r in self.rules {
             let rule_name = r.name();
-            let id = r.id();
+            let id = r.id;
             if unique_rules.contains(&id) {
                 return Err(AlertsError::InvalidConfiguration(format!("{} is a duplicate in group", r)));
             }

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use metricsql_runtime::METRIC_NAME_LABEL;
 use metricsql_parser::prelude::{LabelFilter, LabelFilterOp, Matchers};
-use redis_module::{Context, RedisError};
+use valkey_module::{Context, ValkeyError};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use ahash::{AHashMap, AHashSet};
@@ -206,7 +206,7 @@ impl TimeSeriesIndex {
         &'a self,
         ctx: &'a Context,
         id: u64,
-    ) -> Result<Option<&mut TimeSeries>, RedisError> {
+    ) -> Result<Option<&mut TimeSeries>, ValkeyError> {
         let id_to_key = self.id_to_key.read().unwrap();
         get_series_by_id(ctx, &id_to_key, id)
     }
@@ -362,7 +362,7 @@ fn get_series_by_id<'a>(
     ctx: &'a Context,
     id_to_key: &RwLockReadGuard<AHashMap<u64, String>>,
     id: u64,
-) -> Result<Option<&'a mut TimeSeries>, RedisError> {
+) -> Result<Option<&'a mut TimeSeries>, ValkeyError> {
     if let Some(key) = id_to_key.get(&id) {
         // todo: eliminate this copy
         let redis_key = ctx.create_string(key.as_str());
@@ -375,7 +375,7 @@ fn get_multi_series_by_id<'a>(
     ctx: &'a Context,
     id_to_key: &RwLockReadGuard<AHashMap<u64, String>>,
     ids: &[u64],
-) -> Result<Vec<Option<&'a mut TimeSeries>>, RedisError> {
+) -> Result<Vec<Option<&'a mut TimeSeries>>, ValkeyError> {
     ids.iter()
         .map(|id| get_series_by_id(ctx, &id_to_key, *id))
         .collect()

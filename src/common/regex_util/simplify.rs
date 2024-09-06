@@ -1,3 +1,4 @@
+use metricsql_common::prelude::{remove_start_end_anchors, match_handlers::StringMatchHandler, FastRegexMatcher};
 use regex::{Regex, Error as RegexError};
 use regex_syntax::{
     escape as escape_regex,
@@ -5,24 +6,9 @@ use regex_syntax::{
     hir::{Hir, HirKind}
 };
 use regex_syntax::hir::Class::{Unicode, Bytes};
-use crate::common::bytes_util::FastRegexMatcher;
-use crate::common::regex_util::match_handlers::StringMatchHandler;
 
 const MAX_OR_VALUES: usize = 10;
 
-/// remove_start_end_anchors removes '^' at the start of expr and '$' at the end of the expr.
-pub fn remove_start_end_anchors(expr: &str) -> &str {
-    let mut cursor = &expr[..];
-    if let Some(t) = cursor.strip_prefix("^") {
-        cursor = t;
-    }
-    if !cursor.ends_with("\\$") {
-        if let Some(t) = cursor.strip_suffix("$") {
-            cursor = t;
-        }
-    }
-    cursor
-}
 
 /// get_or_values returns "or" values from the given regexp expr.
 ///
@@ -58,7 +44,7 @@ pub fn get_or_values(expr: &str) -> Vec<String> {
                     *or_value = format!("{prefix}{or_value}")
                 }
             }
-            return or_values
+            or_values
         }
         Err(err) => {
             panic!("BUG: unexpected error when parsing verified tail_expr={tail_expr}: {:?}", err)
@@ -70,10 +56,10 @@ pub(crate) fn get_match_func_for_or_suffixes(or_values: Vec<String>) -> StringMa
     if or_values.len() == 1 {
         let mut or_values = or_values;
         let v = or_values.remove(0);
-        StringMatchHandler::literal(v)
+        StringMatchHandler::equals(v)
     } else {
         // aho-corasick ?
-        StringMatchHandler::Alternates(or_values)
+        StringMatchHandler::Alternates(or_values, true)
     }
 }
 
@@ -83,7 +69,7 @@ fn get_or_values_ext(sre: &Hir) -> Option<Vec<String>> {
         Empty => Some(vec!["".to_string()]),
         Capture(cap) => get_or_values_ext(cap.sub.as_ref()),
         Literal(literal) => {
-            return match String::from_utf8(literal.0.to_vec()) {
+            match String::from_utf8(literal.0.to_vec()) {
                 Ok(s) => Some(vec![s]),
                 Err(_) => None
             }
@@ -101,7 +87,7 @@ fn get_or_values_ext(sre: &Hir) -> Option<Vec<String>> {
                     return None;
                 }
             }
-            return Some(a)
+            Some(a)
         }
         Concat(concat) => {
             if concat.is_empty() {
@@ -130,7 +116,7 @@ fn get_or_values_ext(sre: &Hir) -> Option<Vec<String>> {
                     a.push(format!("{prefix}{suffix}"));
                 }
             }
-            return Some(a)
+            Some(a)
         }
         Class(class) => {
             if let Some(literal) = class.literal() {
@@ -141,7 +127,7 @@ fn get_or_values_ext(sre: &Hir) -> Option<Vec<String>> {
             }
 
             let mut a = Vec::with_capacity(32);
-            return match class {
+            match class {
                 Unicode(uni) => {
                     for urange in uni.iter() {
                         let start = urange.start();
@@ -254,7 +240,7 @@ pub fn simplify(expr: &str) -> Result<(String, String), RegexError> {
     s = s.replace( "(?:)", "");
     s = s.replace( "(?-s:.)", ".");
     s = s.replace("(?-m:$)", "$");
-    return Ok((prefix, s))
+    Ok((prefix, s))
 }
 
 fn simplify_regexp(sre: Hir, has_prefix: bool) -> Result<Hir, RegexError> {
@@ -278,7 +264,7 @@ fn simplify_regexp(sre: Hir, has_prefix: bool) -> Result<Hir, RegexError> {
 fn simplify_regexp_ext(sre: Hir, has_prefix: bool, has_suffix: bool) -> Hir {
     use HirKind::*;
 
-    return match sre.kind() {
+    match sre.kind() {
         Alternation(alternate) => {
             // avoid clone if its all literal
             if alternate.iter().all(|hir| is_literal(hir)) {
@@ -342,191 +328,6 @@ fn simplify_regexp_ext(sre: Hir, has_prefix: bool, has_suffix: bool) -> Hir {
     }
 }
 
-/// These cost values are used for sorting tag filters in ascending order or the required CPU
-/// time for execution.
-///
-/// These values are obtained from BenchmarkOptimizedRematch_cost benchmark.
-pub(super) const FULL_MATCH_COST: usize = 1;
-pub(super) const PREFIX_MATCH_COST: usize = 2;
-pub(super) const LITERAL_MATCH_COST: usize = 3;
-pub(super) const SUFFIX_MATCH_COST: usize = 4;
-pub(super) const MIDDLE_MATCH_COST: usize = 6;
-pub(super) const RE_MATCH_COST: usize = 100;
-
-/// get_optimized_re_match_func tries returning optimized function for matching the given expr.
-///
-///	'.*'
-///	'.+'
-///	'literal.*'
-///	'literal.+'
-///	'.*literal'
-///	'.+literal
-///	'.*literal.*'
-///	'.*literal.+'
-///	'.+literal.*'
-///	'.+literal.+'
-///
-/// It returns re_match if it cannot find optimized function.
-///
-/// It also returns literal suffix from the expr.
-pub(crate) fn get_optimized_re_match_func(
-    re_match: StringMatchHandler,
-    expr: &str,
-) -> (StringMatchHandler, String, usize) {
-    if expr == ".*" {
-        return (StringMatchHandler::dot_star(), "".to_string(), FULL_MATCH_COST);
-    }
-    if expr == ".+" {
-        // '.+'
-        return (
-            StringMatchHandler::dot_plus(),
-            "".to_string(),
-            FULL_MATCH_COST,
-        );
-    }
-    let sre = match build_hir(expr) {
-        Ok(sre) => sre,
-        Err(err) => {
-            panic!(
-                "BUG: unexpected error when parsing verified expr={expr}: {:?}",
-                err
-            );
-        }
-    };
-
-    // Prepare fast string matcher for re_match.
-
-    if let Some((match_func, literal_suffix, re_cost)) =
-        get_optimized_re_match_func_ext(re_match.clone(), &sre)
-    {
-        // Found optimized function for matching the expr.
-        return (match_func, literal_suffix, re_cost);
-    }
-    // Fall back to re_match_fast.
-    (re_match.clone(), "".to_string(), RE_MATCH_COST)
-}
-
-fn get_optimized_re_match_func_ext(
-    re_match: StringMatchHandler,
-    sre: &Hir,
-) -> Option<(StringMatchHandler, String, usize)> {
-    if is_dot_star(sre) {
-        // '.*'
-        return Some((StringMatchHandler::dot_star(), "".to_string(), FULL_MATCH_COST));
-    }
-    if is_dot_star(sre) {
-        // '.+'
-        return Some((
-            StringMatchHandler::dot_plus(),
-            "".to_string(),
-            FULL_MATCH_COST,
-        ));
-    }
-    // todo: handle alternation ?
-    match sre.kind() {
-        HirKind::Capture(cap) => {
-            // Remove parenthesis from expr, i.e. '(expr) -> expr'
-            return get_optimized_re_match_func_ext(re_match, cap.sub.as_ref())
-        }
-        HirKind::Literal(_lit) => {
-            if !is_literal(sre) {
-                return None;
-            }
-            let s = literal_to_string(&sre);
-            // Literal match
-            return Some((StringMatchHandler::literal(&s), s, LITERAL_MATCH_COST));
-        }
-        HirKind::Concat(subs) => {
-            if subs.len() == 2 {
-                let first = &subs[0];
-                let second = &subs[1];
-                if is_literal(first) {
-                    let prefix = hir_to_string(first);
-                    if is_dot_star(second) {
-                        // 'prefix.*'
-                        return Some((
-                            StringMatchHandler::prefix(prefix, true),
-                            "".to_string(),
-                            PREFIX_MATCH_COST,
-                        ));
-                    }
-                    if is_dot_plus(second) {
-                        // 'prefix.+'
-                        return Some((
-                            StringMatchHandler::prefix(prefix, false),
-                            "".to_string(),
-                            PREFIX_MATCH_COST,
-                        ));
-                    }
-                }
-                if is_literal(second) {
-                    let suffix = literal_to_string(second);
-                    if is_dot_star(first) {
-                        // '.*suffix'
-                        return Some((
-                            StringMatchHandler::suffix(&suffix, true),
-                            suffix,
-                            SUFFIX_MATCH_COST,
-                        ));
-                    }
-                    if is_dot_plus(first) {
-                        // '.+suffix'
-                        return Some((
-                            StringMatchHandler::suffix(&suffix, false),
-                            suffix,
-                            SUFFIX_MATCH_COST,
-                        ));
-                    }
-                }
-            }
-            if subs.len() == 3 && is_literal(&subs[1]) {
-                let first = &subs[0];
-                let third = &subs[2];
-                let middle = hir_to_string(&subs[1]);
-                if is_dot_star(first) {
-                    if is_dot_star(third) {
-                        // '.*middle.*'
-                        return Some((
-                            StringMatchHandler::middle(".*", middle, ".*"),
-                            "".to_string(),
-                            MIDDLE_MATCH_COST,
-                        ));
-                    }
-                    if is_dot_plus(third) {
-                        // '.*middle.+'
-                        return Some((
-                            StringMatchHandler::middle(".*", middle, ".+"),
-                            "".to_string(),
-                            MIDDLE_MATCH_COST,
-                        ));
-                    }
-                }
-                if is_dot_plus(first) {
-                    if is_dot_star(third) {
-                        // '.+middle.*'
-                        return Some((
-                            StringMatchHandler::middle(".+", middle, ".*"),
-                            "".to_string(),
-                            MIDDLE_MATCH_COST,
-                        ));
-                    }
-                    if is_dot_plus(third) {
-                        // '.+middle.+'
-                        return Some((
-                            StringMatchHandler::middle(".+", middle, ".+"),
-                            "".to_string(),
-                            MIDDLE_MATCH_COST,
-                        ));
-                    }
-                }
-            }
-        }
-        _ => {
-            todo!()
-        }
-    }
-    None
-}
 
 fn hir_to_string(sre: &Hir) -> String {
     match sre.kind() {
@@ -576,27 +377,32 @@ fn literal_to_string(sre: &Hir) -> String {
     "".to_string()
 }
 
+fn dot_plus_matcher() -> StringMatchHandler {
+    let match_fn = |needle, haystack| !needle.is_empty();
+    StringMatchHandler::MatchFn(match_fn)
+}
+
 pub(super) fn get_prefix_matcher(prefix: &str) -> StringMatchHandler {
     if prefix == ".*" {
-        return StringMatchHandler::dot_star();
+        return StringMatchHandler::MatchAll;
     }
     if prefix == ".+" {
-        return StringMatchHandler::dot_plus();
+        return dot_plus_matcher();
     }
-    StringMatchHandler::starts_with(prefix)
+    StringMatchHandler::StartsWith(prefix.to_string())
 }
 
 pub(super) fn get_suffix_matcher(suffix: &str) -> Result<StringMatchHandler, RegexError> {
     if !suffix.is_empty() {
         if suffix == ".*" {
-            return Ok(StringMatchHandler::dot_star());
+            return Ok(StringMatchHandler::MatchAll);
         }
         if suffix == ".+" {
-            return Ok(StringMatchHandler::dot_plus());
+            return Ok(dot_plus_matcher());
         }
         if escape_regex(suffix) == suffix {
             // Fast path - pr contains only literal prefix such as 'foo'
-            return Ok(StringMatchHandler::literal(suffix));
+            return Ok(StringMatchHandler::equals(suffix.to_string()));
         }
         let or_values = get_or_values(suffix);
         if !or_values.is_empty() {
@@ -652,29 +458,9 @@ fn build_hir(pattern: &str) -> Result<Hir, RegexError> {
         .map_err(|err| RegexError::Syntax(err.to_string()))
 }
 
-pub(super) fn skip_first_char(s: &str) -> &str {
-    let mut chars = s.chars();
-    chars.next();
-    chars.as_str()
-}
-
-pub(super) fn skip_last_char(s: &str) -> &str {
-    match s.char_indices().next_back() {
-        Some((i, _)) => &s[..i],
-        None => s,
-    }
-}
-
-pub(super) fn skip_first_and_last_char(value: &str) -> &str {
-    let mut chars = value.chars();
-    chars.next();
-    chars.next_back();
-    chars.as_str()
-}
-
 #[cfg(test)]
 mod test {
-    use crate::common::regex_util::{get_or_values, remove_start_end_anchors, simplify};
+    use crate::common::simplify::{get_or_values, remove_start_end_anchors, simplify};
 
     #[test]
     fn test_get_or_values() {

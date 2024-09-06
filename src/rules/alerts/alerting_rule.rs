@@ -99,12 +99,12 @@ impl Clone for AlertingRule {
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 struct LabelSet {
-    /// origin labels extracted from received time series plus extra labels (group labels, service
-    /// labels like ALERT_NAME_LABEL). In case of conflicts, origin labels from time series preferred.
+    /// `origin` labels extracted from received time series plus extra labels (group labels, service
+    /// labels like `ALERT_NAME_LABEL`). In case of conflicts, origin labels from time series preferred.
     /// Used for templating annotations
     origin: AHashMap<String, String>,
-    /// processed labels includes origin labels plus extra labels (group labels, service labels
-    /// like ALERT_NAME_LABEL). In case of conflicts, extra labels are preferred.
+    /// `processed` labels includes origin labels plus extra labels (group labels, service labels
+    /// like `ALERT_NAME_LABEL`). In case of conflicts, extra labels are preferred.
     /// Used as labels attached to notifier.Alert and ALERTS series written to remote storage.
     processed: AHashMap<String, String>,
 }
@@ -268,8 +268,8 @@ impl AlertingRule {
         reader
             .iter()
             .filter(|(_hash, a)| a.state != AlertState::Inactive)
-            .map(|(_, alert)| self.alert_to_timeseries(alert, timestamp))
-            .collect::<Vec<RawTimeSeries>>()
+            .flat_map(|(_, alert)| self.alert_to_timeseries(alert, timestamp))
+            .collect()
     }
 
     fn alert_to_timeseries(&self, alert: &Alert, timestamp: Timestamp) -> Vec<RawTimeSeries> {
@@ -278,7 +278,7 @@ impl AlertingRule {
         if !self.r#for.is_zero() {
             tss.push(alert_for_to_time_series(alert, timestamp))
         }
-        return tss;
+        tss
     }
 
     /// alertsToSend walks through the current alerts of AlertingRule
@@ -316,7 +316,7 @@ impl AlertingRule {
             alert.last_sent = ts;
             alerts.push(alert)
         }
-        return f(alerts);
+        f(alerts)
     }
 
 
@@ -327,9 +327,11 @@ impl AlertingRule {
         start: Timestamp,
         q_fn: QueryFn,
     ) -> AlertsResult<Alert> {
+        let mut local_ls = LabelSet::default();
         let ls = if ls.is_none() {
-            self.to_labels(m, q_fn)
-                .map_err(|e| AlertsError::FailedToExpandLabels(e.to_string()))?
+            local_ls = self.to_labels(m, q_fn)
+                .map_err(|e| AlertsError::FailedToExpandLabels(e.to_string()))?;
+            &local_ls
         } else {
             ls.unwrap()
         };
@@ -353,8 +355,9 @@ impl AlertingRule {
             keep_firing_since: 0,
             external_url: "".to_string(),
         };
+
         alert.annotations = alert.exec_template(q_fn, &ls.origin, &self.annotations)?;
-        return Ok(alert);
+        Ok(alert)
     }
 
     fn count_alerts_in_state(&self, state: AlertState) -> usize {
@@ -372,17 +375,17 @@ impl AlertingRule {
     }
 
     pub fn samples(&self) -> usize {
-        if let Some(last) = self.state.last() {
-            last.samples
+        if let Some(last) = self.state.iter().last() {
+            return last.samples
         }
         0
     }
 
     pub fn series_fetched(&self) -> usize {
-        if let Some(last) = self.state.last() {
-            last.series_fetched
+        if let Some(last) = self.state.iter().last() {
+            return last.series_fetched
         }
-        0
+        0usize
     }
 }
 
@@ -436,7 +439,7 @@ impl Rule for AlertingRule {
                 cur_state.err = Some(e.clone());
                 cur_state.duration = Duration::from_millis((current_time_millis() - start) as u64);
                 let msg = format!("failed to execute query {}: {:?}", self.expr, e);
-                return Err(e);
+                return Err(AlertsError::QueryExecutionError(msg));
             }
         };
 
@@ -570,7 +573,7 @@ impl Rule for AlertingRule {
         self.to_timeseries(ts)
     }
 
-    /// exec_range executes alerting rule on the given time range similarly to exec.
+    /// `exec_range` executes alerting rule on the given time range similarly to exec.
     /// It doesn't update internal states of the Rule and is meant to be used just to get time series
     /// for back-filling.
     /// It returns ALERT and ALERT_FOR_STATE time series as a result.

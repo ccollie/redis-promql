@@ -1,14 +1,14 @@
+
 use crate::common::regex_util::prefix_cache::{PrefixCache, PrefixSuffix};
-use crate::common::regex_util::{get_match_func_for_or_suffixes, get_optimized_re_match_func, regex_utils};
-use crate::common::regex_util::regex_utils::{FULL_MATCH_COST, LITERAL_MATCH_COST};
 use crate::common::regex_util::regexp_cache::{RegexpCache, RegexpCacheValue};
-use regex::{Regex, Error as RegexError};
+use crate::common::regex_util::{get_match_func_for_or_suffixes, get_optimized_re_match_func, get_or_values, simplify};
+use crate::common::METRIC_NAME_LABEL;
+use regex::{Error as RegexError, Regex};
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 use std::sync::{Arc, OnceLock};
-use crate::common::bytes_util::FastRegexMatcher;
-use crate::common::METRIC_NAME_LABEL;
-use crate::common::regex_util::match_handlers::StringMatchHandler;
+use metricsql_common::prelude::{FastRegexMatcher, FULL_MATCH_COST, LITERAL_MATCH_COST};
+use metricsql_common::prelude::match_handlers::StringMatchHandler;
 
 /// TagFilters represents filters used for filtering tags.
 #[derive(Clone, Default, Debug)]
@@ -213,7 +213,7 @@ impl TagFilter {
         if !ok {
             return self.is_negative;
         }
-        return !self.is_negative;
+        !self.is_negative
     }
 
     #[inline]
@@ -234,7 +234,7 @@ impl TagFilter {
         if self.is_regexp {
             return "=~";
         }
-        return "=";
+        "="
     }
 }
 
@@ -258,7 +258,7 @@ impl PartialOrd for TagFilter {
         if self.is_negative != other.is_negative {
             return Some(self.is_negative.cmp(&other.is_negative));
         }
-        return Some(self.prefix.cmp(&other.prefix));
+        Some(self.prefix.cmp(&other.prefix))
     }
 }
 
@@ -287,7 +287,7 @@ pub(super) fn compile_regexp(expr: &str) -> Result<RegexpCacheValue, String> {
     let re =
         Regex::new(&expr_str).map_err(|e| format!("cannot compile regexp {}: {}", expr_str, e))?;
 
-    let or_values = regex_utils::get_or_values(expr);
+    let or_values = get_or_values(expr);
 
     let (re_match, literal_suffix, re_cost) = if !or_values.is_empty() {
         let (match_fn, re_cost) = new_match_func_for_or_suffixes(or_values.clone());
@@ -329,7 +329,7 @@ pub fn get_regexp_from_cache(expr: &str) -> Result<Arc<RegexpCacheValue>, String
 fn new_match_func_for_or_suffixes(or_values: Vec<String>) -> (StringMatchHandler, usize) {
     let re_cost = or_values.len() * LITERAL_MATCH_COST;
     let matcher = get_match_func_for_or_suffixes(or_values);
-    return (matcher, re_cost);
+    (matcher, re_cost)
 }
 
 const DEFAULT_MAX_REGEXP_CACHE_SIZE: usize = 2048;
@@ -385,7 +385,7 @@ pub fn simplify_regexp(expr: &str) -> Result<(String, String), RegexError> {
     // Slow path - simplify the expr.
 
     // Make a copy of expr before using it,
-    let (prefix, suffix) = regex_utils::simplify(expr)?;
+    let (prefix, suffix) = simplify(expr)?;
 
     // Put the prefix and the suffix to the cache.
     let ps = PrefixSuffix {

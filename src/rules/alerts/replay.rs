@@ -117,7 +117,7 @@ fn replay_group<'a>(
         total += replay_range(ctx, rule, start, *end, step, *rule_retry_attempts, rw)?;
     }
 
-    return total;
+    total
 }
 
 fn replay_range<'a>(
@@ -200,7 +200,7 @@ fn replay_rule(
             }
             Err(err) => {
                 let msg = format!("remote write failure: {}", err);
-                return Err(err);
+                return Err(AlertsError::Generic(msg));
             }
         }
     }

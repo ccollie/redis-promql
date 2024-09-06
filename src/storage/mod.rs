@@ -1,8 +1,9 @@
 use std::cmp::Ordering;
 use ahash::AHashMap;
-use redis_module::RedisString;
+use valkey_module::ValkeyString;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
+use std::mem::size_of;
 use std::str::FromStr;
 use std::time::Duration;
 use get_size::GetSize;
@@ -280,7 +281,7 @@ pub struct TimeSeriesOptions {
 }
 
 impl TimeSeriesOptions {
-    pub fn new(key: &RedisString) -> Self {
+    pub fn new(key: &ValkeyString) -> Self {
         Self {
             metric_name: Some(key.to_string()),
             encoding: None,

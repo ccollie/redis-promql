@@ -1,8 +1,8 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{RwLock, RwLockWriteGuard};
+use std::sync::{Arc, RwLock, RwLockWriteGuard};
 use std::time::Duration;
-use redis_module::{ContextGuard, RedisString, ThreadSafeContext};
+use valkey_module::{ContextGuard, ValkeyString, ThreadSafeContext};
 use crate::index::RedisContext;
 use crate::module::commands::create_series_ex;
 use crate::module::get_timeseries_mut;
@@ -21,6 +21,8 @@ pub struct WriteQueue {
     max_queue_size: usize,
     closed: AtomicBool,
 }
+
+pub type WriteQueueRef = Arc<WriteQueue>;
 
 /// WriteQueueConfig is config for remote write.
 #[derive(Clone, Default, Debug)]
@@ -167,7 +169,7 @@ impl WriteQueue {
         writer.append(&mut remainder);
     }
 
-    fn create_series<'a>(&self, ctx: &'a RedisContext, key: &RedisString) -> AlertsResult<&'a mut TimeSeries> {
+    fn create_series<'a>(&self, ctx: &'a RedisContext, key: &ValkeyString) -> AlertsResult<&'a mut TimeSeries> {
         let options = TimeSeriesOptions::default();
         create_series_ex(ctx, key, options)
             .map_err(|e| AlertsError::Generic(format!("failed to create series: {:?}", e)))?;

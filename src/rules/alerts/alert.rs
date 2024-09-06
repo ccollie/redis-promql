@@ -51,9 +51,9 @@ impl FromStr for AlertState {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            value if value.eq_ignore_ascii_case(AlertState::Inactive::name()) => Ok(AlertState::Inactive),
-            value if value.eq_ignore_ascii_case(AlertState::Pending::name()) => Ok(AlertState::Pending),
-            value if value.eq_ignore_ascii_case(AlertState::Firing::name()) => Ok(AlertState::Firing),
+            value if value.eq_ignore_ascii_case("inactive") => Ok(AlertState::Inactive),
+            value if value.eq_ignore_ascii_case("pending") => Ok(AlertState::Pending),
+            value if value.eq_ignore_ascii_case("firing") => Ok(AlertState::Firing),
             _ => Err(format!("unknown alert state: {}", s)),
         }
     }
@@ -75,11 +75,11 @@ pub struct Alert {
     pub annotations: AHashMap<String, String>,
     /// state represents the current state of the Alert
     pub state: AlertState,
-    /// expr contains the expression that was executed to generate the Alert
+    /// the expression that was executed to generate the Alert
     pub expr: String,
-    /// active_at defines the moment of time when the Alert has become active
+    /// the moment of time when the Alert has become active
     pub active_at: Timestamp,
-    /// start defines the moment of time when the alert starts firing
+    /// the moment of time when the alert starts firing
     pub start: Timestamp,
     /// end defines the moment of time when the alert is set to expire
     pub end: Timestamp,
@@ -87,7 +87,7 @@ pub struct Alert {
     pub resolved_at: Timestamp,
     /// last_sent defines the moment when Alert was sent last time
     pub last_sent: Timestamp,
-    /// defines the moment when Alert::Firing was kept because of `keep_firing_for` instead of real alert
+    /// The moment when Alert::Firing was kept because of `keep_firing_for` instead of real alert
     pub keep_firing_since: Timestamp,
     /// value stores the value returned from evaluating expression from expr field
     pub value: f64,
@@ -158,7 +158,7 @@ impl Alert {
             relabelCfg.apply(&mut labels, 0);
         }
         labels.sort();
-        return labels;
+        labels
     }
 }
 
@@ -169,7 +169,7 @@ pub fn exec_template(
     tpl_data: &AlertTplData,
 ) -> AlertsResult<AHashMap<String, String>> {
     let tmpl = get_with_funcs(funcs_with_query(q))?;
-    return template_annotations(annotations, tpl_data, &tmpl);
+    template_annotations(annotations, tpl_data, &tmpl)
 }
 
 /// validate annotations for possible template error, uses empty data for template population

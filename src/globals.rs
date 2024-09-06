@@ -4,7 +4,7 @@ use metricsql_common::hash::IntMap;
 use metricsql_engine::prelude::{Context as QueryContext};
 use crate::index::{TimeSeriesIndex};
 use crate::provider::TsdbDataProvider;
-use redis_module::{raw, Context, RedisModule_GetSelectedDb};
+use valkey_module::{raw, Context};
 
 pub type TimeSeriesIndexMap = IntMap<u32, TimeSeriesIndex>;
 
@@ -26,14 +26,14 @@ pub(crate) fn set_query_context(ctx: QueryContext) {
     match QUERY_CONTEXT.set(ctx) {
         Ok(_) => {}
         Err(_) => {
-            // how to do this in redis context ?
+            // how to do this in Valkey context ?
             panic!("set query context failed");
         }
     }
 }
 
-pub unsafe fn get_current_db(ctx: *mut raw::RedisModuleCtx) -> u32 {
-    let db = RedisModule_GetSelectedDb.unwrap()(ctx);
+pub unsafe fn get_current_db(ctx: *mut raw::ValkeyModuleCtx) -> u32 {
+    let db = ValkeyModule_GetSelectedDb.unwrap()(ctx);
     db as u32
 }
 

@@ -1,7 +1,6 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::common::regex_util::PromRegex;
 use crate::relabel::actions::Action;
 use crate::relabel::is_default_regex_for_config;
 use crate::relabel::regex_parse::parse_regex;

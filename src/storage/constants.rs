@@ -1,3 +1,5 @@
+use std::mem::size_of;
+
 pub(crate) const U16_SIZE: usize = size_of::<u16>();
 pub(crate) const I64_SIZE: usize = size_of::<i64>();
 pub(crate) const U64_SIZE: usize = size_of::<u64>();

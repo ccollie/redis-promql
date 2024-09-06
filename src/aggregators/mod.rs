@@ -1,8 +1,8 @@
 // The code in this file is copied from
-// https://github.com/cryptorelay/redis-aggregation/tree/master
+// https://github.com/cryptorelay/Valkey-aggregation/tree/master
 // License: Apache License 2.0
 
-use redis_module::{RedisError, RedisString};
+use Valkey_module::{ValkeyError, ValkeyString};
 
 type Time = i64;
 type Value = f64;
@@ -247,7 +247,7 @@ impl AggStd {
         self.count = 0;
     }
     fn variance(&self) -> Value {
-        // ported from: https://github.com/RedisTimeSeries/RedisTimeSeries/blob/7911f43e2861472565b2aa61d8e91a9c37ec6cae/src/compaction.c
+        // ported from: https://github.com/ValkeyTimeSeries/ValkeyTimeSeries/blob/7911f43e2861472565b2aa61d8e91a9c37ec6cae/src/compaction.c
         //  var(X) = sum((x_i - E[X])^2)
         //  = sum(x_i^2) - 2 * sum(x_i) * E[X] + E^2[X]
         if self.count <= 1 {
@@ -394,23 +394,23 @@ pub enum Aggregator {
     VarP(AggVarP),
 }
 
-impl TryFrom<&RedisString> for Aggregator {
-    type Error = RedisError;
+impl TryFrom<&ValkeyString> for Aggregator {
+    type Error = ValkeyError;
 
-    fn try_from(value: &RedisString) -> Result<Self, Self::Error> {
+    fn try_from(value: &ValkeyString) -> Result<Self, Self::Error> {
         let str = value.to_string_lossy();
         str.as_str().try_into()
     }
 }
 
 impl TryFrom<&str> for Aggregator {
-    type Error = RedisError;
+    type Error = ValkeyError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         if let Some(agg) = Self::new(value) {
             return Ok(agg);
         }
-        Err(RedisError::Str("TSDB: unknown AGGREGATION type"))
+        Err(ValkeyError::Str("TSDB: unknown AGGREGATION type"))
     }
 }
 

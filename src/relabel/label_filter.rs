@@ -1,10 +1,8 @@
 use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Deref;
-
+use metricsql_common::prelude::match_handlers::StringMatchHandler;
 use serde::{Deserialize, Serialize};
-
-use crate::common::regex_util::PromRegex;
 use crate::storage::Label;
 
 // todo: borrow this from metricsql_parser
@@ -67,7 +65,7 @@ pub struct LabelFilter {
     pub value: String,
 
     // re contains compiled regexp for `=~` and `!~` op.
-    pub re: Option<PromRegex>,
+    pub re: Option<StringMatchHandler>,
 }
 
 impl PartialEq<LabelFilter> for LabelFilter {
@@ -80,19 +78,6 @@ impl PartialEq<LabelFilter> for LabelFilter {
 impl PartialOrd for LabelFilter {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
-    }
-}
-
-impl Ord for LabelFilter {
-    fn cmp(&self, other: &Self) -> Ordering {
-        let mut cmp = self.label.cmp(&other.label);
-        if cmp == Ordering::Equal {
-            cmp = self.value.cmp(&other.value);
-            if cmp == Ordering::Equal {
-                cmp = self.op.cmp(&other.op);
-            }
-        }
-        cmp
     }
 }
 
@@ -122,7 +107,7 @@ impl LabelFilter {
             // Special case for {non_existing_label=""}, which matches anything except of non-empty non_existing_label
             return self.value == "";
         }
-        return false;
+        false
     }
 
     fn match_regexp(&self, labels: &[Label]) -> bool {
@@ -134,16 +119,16 @@ impl LabelFilter {
                     continue;
                 }
                 label_name_matches += 1;
-                if re.is_match(&label.value) {
+                if re.matches(&label.value) {
                     return true;
                 }
             }
             if label_name_matches == 0 {
                 // Special case for {non_existing_label=~"something|"}, which matches empty non_existing_label
-                return re.is_match("");
+                return re.matches("");
             }
         }
-        return false;
+        false
     }
 }
 
@@ -192,10 +177,6 @@ impl LabelMatchers {
 
     pub fn push(&mut self, m: LabelFilter) {
         self.0.push(m);
-    }
-
-    pub fn sort(&mut self) {
-        self.0.sort();
     }
 
     pub fn iter(&self) -> impl Iterator<Item=&LabelFilter> {

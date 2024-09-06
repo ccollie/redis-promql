@@ -2,13 +2,13 @@
 use std::sync::atomic::{Ordering, AtomicBool};
 use std::sync::{Arc, mpsc};
 
-use ahash::{AHashMap, HashMap, HashMapExt};
+use ahash::{AHashMap, HashMapExt};
 use metricsql_common::hash::IntMap;
-use redis_module::{Context, RedisModuleTimerID};
+use valkey_module::{Context, RedisModuleTimerID};
 use tracing::info;
 use crate::common::current_time_millis;
 use crate::module::commands::RangeAlignment::Timestamp;
-use crate::rules::alerts::{Alert, Group, Notifier, Querier, QuerierBuilder, QuerierParams, WriteQueue};
+use crate::rules::alerts::{Group, Notifier, NotifierProviderFn, Querier, QuerierBuilder, QuerierParams, WriteQueue};
 use crate::rules::alerts::executor::Executor;
 
 /// Control messages sent to Group channel during evaluation
@@ -35,7 +35,7 @@ struct GroupMetaInner {
 pub struct GroupProcessor {
     redis_ctx: Context,
     pub groups: IntMap<u64, GroupMeta>,
-    pub notifiers: fn() -> Vec<Box<dyn Notifier>>,
+    pub notifiers: Arc<Vec<Box<dyn Notifier>>>,
     pub notifier_headers: AHashMap<String, String>,
     pub write_queue: Arc<WriteQueue>,
     pub querier_builder: Arc<dyn QuerierBuilder>,
@@ -54,14 +54,16 @@ fn delay_callback(ctx: &Context, data: String) {
 
 
 impl GroupProcessor {
-    pub fn new() -> Self {
+    pub fn new(ctx: Context, write_queue: Arc<WriteQueue>, querier_builder: Arc<dyn QuerierBuilder>
+    ) -> Self {
         let (tx, rx) = mpsc::channel::<GroupMessage>();
         Self {
+            redis_ctx: ctx,
             groups: IntMap::new(),
-            notifiers: (),
+            notifiers: Default::default(),
             notifier_headers: Default::default(),
-            write_queue: Arc::new(()),
-            querier_builder: Arc::new(()),
+            write_queue: Arc::clone(&write_queue),
+            querier_builder: Arc::clone(&querier_builder),
             is_stopped: Default::default(),
             receiver: rx,
             sender: tx,
@@ -72,12 +74,12 @@ impl GroupProcessor {
         loop {
             match self.receiver.recv() {
                 Ok(GroupMessage::Stop) => {
-                    info!("group processor {}: received stop signal");
+                    info!("group processor: received stop signal");
                     break;
                 }
                 Ok(GroupMessage::Update(group)) => {
                     // push to worker ???
-                    self.update(group);
+                    let _ = self.update(group);
                 }
                 Ok(GroupMessage::Tick(ts)) => {
                     self.handle_tick(ts);
@@ -102,7 +104,7 @@ impl GroupProcessor {
         }
     }
 
-    fn start_group(&mut self, group: &Group) {
+    pub fn start_group(&mut self, group: &Group) {
         // start group
         if self.is_stopped() {
             return;

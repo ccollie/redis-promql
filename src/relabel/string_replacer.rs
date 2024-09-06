@@ -1,6 +1,5 @@
 use dynamic_lru_cache::DynamicCache;
 use regex::Regex;
-use crate::common::regex_util::PromRegex;
 use crate::relabel::regex_parse::parse_regex;
 use crate::relabel::utils::get_regex_literal_prefix;
 
@@ -88,7 +87,7 @@ impl StringReplacer {
             return s.to_string();
         }
         // Slow path - handle the rest of cases.
-        return self.replace_string(s);
+        self.replace_string(s)
     }
 
     pub fn replace_string(&self, val: &str) -> String {

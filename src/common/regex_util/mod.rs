@@ -7,7 +7,8 @@ mod regexp_cache;
 mod prefix_cache;
 #[cfg(test)]
 mod tag_filters_test;
-mod match_handlers;
+mod simplify;
 
 pub use prom_regex::*;
 pub use regex_utils::*;
+pub use simplify::*;

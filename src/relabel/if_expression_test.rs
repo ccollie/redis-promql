@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod test {
-	use metricsql_engine::parse_metric_selector;
+	use metricsql_runtime::parse_metric_selector;
 	use crate::relabel::IfExpression;
 	use crate::relabel::utils::new_labels_from_string;
 
@@ -58,7 +58,7 @@ mod test {
 				}
 			};
 
-			let data2 = match serde_json::from_str(&ie2) {
+			let data2 = match serde_json::to_string(&ie2) {
 				Ok(data) => data,
 				Err(err) => {
 					panic!("cannot marshal ifExpression {s}: {:?}", err);

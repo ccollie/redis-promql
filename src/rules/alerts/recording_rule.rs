@@ -53,7 +53,7 @@ impl RecordingRule {
             metrics: Default::default(),
             ts_key: Default::default(),
         };
-        return rr;
+        rr
     }
 
     pub fn update(&mut self, rule: &RecordingRule) {
@@ -72,13 +72,21 @@ impl RecordingRule {
         for (k, v) in self.labels {
             labels.insert(k.clone(), v.clone());
         }
-        return new_time_series(&m.key, &m.values, &m.timestamps, labels);
+        new_time_series(&m.key, &m.values, &m.timestamps, labels)
     }
 
     fn run_query(&self, querier: &impl Querier, ts: Timestamp) -> AlertsResult<Vec<Metric>> {
-        querier
-            .query(&self.expr, ts)
-            .map_err(|e| AlertsError::QueryExecutionError(format!("{}: {:?}", self.expr, e)))
+        let values = querier.query(&self.expr, ts)?;
+        let mut metrics = Vec::with_capacity(values.len());
+        for v in values {
+            metrics.push(DatasourceMetric {
+                key: v.key.clone(),
+                labels: v.labels.clone(),
+                timestamps: v.timestamps.clone(),
+                values: v.values.clone(),
+            });
+        }
+        Ok(metrics)
     }
 }
 

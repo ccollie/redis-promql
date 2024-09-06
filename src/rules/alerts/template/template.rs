@@ -123,7 +123,7 @@ impl Metric {
 fn datasource_metrics_to_template_metrics(ms: &[DatasourceMetric]) -> Vec<Metric> {
     let mut mss = Vec::with_capacity(ms.len());
     for m in ms.iter() {
-        let mut labels_map = Labels::with_capacity(m.labels.len());
+        let mut labels_map = Labels::default();
         for label in m.labels.iter() {
             labels_map.insert(label.name.clone(), label.value.clone());
         }
@@ -133,7 +133,7 @@ fn datasource_metrics_to_template_metrics(ms: &[DatasourceMetric]) -> Vec<Metric
             value:     m.values[0]
         })
     }
-    return mss
+    mss
 }
 
 /// QueryFn is used to wrap a call to provider into simple-to-use function for templating functions.
@@ -313,7 +313,7 @@ gtmpl_fn!(fn get_label(label: &str, m: &Metric) -> Result<String, FuncError> {
 // value returns the value of the given metric.
 // usually used alongside with `query` template function.
 gtmpl_fn!(fn get_value(m: &Metric) -> Result<f64, FuncError> {
-    return Ok(m.value)
+    Ok(m.value)
 });
 
 // sortByLabel sorts the given metrics by provided label key

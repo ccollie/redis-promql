@@ -1,14 +1,13 @@
+use crate::common::{current_time_millis, METRIC_NAME_LABEL};
 use crate::rules::alerts::{AlertsError, AlertsResult, Querier};
 use crate::rules::types::{new_time_series, RawTimeSeries};
 use crate::rules::{Rule, RuleStateEntry, RuleType};
 use crate::storage::{Label, Timestamp};
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::sync::atomic::AtomicU64;
-use std::time::Duration;
 use ahash::{AHashMap, AHashSet};
 use metricsql_parser::label::Labels;
-use crate::common::{current_time_millis, METRIC_NAME_LABEL};
+use serde::{Deserialize, Serialize};
+use std::sync::atomic::AtomicU64;
+use std::time::Duration;
 
 const ERR_DUPLICATE: &str =
     "result contains metrics with the same labelset after applying rule labels.";
@@ -56,13 +55,29 @@ impl RecordingRule {
         for Label { name, value } in self.labels.iter() {
             labels.insert(name.clone(), value.clone());
         }
-        return new_time_series(m.key, &m.values, &m.timestamps, labels);
+        new_time_series(m.key, &m.values, &m.timestamps, labels)
     }
 
     fn run_query(&self, querier: &impl Querier, ts: Timestamp) -> AlertsResult<Vec<DatasourceMetric>> {
-        querier
-            .query(&self.expr, ts)
-            .map_err(|e| AlertsError::QueryExecutionError(format!("{}: {:?}", self.expr, e)))
+        let items =  querier.query(&self.expr, ts)?;
+        let metrics = items.into_iter().map(|m| {
+            let mut labels = AHashMap::with_capacity(m.labels.len() + 1);
+            for label in m.labels.iter() {
+                labels.insert(label.name.clone(), label.value.clone());
+            }
+            labels.insert(METRIC_NAME_LABEL.to_string(), self.name.to_string());
+            // override existing labels with configured ones
+            for Label { name, value } in self.labels.iter() {
+                labels.insert(name.clone(), value.clone());
+            }
+            DatasourceMetric {
+                key: m.key,
+                labels,
+                timestamps: m.timestamps,
+                values: m.values,
+            }
+        }).collect();
+        Ok(metrics)
     }
 }
 

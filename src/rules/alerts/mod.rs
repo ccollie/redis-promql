@@ -1,5 +1,4 @@
 mod alert;
-mod notifier;
 mod alerting_rule;
 mod constants;
 mod alert_manager;
@@ -12,9 +11,10 @@ mod recording_rule;
 mod replay;
 mod executor;
 mod group_processor;
+mod notifiers;
 
 pub use alert::*;
-pub use notifier::*;
+pub use notifiers::notifier::*;
 pub use alerting_rule::*;
 pub use constants::*;
 pub use alert_manager::*;

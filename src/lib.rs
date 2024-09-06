@@ -1,12 +1,12 @@
 #![feature(lazy_cell)]
 
 #[cfg(not(test))]
-use redis_module::alloc::RedisAlloc;
-use redis_module::{redis_module, Context as RedisContext, NotifyEvent};
-use redis_module_macros::config_changed_event_handler;
+use valkey_module::alloc::ValkeyAlloc;
+use valkey_module::{valkey_module, Context as RedisContext, NotifyEvent};
+use valkey_module_macros::config_changed_event_handler;
 
 extern crate get_size;
-extern crate redis_module_macros;
+extern crate valkey_module_macros;
 
 mod aggregators;
 mod common;
@@ -59,7 +59,7 @@ fn on_event(ctx: &RedisContext, _event_type: NotifyEvent, event: &str, key: &[u8
 #[cfg(not(test))]
 macro_rules! get_allocator {
     () => {
-        RedisAlloc
+        ValkeyAlloc
     };
 }
 
@@ -70,7 +70,7 @@ macro_rules! get_allocator {
     };
 }
 
-redis_module! {
+valkey_module! {
     name: MODULE_NAME,
     version: REDIS_PROMQL_VERSION,
     allocator: (get_allocator!(), get_allocator!()),

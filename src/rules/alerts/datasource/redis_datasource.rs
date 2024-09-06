@@ -44,7 +44,7 @@ pub struct RedisDatasource {
 impl RedisDatasource {
     /// construct a RedisDatasource with default values
     pub fn new(look_back: Duration, query_step: Duration) -> Self {
-        return RedisDatasource {
+        RedisDatasource {
             look_back,
             query_step,
             data_source_type: DataSourceType::Redis,
@@ -54,7 +54,7 @@ impl RedisDatasource {
             extra_params: Default::default(),
             extra_headers: Default::default(),
             debug: false,
-        };
+        }
     }
 
     /// apply_params - changes given querier params.
@@ -77,25 +77,27 @@ impl RedisDatasource {
             self.extra_headers.insert(key, value);
         }
         self.debug = params.debug;
-        return self;
+        self
     }
 
     fn get_instant_req_params(&self, query: String, timestamp: Timestamp) -> QueryParams {
         let timestamp = self.adjust_req_timestamp(timestamp);
-        let mut params = QueryParams::new(query, timestamp);
+        let mut params = QueryParams::default();
+        params.query = query;
+        params.start = timestamp;
+        params.end = timestamp;
+
         if !self.evaluation_interval.is_zero() {
             // set step as evaluation_interval by default always convert to seconds to keep
             // compatibility with older Prometheus versions. See https://github.com/VictoriaMetrics/VictoriaMetrics/issues/1943
             // -- eliminate this unwrap
-            let step = duration_to_chrono(&self.evaluation_interval);
-            params.step = Some(step);
+            params.step = duration_to_chrono(&self.evaluation_interval);
         }
         if !self.query_step.is_zero() {
             // override step with user-specified value
             // always convert to seconds to keep compatibility with older
             // Prometheus versions. See https://github.com/VictoriaMetrics/VictoriaMetrics/issues/1943
-            let step = duration_to_chrono(&self.query_step);
-            params.step = Some(step);
+            params.step = duration_to_chrono(&self.query_step);
         }
         params
     }
@@ -107,8 +109,12 @@ impl RedisDatasource {
                 .truncate(self.evaluation_interval)
                 .add(&self.evaluation_offset);
         }
-        let mut params = QueryParams::new(query, start);
+
+        let mut params = QueryParams::default();
+        params.query = query;
+        params.start = start;
         params.end = end;
+
         if !self.evaluation_interval.is_zero() {
             // set step as evaluationInterval by default
             // always convert to seconds to keep compatibility with older
@@ -185,5 +191,5 @@ impl QuerierBuilder for RedisDatasource {
 }
 
 fn duration_to_chrono(duration: &Duration) -> chrono::Duration {
-    return chrono::Duration::from_std(*duration).unwrap();
+    chrono::Duration::from_std(*duration).unwrap()
 }

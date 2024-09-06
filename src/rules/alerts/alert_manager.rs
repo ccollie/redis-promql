@@ -2,19 +2,15 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use ahash::{AHashMap, HashMap};
-use redis_module::Context;
+use valkey_module::Context;
 
 use crate::rules::alerts::{AlertsError, AlertsResult, Group, GroupConfig, Notifier, QuerierBuilder, WriteQueue};
 
 /// manager controls group states
 pub struct Manager {
     querier_builder: Box<dyn QuerierBuilder>,
-    notifiers: fn() -> Vec<Box<dyn Notifier>>,
-
+    notifiers: Arc<Vec<Box<dyn Notifier>>>,
     rw: Arc<WriteQueue>,
-    // remote read builder.
-    rr: Box<dyn QuerierBuilder>,
-
     labels: AHashMap<String, String>,
     groups: RwLock<AHashMap<u64, Group>>,
     evaluation_interval: Duration,
@@ -23,7 +19,7 @@ pub struct Manager {
 impl Manager {
 
     fn start(&mut self, ctx: &Context, groups_cfg: &[GroupConfig]) -> AlertsResult<()> {
-        return self.update(ctx, groups_cfg, true)
+        self.update(ctx, groups_cfg, true)
     }
 
     pub fn close(&mut self) -> AlertsResult<()> {
@@ -39,7 +35,7 @@ impl Manager {
         let id = group.id();
         let mut group = group;
         if restore {
-            group.start(ctx, self.notifiers, Arc::clone(&self.rw), self.rr)
+            group.start(ctx, self.notifiers, Arc::clone(&self.rw), self.querier_builder)
         } else {
             group.start(ctx, self.notifiers, Arc::clone(&self.rw), None)
         }
@@ -69,10 +65,7 @@ impl Manager {
             groups_registry.insert(ng.ID(), ng)
         }
 
-        if rr_present && self.rw == nil {
-            return Err(AlertsError::Configuration("config contains recording rules but `-remoteWrite.url` isn't set".to_string()))
-        }
-        if ar_present && self.notifiers == nil {
+        if ar_present && self.notifiers.is_empty() {
             return Err(AlertsError::Configuration("config contains alerting rules but neither `-notifier.url` nor `-notifier.config` nor `-notifier.blackhole` aren't set".to_string()))
         }
         struct UpdateItem<'a> {
