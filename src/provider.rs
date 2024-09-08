@@ -1,5 +1,4 @@
 use crate::storage::time_series::TimeSeries;
-use metricsql_runtime::provider::MetricDataProvider;
 use metricsql_runtime::{
     Deadline, MetricName, QueryResult, QueryResults, RuntimeResult, SearchQuery,
 };

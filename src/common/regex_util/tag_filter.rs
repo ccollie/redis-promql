@@ -1,13 +1,13 @@
 
 use crate::common::regex_util::prefix_cache::{PrefixCache, PrefixSuffix};
 use crate::common::regex_util::regexp_cache::{RegexpCache, RegexpCacheValue};
-use crate::common::regex_util::{get_match_func_for_or_suffixes, get_optimized_re_match_func, get_or_values, simplify};
+use crate::common::regex_util::{get_match_func_for_or_suffixes, get_or_values, simplify};
 use crate::common::METRIC_NAME_LABEL;
 use regex::{Error as RegexError, Regex};
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 use std::sync::{Arc, OnceLock};
-use metricsql_common::prelude::{FastRegexMatcher, FULL_MATCH_COST, LITERAL_MATCH_COST};
+use metricsql_common::prelude::{get_optimized_re_match_func, FastRegexMatcher, FULL_MATCH_COST, LITERAL_MATCH_COST};
 use metricsql_common::prelude::match_handlers::StringMatchHandler;
 
 /// TagFilters represents filters used for filtering tags.

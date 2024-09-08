@@ -1,4 +1,4 @@
-use redis_module::{Context, RedisError, RedisResult, RedisString};
+use valkey_module::{Context, ValkeyError, ValkeyResult, ValkeyString};
 pub(crate) use ts_db::*;
 pub(crate) use utils::*;
 use crate::storage::time_series::TimeSeries;
@@ -31,11 +31,11 @@ pub mod commands {
     pub(crate) use super::function_range::*;
 }
 
-pub(crate) fn get_timeseries_mut<'a>(ctx: &'a Context, key: &RedisString, must_exist: bool) -> RedisResult<Option<&'a mut TimeSeries>> {
+pub(crate) fn get_timeseries_mut<'a>(ctx: &'a Context, key: &ValkeyString, must_exist: bool) -> ValkeyResult<Option<&'a mut TimeSeries>> {
     let redis_key = ctx.open_key_writable(key.into());
     let result = redis_key.get_value::<TimeSeries>(&REDIS_PROMQL_SERIES_TYPE)?;
     if must_exist && result.is_none() {
-        return Err(RedisError::Str("ERR TSDB: the key is not a timeseries"));
+        return Err(ValkeyError::Str("ERR TSDB: the key is not a timeseries"));
     }
     Ok(result)
 }

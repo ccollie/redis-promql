@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
 use lru_time_cache::LruCache;
-use crate::common::regex_util::match_handlers::StringMatchHandler;
+use metricsql_common::prelude::match_handlers::StringMatchHandler;
 
 const DEFAULT_MAX_SIZE_BYTES: usize = 1024 * 1024 * 1024;
 const DEFAULT_CACHE_SIZE: usize = 100;

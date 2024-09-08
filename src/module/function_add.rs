@@ -1,9 +1,9 @@
 use crate::module::function_create::{create_series};
 use crate::module::{get_timeseries_mut, REDIS_PROMQL_SERIES_TYPE};
 use crate::storage::{DuplicatePolicy, TimeSeriesOptions};
-use redis_module::key::RedisKeyWritable;
-use redis_module::{Context, NextArg, RedisError, RedisResult, RedisString, RedisValue};
+use valkey_module::{Context, NextArg, ValkeyError, ValkeyResult, ValkeyString, ValkeyValue};
 use ahash::AHashMap;
+use valkey_module::key::ValkeyKeyWritable;
 use crate::arg_parse::{parse_duration_arg, parse_number_with_unit, parse_timestamp};
 
 const CMD_ARG_RETENTION: &str = "RETENTION";
@@ -13,7 +13,7 @@ const CMD_ARG_CHUNK_SIZE: &str = "CHUNK_SIZE";
 const CMD_ARG_LABELS: &str = "LABELS";
 const CMD_ARG_METRIC_NAME: &str = "METRIC_NAME";
 
-pub fn add(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+pub fn add(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
     let mut args = args.into_iter().skip(1);
 
     let key = args.next_arg()?;
@@ -26,7 +26,7 @@ pub fn add(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     if let Some(series) = series {
         args.done()?;
         series.add(timestamp, value, None)?;
-        return Ok(RedisValue::Integer(timestamp));
+        return Ok(ValkeyValue::Integer(timestamp));
     }
 
     while let Ok(arg) = args.next_str() {
@@ -36,7 +36,7 @@ pub fn add(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
                 if let Ok(val) = parse_duration_arg(&next) {
                     options.retention(val);
                 } else {
-                    return Err(RedisError::Str("ERR invalid RETENTION value"));
+                    return Err(ValkeyError::Str("ERR invalid RETENTION value"));
                 }
             }
             arg if arg.eq_ignore_ascii_case(CMD_ARG_DEDUPE_INTERVAL) => {
@@ -44,7 +44,7 @@ pub fn add(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
                 if let Ok(val) = parse_duration_arg(&next) {
                     options.dedupe_interval = Some(val);
                 } else {
-                    return Err(RedisError::Str("ERR invalid DEDUPE_INTERVAL value"));
+                    return Err(ValkeyError::Str("ERR invalid DEDUPE_INTERVAL value"));
                 }
             }
             arg if arg.eq_ignore_ascii_case(CMD_ARG_CHUNK_SIZE) => {
@@ -52,7 +52,7 @@ pub fn add(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
                 if let Ok(val) = parse_number_with_unit(&next) {
                     options.chunk_size(val as usize);
                 } else {
-                    return Err(RedisError::Str("ERR invalid CHUNK_SIZE value"));
+                    return Err(ValkeyError::Str("ERR invalid CHUNK_SIZE value"));
                 }
             }
             arg if arg.eq_ignore_ascii_case(CMD_ARG_DUPLICATE_POLICY) => {
@@ -60,7 +60,7 @@ pub fn add(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
                 if let Ok(policy) = DuplicatePolicy::try_from(next) {
                     options.duplicate_policy(policy);
                 } else {
-                    return Err(RedisError::Str("ERR invalid DUPLICATE_POLICY"));
+                    return Err(ValkeyError::Str("ERR invalid DUPLICATE_POLICY"));
                 }
             }
             arg if arg.eq_ignore_ascii_case(CMD_ARG_LABELS) => {
@@ -73,7 +73,7 @@ pub fn add(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
             }
             _ => {
                 let msg = format!("ERR invalid argument '{}'", arg);
-                return Err(RedisError::String(msg));
+                return Err(ValkeyError::String(msg));
             }
         };
     }
@@ -81,8 +81,8 @@ pub fn add(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let mut ts = create_series(&key, options, ctx)?;
     ts.add(timestamp, value, None)?;
 
-    let redis_key = RedisKeyWritable::open(ctx.ctx, &key);
-    redis_key.set_value(&REDIS_PROMQL_SERIES_TYPE, ts)?;
+    let valkey_key = ValkeyKeyWritable::open(ctx.ctx, &key);
+    valkey_key.set_value(&REDIS_PROMQL_SERIES_TYPE, ts)?;
 
-    return Ok(RedisValue::Integer(timestamp));
+    Ok(ValkeyValue::Integer(timestamp))
 }

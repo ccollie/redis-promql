@@ -1033,11 +1033,9 @@ action: replace
         let mut rc: RelabelConfig = Default::default();
         rc.action = RelabelAction::LabelDrop;
         rc.regex = Some(Regex::new(pattern).unwrap());
-        let prc = parse_relabel_config(rc)
+        parse_relabel_config(rc)
             .map_err(|err| format!("cannot parse pattern {:?}: {}", pattern, err))
-            .unwrap();
-
-        return prc;
+            .unwrap()
     }
 
     fn test_parsed_relabel_configs_apply_for_multiple_series() {
