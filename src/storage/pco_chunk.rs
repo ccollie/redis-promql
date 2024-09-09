@@ -11,10 +11,10 @@ use crate::storage::{DuplicatePolicy, Sample, SeriesSlice, DEFAULT_CHUNK_SIZE_BY
 use metricsql_encoding::encoders::pco::{decode as pco_decode, encode as pco_encode, encode_with_options as pco_encode_with_options, CompressorConfig};
 use valkey_module::raw;
 
-const F64_SIZE: usize = size_of::<f64>();
-const I64_SIZE: usize = size_of::<i64>();
+static  F64_SIZE: usize = size_of::<f64>();
+static  I64_SIZE: usize = size_of::<i64>();
 
-const SAMPLE_SIZE: usize = F64_SIZE + I64_SIZE;
+static  SAMPLE_SIZE: usize = F64_SIZE + I64_SIZE;
 
 
 /// items above this count will cause value and timestamp encoding/decoding to happen in parallel

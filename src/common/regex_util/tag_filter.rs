@@ -284,6 +284,7 @@ fn matcher_size_bytes(m: &StringMatchHandler) -> usize {
             size_of::<fn(&str, &str) -> bool>()
         }
         Regex(r) => r.get_size(),
+        _ => 0,
     };
     base + extra
 }
@@ -330,7 +331,7 @@ fn compile_regexp_ex(expr: &str) -> Result<RegexpCacheValue, String> {
     let (matcher, cost) =
         get_optimized_re_match_func(&expr)
             .map_err(|_| {
-                return format!("cannot build regexp from {}", expr);
+                format!("cannot build regexp from {}", expr)
             })?;
 
     // heuristic for rcv in-memory size
