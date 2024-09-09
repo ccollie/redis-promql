@@ -1,6 +1,6 @@
-# ValkeyPromQL
+# VKMetrics
 
-Valkey PromQL is a module providing a [Prometheus](https://prometheus.io/docs/prometheus/latest/querying/api/#querying-metadata)-like API over timeseries data.
+VKMetrics is a module providing a [Prometheus](https://prometheus.io/docs/prometheus/latest/querying/api/#querying-metadata)-like API over timeseries data.
 Add your data and query it using [PromQL](https://prometheus.io/docs/prometheus/latest/querying/basics/).
 
 Currently supported are [Instant Queries](https://prometheus.io/docs/prometheus/latest/querying/basics/#instant-vector-selectors) and [Range Queries](https://prometheus.io/docs/prometheus/latest/querying/basics/#range-vector-selectors),
@@ -13,11 +13,9 @@ as well as basic [Metadata](https://prometheus.io/docs/prometheus/latest/queryin
 
 ## Caveats
 - Is highly experimental and not yet ready for production use
-- The library does up-front query optimization and caching, so one-off ad-hoc queries are not as fast as repeated queries.
+- The library does up-front query optimization and caching, so one-off ad-hoc queries are not as fast as repeated queries. These behaviours will be made configurable in future releases.
 
-## Give it a try
-
-After you setup RedisPromQL, you can interact with it using redis-cli.
+## Quick Example
 
 Here we'll create a time series representing sensor temperature measurements.
 After you create the time series, you can send temperature measurements.
@@ -304,6 +302,9 @@ PROM.LABEL-VALUES job
    ]
 }
 ```
+
+## Acknowledgements
+This underlying library this project uses originated as a heavily modded `rust` port of [VictoriaMetrics](https://victoriametrics.com).
 
 ## License
 RedisPromQL is licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
