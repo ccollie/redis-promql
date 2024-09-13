@@ -1,15 +1,28 @@
 #!/bin/bash
 
 # [[ $VERBOSE == 1 ]] && set -x
+os_type=$(uname)
+MODULE_EXT=".so"
+if [[ "$os_type" == "Darwin" ]]; then
+  MODULE_EXT=".dylib"
+elif [[ "$os_type" == "Linux" ]]; then
+  MODULE_EXT=".so"
+elif [[ "$os_type" == "Windows" ]]; then
+  MODULE_EXT=".dll"
+else
+  echo "Unsupported OS type: $os_type"
+  exit 1
+fi
 
 PROGNAME="${BASH_SOURCE[0]}"
 HERE="$(cd "$(dirname "$PROGNAME")" &>/dev/null && pwd)"
-ROOT=$(cd $HERE/../.. && pwd)
-READIES=$ROOT/deps/readies
+ROOT=$(cd $HERE/../../.. && pwd)
+MODULE="$ROOT/target/debug/libredis_promql${MODULE_EXT}"
 
+echo "HERE=$HERE, ROOT=$ROOT, MODULE_PATH=$MODULE"
 export PYTHONUNBUFFERED=1
 
-cd $HERE
+# cd $HERE
 
 #----------------------------------------------------------------------------------------------
 
@@ -104,11 +117,11 @@ macos_stop() {
 
 stop() {
 	trap - SIGINT
-	if [[ $OS == linux ]]; then
-		linux_stop
-	elif [[ $OS == macos ]]; then
-		macos_stop
-	fi
+	if [[ "$os_type" == "Darwin" ]]; then
+    macos_stop
+  elif [[ "$os_type" == "Linux" ]]; then
+    linux_stop
+  fi
 	exit 1
 }
 
@@ -273,7 +286,6 @@ EXT_HOST=${EXT_HOST:-127.0.0.1}
 EXT_PORT=${EXT_PORT:-6379}
 
 PID=$$
-OS=$($READIES/bin/platform --os)
 
 #---------------------------------------------------------------------------------- Tests scope
 MODULE="${MODULE:-$1}"
@@ -304,7 +316,7 @@ if [[ $PLATFORM_MODE == 1 ]]; then
 	CLEAR_LOGS=0
 	NOFAIL=1
 fi
-STATFILE=${STATFILE:-$ROOT/bin/artifacts/tests/status}
+STATFILE=${STATFILE:-$ROOT/tests/integration/status}
 
 #---------------------------------------------------------------------------------- Parallelism
 
@@ -313,7 +325,7 @@ STATFILE=${STATFILE:-$ROOT/bin/artifacts/tests/status}
 PARALLEL=${PARALLEL:-1}
 
 # due to Python "Can't pickle local object" problem in RLTest
-[[ $OS == macos ]] && PARALLEL=0
+[[ "$os_type" == "Darwin" ]] && PARALLEL=0
 
 [[ $EXT == 1 || $EXT == run || $BB == 1 || $GDB == 1 ]] && PARALLEL=0
 
