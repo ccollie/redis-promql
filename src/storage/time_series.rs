@@ -3,12 +3,11 @@ use super::{
     validate_chunk_size,
     Chunk,
     ChunkCompression,
-    Label,
     Sample,
     TimeSeriesChunk,
     TimeSeriesOptions
 };
-use crate::common::types::{PooledTimestampVec, PooledValuesVec, Timestamp};
+use crate::common::types::{Label, PooledTimestampVec, PooledValuesVec, Timestamp};
 use crate::error::{TsdbError, TsdbResult};
 use crate::storage::constants::{DEFAULT_CHUNK_SIZE_BYTES, SPLIT_FACTOR};
 use crate::storage::timestamps_filter_iterator::TimestampsFilterIterator;

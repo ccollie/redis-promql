@@ -2,10 +2,9 @@ use crate::error::TsdbResult;
 use crate::module::{with_timeseries, VKM_SERIES_TYPE};
 use crate::storage::time_series::TimeSeries;
 use crate::storage::utils::format_prometheus_metric_name;
-use crate::storage::Label;
 use metricsql_common::hash::IntMap;
 use metricsql_parser::prelude::{LabelFilter, LabelFilterOp, Matchers};
-use metricsql_runtime::METRIC_NAME_LABEL;
+use metricsql_runtime::types::METRIC_NAME_LABEL;
 use papaya::HashMap;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
@@ -13,6 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{RwLock, RwLockReadGuard};
 use croaring::Bitmap64;
 use valkey_module::{Context, ValkeyString, ValkeyValue};
+use crate::common::types::Label;
 
 /// Type for the key of the index. Use instead of `String` because Valkey keys are binary safe not utf8 safe.
 pub type IndexKeyType = Box<[u8]>;
