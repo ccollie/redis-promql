@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use crate::common::METRIC_NAME_LABEL;
 use crate::globals::with_timeseries_index;
 use crate::index::IndexInner;
@@ -35,7 +36,7 @@ pub fn stats(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
     with_timeseries_index(ctx, |index| {
         let inner = index.get_inner();
 
-        let series_count = inner.label_kv_to_ts.len();
+        let series_count = index.series_count();
 
         let (series_count_by_metric_name,
             label_value_count_by_label_name,
@@ -85,31 +86,30 @@ fn append_key_value(map: &mut Vec<ValkeyValue>, key: &str, value: ValkeyValue) {
 
 fn get_series_count_by_metric_name(inner: &RwLockReadGuard<IndexInner>, limit: usize) -> ValkeyValue {
     let prefix = format!("{METRIC_NAME_LABEL}=");
-    let items: Vec<_> = inner.label_kv_to_ts
-        .range(prefix..)
+    let prefix_len = prefix.len();
+    let items: Vec<_> = inner.label_index
+        .prefix(prefix.as_bytes())
         .filter_map(|(key,  map)| {
-            if let Some((_, value)) = key.split_once('=') {
-                Some((value, map.cardinality() as usize)) // todo: can this overflow?
-            } else {
-                None
-            }
+            let key = String::from_utf8_lossy(&key[prefix_len..]);
+            Some((key, map.cardinality() as usize)) // todo: can this overflow?
         })
         .take(limit)
         .collect();
 
     let arr: Vec<ValkeyValue> = items.into_iter().map(|(name, count)| {
         let mut res: HashMap<ValkeyValueKey, ValkeyValue> = HashMap::with_capacity(1);
-        res.insert(name.into(), count.into());
+        res.insert(name.as_ref().into(), count.into());
         ValkeyValue::Map(res)
     }).collect();
     ValkeyValue::Array(arr)
 }
 
 fn get_label_value_count_by_label_name(inner: &RwLockReadGuard<IndexInner>, limit: usize) -> ValkeyValue {
-    let items = inner.label_kv_to_ts
+    let items = inner.label_index
         .iter()
         .filter_map(|(key,  _)| {
-            if let Some((name, _)) = key.split_once('=') {
+            if let Some(index) = key.iter().position(|x| *x == b'=') {
+                let name = String::from_utf8_lossy(&key[..index]);
                 Some(name)
             } else {
                 None
@@ -117,14 +117,14 @@ fn get_label_value_count_by_label_name(inner: &RwLockReadGuard<IndexInner>, limi
         });
 
     let capacity = if limit < 100 { limit } else { 10 }; // ??
-    let mut current = SENTINEL_VALUE;
+    let mut current = Cow::Borrowed(SENTINEL_VALUE);
     let mut count: usize = 0;
     let mut arr: Vec<ValkeyValue> = Vec::with_capacity(capacity);
 
     for name in items {
         count += 1;
-        if current != name && current != SENTINEL_VALUE {
-            append_key_value(&mut arr, current, count.into());
+        if current != name && *current != *SENTINEL_VALUE {
+            append_key_value(&mut arr, &current, count.into());
             if arr.len() >= limit {
                 break;
             }
@@ -137,11 +137,12 @@ fn get_label_value_count_by_label_name(inner: &RwLockReadGuard<IndexInner>, limi
 }
 
 fn get_series_count_by_label_pair(inner: &RwLockReadGuard<IndexInner>, limit: usize) -> ValkeyValue {
-    let items: Vec<_> = inner.label_kv_to_ts
+    let items: Vec<_> = inner.label_index
         .iter()
         .filter_map(|(key,  map)| {
-            if let Some((name, value)) = key.split_once('=') {
-                Some((ValkeyValueKey::from(format!("{}={}", name, value)), map.cardinality() as usize))
+            if key.iter().position(|x| *x == b'=').is_some() {
+                let key = String::from_utf8_lossy(key);
+                Some((key, map.cardinality() as usize))
             } else {
                 None
             }
@@ -151,17 +152,20 @@ fn get_series_count_by_label_pair(inner: &RwLockReadGuard<IndexInner>, limit: us
 
     let arr: Vec<ValkeyValue> = items.into_iter().map(|(name, count)| {
         let mut res: HashMap<ValkeyValueKey, ValkeyValue> = HashMap::with_capacity(1);
-        res.insert(name, count.into());
+        res.insert(name.as_ref().into(), count.into());
         ValkeyValue::Map(res)
     }).collect();
     ValkeyValue::Array(arr)
 }
 
 fn get_memory_in_bytes_by_label_pair(inner: &RwLockReadGuard<IndexInner>, limit: usize) -> ValkeyValue {
-    let items = inner.label_kv_to_ts
+    let items = inner.label_index
         .iter()
         .filter_map(|(key,  map)| {
-            if let Some((name, value)) = key.split_once('=') {
+            if let Some(pos) = key.iter().position(|x| *x == b'=') {
+                let name = String::from_utf8_lossy(&key[..pos]);
+                let value = String::from_utf8_lossy(&key[pos + 1..]);
+
                 // since we currently also store labels with the timeseries, we need to account for that
                 // hopefully we can use an interner to reduce this overhead
                 let series_count = map.cardinality() as usize;
@@ -172,18 +176,18 @@ fn get_memory_in_bytes_by_label_pair(inner: &RwLockReadGuard<IndexInner>, limit:
         });
 
     let capacity = if limit < 100 { limit } else { 10 }; // ??
-    let mut current = SENTINEL_VALUE;
+    let mut current = SENTINEL_VALUE.to_string();
     let mut acc: usize = 0;
     let mut arr: Vec<ValkeyValue> = Vec::with_capacity(capacity);
 
     for (key, sum) in items {
         acc += sum;
         if key != SENTINEL_VALUE && current != key {
-            append_key_value(&mut arr, current, acc.into());
+            append_key_value(&mut arr, &current, acc.into());
             if arr.len() >= limit {
                 break;
             }
-            current = key;
+            current = key.to_string();
             acc = 0;
         }
     }
