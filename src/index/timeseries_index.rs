@@ -1,5 +1,6 @@
 use crate::common::types::Label;
 use crate::error::TsdbResult;
+use crate::index::filters::{get_ids_by_matchers_optimized, process_iterator};
 use crate::module::{with_timeseries, VKM_SERIES_TYPE};
 use crate::storage::time_series::TimeSeries;
 use crate::storage::utils::format_prometheus_metric_name;
@@ -14,6 +15,7 @@ use std::fmt::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{RwLock, RwLockReadGuard};
 use valkey_module::{Context, ValkeyString, ValkeyValue};
+use valkey_module::redisvalue::ValkeyValueKey;
 
 /// Type for the key of the index. Use instead of `String` because Valkey keys are binary safe not utf8 safe.
 pub type IndexKeyType = Box<[u8]>;
@@ -23,7 +25,7 @@ pub type TimeSeriesIndexMap = HashMap<u32, TimeSeriesIndex>;
 
 // label
 // label=value
-type ARTBitmap = blart::TreeMap<Box<[u8]>, Bitmap64>;
+pub type ARTBitmap = blart::TreeMap<Box<[u8]>, Bitmap64>;
 
 // todo: in on_load, we need to set this to the last id + 1
 static TIMESERIES_ID_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -49,10 +51,22 @@ pub fn reset_timeseries_id_after_load() -> u64 {
 }
 
 #[derive(Clone, Copy)]
-enum SetOperation {
+pub(super) enum SetOperation {
     Union,
     Intersection,
 }
+
+impl PartialEq for SetOperation {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (SetOperation::Union, SetOperation::Union) => true,
+            (SetOperation::Intersection, SetOperation::Intersection) => true,
+            _ => false,
+        }
+    }
+}
+
+const METRIC_NAME_PREFIX: &str = "__name__=";
 
 #[derive(Default, Debug)]
 pub(crate) struct IndexInner {
@@ -163,6 +177,9 @@ impl IndexInner {
     }
 
     fn index_series_by_label(&mut self, ts_id: u64, label: &str, value: &str) {
+        let key_value = format!("{}={}", label, value);
+        self.add_or_insert(&key_value, ts_id);
+
         // here were associating a series with a bare label name, so we don't need to do this for __name__
         if label != METRIC_NAME_LABEL {
             if self.add_or_insert(label, ts_id) {
@@ -170,9 +187,6 @@ impl IndexInner {
                 self.label_count += 1;
             }
         }
-
-        let key_value = format!("{}={}", label, value);
-        self.add_or_insert(&key_value, ts_id);
     }
 
     pub(super) fn get_ids_by_metric_name(&self, metric: &str) -> Option<&Bitmap64> {
@@ -288,7 +302,7 @@ impl TimeSeriesIndex {
     /// stored at requests:http:total:200
     pub fn get_id_by_name_and_labels(&self, metric: &str, labels: &[Label]) -> TsdbResult<Option<u64>> {
         let inner = self.inner.read().unwrap();
-        let key = format!("{}={}", METRIC_NAME_LABEL, metric);
+        let key = format!("{METRIC_NAME_PREFIX}{metric}");
         if let Some(bmp) = inner.label_index.get(key.as_bytes()) {
             let mut key: String = String::new();
             let mut acc: Bitmap64 = bmp.clone(); // wish we didn't have to clone here
@@ -329,10 +343,9 @@ impl TimeSeriesIndex {
         }
     }
 
-    // todo: store Arc<Bitmap64> in the index
     pub(super) fn get_ids_by_metric_name(&self, metric: &str) -> Bitmap64 {
         let inner = self.inner.read().unwrap();
-        let key = format!("{}={}", METRIC_NAME_LABEL, metric);
+        let key = format!("{METRIC_NAME_PREFIX}{metric}");
         if let Some(bmp) = inner.label_index.get(key.as_bytes()) {
             bmp.clone()
         } else {
@@ -340,7 +353,7 @@ impl TimeSeriesIndex {
         }
     }
 
-    pub(crate) fn rename_series(&self, ctx: &Context, new_key: &ValkeyString) -> bool {
+    pub fn rename_series(&self, ctx: &Context, new_key: &ValkeyString) -> bool {
         let mut inner = self.inner.write().unwrap();
         with_timeseries(ctx, new_key, | series | {
             let id = series.id;
@@ -383,7 +396,7 @@ impl TimeSeriesIndex {
 
     pub fn is_key_indexed(&self, key: &str) -> bool {
         let inner = self.inner.read().unwrap();
-        let key = format!("{}={}", METRIC_NAME_LABEL, key);
+        let key = format!("{METRIC_NAME_PREFIX}{key}");
         inner.label_index.contains_key(key.as_bytes())
     }
 
@@ -416,10 +429,38 @@ impl TimeSeriesIndex {
         dest
     }
 
+    // Compiles the given matchers to optimized matchers. Incurs some setup overhead, so use this in the following cases: s
+    // * the queries are complex.
+    // * the labels being matched have high cardinality
+    pub fn get_ids_by_matchers_optimized(&self, matchers: &Matchers) -> Bitmap64 {
+        let inner = self.inner.read().unwrap();
+        let mut dest = Bitmap64::new();
+        get_ids_by_matchers_optimized(&inner.label_index, matchers, &mut dest);
+        dest
+    }
+
+    // todo: just return the ValkeyString instead of string
+    pub fn get_series_count_by_metric_name(&self, limit: usize, start: Option<&str>) -> Vec<(ValkeyValueKey, usize)> {
+        let inner = self.inner.read().unwrap();
+        let prefix = format!("{METRIC_NAME_PREFIX}{}", start.unwrap_or(""));
+        let prefix_len = prefix.len();
+        inner.label_index
+            .prefix(prefix.as_bytes())
+            .filter_map(|(key,  map)| {
+                // keys and values are expected to be utf-8. If we panic, we have bigger issues
+                let key = String::from_utf8_lossy(&key[prefix_len..]).to_string();
+                let k = ValkeyValueKey::from(key);
+                Some((k, map.cardinality() as usize))
+            })
+            .take(limit)
+            .collect()
+    }
+
     pub(crate) fn get_inner(&self) -> RwLockReadGuard<IndexInner> {
         self.inner.read().unwrap()
     }
 }
+
 
 fn filter_by_label_value_predicate(
     label_index: &ARTBitmap,
@@ -430,7 +471,7 @@ fn filter_by_label_value_predicate(
 ) {
     let prefix = format!("{label}=");
     let start_pos = prefix.len();
-    let mut iter = label_index
+    let iter = label_index
         .prefix(prefix.as_bytes())
         .filter_map(|(key, map)| {
             let value = String::from_utf8_lossy(&key[start_pos..]);
@@ -441,26 +482,7 @@ fn filter_by_label_value_predicate(
             }
         });
 
-    match op {
-        SetOperation::Union => {
-            for map in iter {
-                dest.or_inplace(map);
-            }
-        }
-        SetOperation::Intersection => {
-            if dest.is_empty() {
-                // we need at least one set to intersect with
-                if let Some(first) = iter.next() {
-                    dest.or_inplace(first);
-                } else {
-                    return;
-                }
-            }
-            for map in iter {
-                dest.and_inplace(map);
-            }
-        }
-    }
+    process_iterator(iter, dest, op);
 }
 
 fn get_label_value_bitmap(
@@ -565,16 +587,17 @@ fn find_ids_by_matchers(
 ) {
     let mut key_buf = String::with_capacity(64);
 
+    if !matchers.matchers.is_empty() {
+        find_ids_by_multiple_filters(label_index, &matchers.matchers, dest, SetOperation::Intersection, &mut key_buf);
+    }
+
     if !matchers.or_matchers.is_empty() {
         for filter in matchers.or_matchers.iter() {
             find_ids_by_multiple_filters(label_index, filter, dest, SetOperation::Union, &mut key_buf);
         }
     }
-
-    if !matchers.matchers.is_empty() {
-        find_ids_by_multiple_filters(label_index, &matchers.matchers, dest, SetOperation::Intersection, &mut key_buf);
-    }
 }
+
 
 #[cfg(test)]
 mod tests {}

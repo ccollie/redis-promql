@@ -1,8 +1,7 @@
-use std::borrow::Cow;
-use crate::common::METRIC_NAME_LABEL;
 use crate::globals::with_timeseries_index;
-use crate::index::IndexInner;
+use crate::index::{IndexInner, TimeSeriesIndex};
 use crate::module::arg_parse::parse_integer_arg;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::RwLockReadGuard;
 use valkey_module::redisvalue::ValkeyValueKey;
@@ -56,7 +55,7 @@ pub fn stats(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
         //     (series_count, label_value_counts, label_pair_count, memory_bytes)
         else {
             (
-                get_series_count_by_metric_name(&inner, limit),
+                get_series_count_by_metric_name(index, limit),
                 get_label_value_count_by_label_name(&inner, limit),
                 get_series_count_by_label_pair(&inner, limit),
                 get_memory_in_bytes_by_label_pair(&inner, limit),
@@ -84,21 +83,11 @@ fn append_key_value(map: &mut Vec<ValkeyValue>, key: &str, value: ValkeyValue) {
 }
 
 
-fn get_series_count_by_metric_name(inner: &RwLockReadGuard<IndexInner>, limit: usize) -> ValkeyValue {
-    let prefix = format!("{METRIC_NAME_LABEL}=");
-    let prefix_len = prefix.len();
-    let items: Vec<_> = inner.label_index
-        .prefix(prefix.as_bytes())
-        .filter_map(|(key,  map)| {
-            let key = String::from_utf8_lossy(&key[prefix_len..]);
-            Some((key, map.cardinality() as usize)) // todo: can this overflow?
-        })
-        .take(limit)
-        .collect();
-
+fn get_series_count_by_metric_name(index: &TimeSeriesIndex, limit: usize) -> ValkeyValue {
+    let items = index.get_series_count_by_metric_name(limit, None);
     let arr: Vec<ValkeyValue> = items.into_iter().map(|(name, count)| {
         let mut res: HashMap<ValkeyValueKey, ValkeyValue> = HashMap::with_capacity(1);
-        res.insert(name.as_ref().into(), count.into());
+        res.insert(name, count.into());
         ValkeyValue::Map(res)
     }).collect();
     ValkeyValue::Array(arr)
