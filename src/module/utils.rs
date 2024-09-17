@@ -13,7 +13,7 @@ use valkey_module::{
 };
 
 use crate::common::current_time_millis;
-use crate::common::types::Timestamp;
+use crate::common::types::{Label, Timestamp};
 use crate::config::get_global_settings;
 use crate::module::arg_parse::{parse_timestamp_range_value, TimestampRangeValue};
 
