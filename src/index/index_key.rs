@@ -2,7 +2,7 @@ use std::fmt::Write;
 use std::borrow::Borrow;
 use std::fmt::Display;
 use std::ops::Deref;
-use blart::AsBytes;
+use blart::{AsBytes, BytesMapping};
 use metricsql_runtime::prelude::METRIC_NAME_LABEL;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -16,30 +16,30 @@ impl IndexKey {
     }
 
     pub fn for_metric_name(metric_name: &str) -> Self {
-        let value = get_key_for_metric_name(metric_name);
-        Self::new(&value)
+        Self::for_label_value(METRIC_NAME_LABEL, metric_name)
     }
 
     pub fn for_label_value(label_name: &str, value: &str) -> Self {
-        let value = get_key_for_label_value(label_name, value);
-        Self::new(&value)
+        Self::from(format!("{label_name}={value}"))
     }
 
     pub fn as_str(&self) -> &str {
-        std::str::from_utf8(&self.0[..self.0.len() - 1]).unwrap()
+        let buf = &self.0[..self.0.len()-1];
+        std::str::from_utf8(buf).unwrap()
     }
 
     pub fn split(&self) -> Option<(&str, &str)> {
         let key = self.as_str();
         if let Some(index) = key.find('=') {
-            Some((&key[..index], &key[index + 1..]))
+            Some((&key[..index], &key[index + 1..self.len()]))
         } else {
             None
         }
     }
 
     pub(super) fn sub_string(&self, start: usize) -> &str {
-        std::str::from_utf8(&self.0[start..self.0.len() - 1]).unwrap()
+        let buf = &self.0[start .. self.0.len() - 1];
+        std::str::from_utf8(buf).unwrap()
     }
 
     pub fn into_vec(self) -> Vec<u8> {
@@ -100,11 +100,18 @@ impl From<&str> for IndexKey {
     }
 }
 
+impl From<String> for IndexKey {
+    fn from(key: String) -> Self {
+        Self::from(key.as_str())
+    }
+}
+
 impl Borrow<[u8]> for IndexKey {
     fn borrow(&self) -> &[u8] {
         self.as_bytes()
     }
 }
+
 
 pub fn format_key_for_label_prefix(dest: &mut String, label_name: &str) {
     dest.clear();
@@ -116,7 +123,7 @@ pub fn format_key_for_label_value(dest: &mut String, label_name: &str, value: &s
     dest.clear();
     // according to https://github.com/rust-lang/rust/blob/1.47.0/library/alloc/src/string.rs#L2414-L2427
     // write! will not return an Err, so the unwrap is safe
-    write!(dest, "{label_name}={value}{SENTINEL}").unwrap();
+    write!(dest, "{label_name}={value}\0").unwrap();
 }
 
 pub fn format_key_for_metric_name(dest: &mut String, metric_name: &str) {
@@ -137,4 +144,145 @@ pub fn get_key_for_label_value(label_name: &str, value: &str) -> String {
 
 pub fn get_key_for_metric_name(metric_name: &str) -> String {
     get_key_for_label_value(METRIC_NAME_LABEL, metric_name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blart::TreeMap;
+
+    #[test]
+    fn test_new() {
+        let key = IndexKey::new("test_key");
+        assert_eq!(key.as_str(), "test_key");
+    }
+
+    #[test]
+    fn test_for_metric_name() {
+        let key = IndexKey::for_metric_name("metric");
+        assert_eq!(key.as_str(), "__name__=metric");
+    }
+
+    #[test]
+    fn test_for_label_value() {
+        let key = IndexKey::for_label_value("label", "value");
+        assert_eq!(key.as_str(), "label=value");
+    }
+
+    #[test]
+    fn test_as_str() {
+        let key = IndexKey::new("test_key");
+        assert_eq!(key.as_str(), "test_key");
+    }
+
+    #[test]
+    fn test_split() {
+        let key = IndexKey::new("label=value");
+        let (label, value) = key.split().unwrap();
+        assert_eq!(label, "label");
+        assert_eq!(value, "value");
+    }
+
+    #[test]
+    fn test_sub_string() {
+        let key = IndexKey::new("label=value");
+        assert_eq!(key.sub_string(6), "value");
+    }
+
+    #[test]
+    fn test_into_vec() {
+        let key = IndexKey::new("test_key");
+        assert_eq!(key.into_vec(), b"test_key\0".to_vec());
+    }
+
+    #[test]
+    fn test_len() {
+        let key = IndexKey::new("test_key");
+        assert_eq!(key.len(), 8);
+    }
+
+    #[test]
+    fn test_display() {
+        let key = IndexKey::new("test_key");
+        assert_eq!(format!("{}", key), "test_key");
+    }
+
+    #[test]
+    fn test_as_bytes() {
+        let key = IndexKey::new("test_key");
+        assert_eq!(key.as_bytes(), b"test_key\0");
+    }
+
+    #[test]
+    fn test_from_u8_slice() {
+        let key = IndexKey::from(b"test_key".as_ref());
+        assert_eq!(key.as_str(), "test_key");
+    }
+
+    #[test]
+    fn test_from_vec_u8() {
+        let key = IndexKey::from(b"test_key".to_vec());
+        assert_eq!(key.as_str(), "test_key");
+    }
+
+    #[test]
+    fn test_from_str() {
+        let key = IndexKey::from("test_key");
+        assert_eq!(key.as_str(), "test_key");
+    }
+
+    #[test]
+    fn test_borrow() {
+        let key = IndexKey::new("test_key");
+        let borrowed: &[u8] = key.borrow();
+        assert_eq!(borrowed, b"test_key\0");
+    }
+
+    fn sample<'a>(choices: &'a [&str]) -> &'a str {
+        let index = rand::random::<usize>() % choices.len();
+        choices[index]
+    }
+
+    #[test]
+    fn test_with_collection() {
+
+        let mut tree: TreeMap<IndexKey, String> = TreeMap::new();
+
+        let regions = ["US", "EU", "APAC"];
+        let services = ["web", "api", "db"];
+        let environments = ["prod", "staging", "dev"];
+
+        for region in regions.iter() {
+            let region_key = IndexKey::for_label_value("region", region);
+            let _ = tree.try_insert(region_key, region.to_string()).unwrap();
+        }
+
+        for service in services.iter() {
+            let key = IndexKey::for_label_value("service", service);
+            let _ = tree.try_insert(key.into(), service.to_string()).unwrap();
+        }
+
+        for environment in environments.iter() {
+            let key = IndexKey::for_label_value("environment", environment);
+            let _ = tree.try_insert(key, environment.to_string()).unwrap();
+        }
+
+        for region in regions.iter() {
+            let search_key = get_key_for_label_value("region", region);
+            let value = tree.get(search_key.as_bytes()).map(|v| v.as_str());
+            assert_eq!(value, Some(*region));
+        }
+
+        for service in services.iter() {
+            let search_key = get_key_for_label_value("service", service);
+            let value = tree.get(search_key.as_bytes()).map(|v| v.as_str());
+            assert_eq!(value, Some(*service));
+        }
+
+        for environment in environments.iter() {
+            let search_key = get_key_for_label_value("environment", environment);
+            let value = tree.get(search_key.as_bytes()).map(|v| v.as_str());
+            assert_eq!(value, Some(*environment));
+        }
+    }
 }

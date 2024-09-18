@@ -5,6 +5,7 @@ use crate::index::filters::{get_ids_by_matchers_optimized, process_equals_match,
 use crate::module::{with_timeseries, VKM_SERIES_TYPE};
 use crate::storage::time_series::TimeSeries;
 use crate::storage::utils::format_prometheus_metric_name;
+use blart::AsBytes;
 use croaring::Bitmap64;
 use metricsql_common::hash::IntMap;
 use metricsql_parser::prelude::{LabelFilter, LabelFilterOp, Matchers};
@@ -123,35 +124,12 @@ impl IndexInner {
             return;
         }
 
-        for Label { name, .. } in labels.iter() {
-            if let Some(bitmap) = self.label_index.get_mut(name.as_bytes()) {
-                bitmap.remove(id);
-                if bitmap.is_empty() {
-                    self.label_count -= 1;
-                    self.label_index.remove(name.as_bytes());
-                }
-            }
-        }
-
-        let mut key: String = String::with_capacity(metric_name.len() + METRIC_NAME_LABEL.len() + 1);
         if !metric_name.is_empty() {
-            format_key_for_metric_name(&mut key, metric_name);
-            if let Some(bitmap) = self.label_index.get_mut(key.as_bytes()) {
-                bitmap.remove(id);
-                if bitmap.is_empty() {
-                    self.label_index.remove(key.as_bytes());
-                }
-            }
+            self.remove_label_value(METRIC_NAME_LABEL, metric_name, id);
         }
 
         for Label { name, value} in labels.iter() {
-            format_key_for_label_value(&mut key, name, value);
-            if let Some(map) = self.label_index.get_mut(key.as_bytes()) {
-                map.remove(id);
-                if map.is_empty() {
-                    self.label_index.remove(key.as_bytes());
-                }
-            }
+            self.remove_label_value(name, value, id);
         }
     }
 
@@ -159,28 +137,42 @@ impl IndexInner {
         self.index_series_by_label(ts_id, METRIC_NAME_LABEL, metric_name);
     }
 
-    fn add_or_insert(&mut self, key: &str, ts_id: u64) -> bool {
-        if let Some(bmp) = self.label_index.get_mut(key.as_bytes()) {
+    fn has_label(&self, label: &str) -> bool {
+        let prefix = get_key_for_label_prefix(label);
+        self.label_index.prefix_keys(prefix.as_bytes()).next().is_some()
+    }
+
+    fn add_or_insert(&mut self, label: &str, value: &str, ts_id: u64) -> bool {
+        let key = IndexKey::for_label_value(label, value);
+        if let Some(bmp) = self.label_index.get_mut(&key) {
             bmp.add(ts_id);
             false
         } else {
             let mut bmp = Bitmap64::new();
             bmp.add(ts_id);
+            let has_label = self.has_label(label);
             // TODO: !!!!!! handle error
-            self.label_index.try_insert(key.into(), bmp).unwrap();
+            self.label_index.try_insert(key, bmp).unwrap();
+            if has_label {
+                self.label_count += 1;
+            }
             true
         }
     }
 
     fn index_series_by_label(&mut self, ts_id: u64, label: &str, value: &str) {
-        let key_value = get_key_for_label_value(label, value);
-        self.add_or_insert(&key_value, ts_id);
+        self.add_or_insert(label, value, ts_id);
+    }
 
-        // here were associating a series with a bare label name, so we don't need to do this for __name__
-        if label != METRIC_NAME_LABEL {
-            if self.add_or_insert(label, ts_id) {
-                // if by_label.is_empty(), we need to increment the label count
-                self.label_count += 1;
+    fn remove_label_value(&mut self, label: &str, value: &str, ts_id: u64) {
+        let key = IndexKey::for_label_value(label, value);
+        if let Some(bmp) = self.label_index.get_mut(&key) {
+            bmp.remove(ts_id);
+            if bmp.is_empty() {
+                self.label_index.remove(&key);
+                if !self.has_label(label) {
+                    self.label_count -= 1;
+                }
             }
         }
     }
@@ -321,17 +313,22 @@ impl TimeSeriesIndex {
         let inner = self.inner.read().unwrap();
         let mut key: String = String::new();
         format_key_for_metric_name(&mut key, metric);
-        if let Some(bmp) = inner.label_index.get(key.as_bytes()) {
-            let mut acc: Bitmap64 = bmp.clone(); // wish we didn't have to clone here
+        if let Some(measurement_bmp) = inner.label_index.get(key.as_bytes()) {
+            let mut first = true;
+            let mut acc = Bitmap64::new();
             for label in labels.iter() {
                 format_key_for_label_value(&mut key, &label.name, &label.value);
                 if let Some(bmp) = inner.label_index.get(key.as_bytes()) {
-                    acc.and_inplace(bmp);
                     if bmp.is_empty() {
                         break;
                     }
+                    if first {
+                        acc = measurement_bmp.and(bmp);
+                        first = false;
+                    } else {
+                        acc.and_inplace(bmp);
+                    }
                 }
-                key.clear();
             }
             match acc.cardinality() {
                 0 => Ok(None),
@@ -592,4 +589,120 @@ fn find_ids_by_matchers(
 
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+    use crate::common::types::Label;
+    use crate::storage::time_series::TimeSeries;
+    use metricsql_parser::prelude::parse_metric_name;
+
+    fn create_series_from_metric_name(prometheus_name: &str) -> TimeSeries {
+        let mut ts = TimeSeries::new();
+        let labels = parse_metric_name(prometheus_name).unwrap();
+        for label in labels.into_iter() {
+            if label.name == METRIC_NAME_LABEL {
+                ts.metric_name = label.value;
+            } else {
+                ts.labels.push(label);
+            }
+        }
+        ts.id = TimeSeriesIndex::next_id();
+        ts
+    }
+
+    fn create_series(metric_name: &str, labels: Vec<Label>) -> TimeSeries {
+        let mut ts = TimeSeries::new();
+        ts.id = TimeSeriesIndex::next_id();
+        ts.metric_name = metric_name.to_string();
+        ts.labels = labels;
+        ts
+    }
+
+    #[test]
+    fn test_index_time_series() {
+        let mut index = TimeSeriesIndex::new();
+        let ts = create_series_from_metric_name(r#"latency{region="us-east-1",env="qa"}"#);
+
+        index.index_time_series(&ts, b"time-series-1");
+
+        assert_eq!(index.series_count(), 1);
+        assert_eq!(index.label_count(), 3); // metric_name + region + env
+    }
+
+    #[test]
+    fn test_reindex_time_series() {
+        let mut index = TimeSeriesIndex::new();
+        let ts = create_series_from_metric_name(r#"latency{region="us-east-1",env="qa"}"#);
+
+        index.index_time_series(&ts, b"time-series-1");
+
+        let ts = create_series_from_metric_name(r#"latency{region="us-east-1",env="prod"}"#);
+        index.reindex_timeseries(&ts, b"time-series-1");
+
+        assert_eq!(index.series_count(), 2);
+        assert_eq!(index.label_count(), 3); // metric_name + region + env
+    }
+
+    #[test]
+    fn test_remove_time_series() {
+        let mut index = TimeSeriesIndex::new();
+        let ts = create_series_from_metric_name(r#"latency{region="us-east-1",env="qa"}"#);
+
+        index.index_time_series(&ts, b"time-series-1");
+        assert_eq!(index.series_count(), 1);
+
+        index.remove_series(&ts);
+
+        assert_eq!(index.series_count(), 0);
+        assert_eq!(index.label_count(), 0);
+    }
+
+    #[test]
+    fn test_get_label_values() {
+        let mut index = TimeSeriesIndex::new();
+        let ts1 = create_series("latency", vec![
+            Label { name: "region".to_string(), value: "us-east1".to_string() },
+            Label { name: "env".to_string(), value: "dev".to_string() },
+        ]);
+        let ts2 = create_series("latency", vec![
+            Label { name: "region".to_string(), value: "us-east2".to_string() },
+            Label { name: "env".to_string(), value: "qa".to_string() },
+        ]);
+
+        index.index_time_series(&ts1, b"time-series-1");
+        index.index_time_series(&ts2, b"time-series-2");
+
+        let values = index.get_label_values("region");
+        assert_eq!(values.len(), 2);
+        assert!(values.contains("us-east1"));
+        assert!(values.contains("us-east2"));
+
+        let values = index.get_label_values("env");
+        assert_eq!(values.len(), 2);
+        assert!(values.contains("dev"));
+        assert!(values.contains("qa"));
+    }
+
+    #[test]
+    fn test_get_id_by_name_and_labels() {
+        let mut index = TimeSeriesIndex::new();
+        let ts = create_series_from_metric_name(r#"latency{region="us-east-1",env="qa"}"#);
+
+        index.index_time_series(&ts, b"time-series-1");
+
+        let id = index.get_id_by_name_and_labels("latency", &ts.labels).unwrap();
+        assert_eq!(id, Some(ts.id));
+    }
+
+    #[test]
+    fn test_prometheus_name_exists() {
+        let mut index = TimeSeriesIndex::new();
+        let ts = create_series("latency", vec![
+            Label { name: "region".to_string(), value: "us-east1".to_string() },
+            Label { name: "env".to_string(), value: "qa".to_string() },
+        ]);
+
+        index.index_time_series(&ts, b"time-series-1");
+
+        assert!(index.prometheus_name_exists("latency", &ts.labels));
+    }
+}
