@@ -72,12 +72,6 @@ impl AggrIterator {
             let timestamp = sample.timestamp;
             let value = sample.value;
 
-            // (1) time_delta > 0,
-            // (2) self.aggregation_last_timestamp > sample.timestamp -
-            // time_delta (3) self.aggregation_last_timestamp = samples.timestamps[0]
-            // - mod where 0 <= mod from (1)+(2) context_scope > chunk->samples.timestamps[0]
-            // from (3) chunk->samples.timestamps[0] >= self.aggregation_last_timestamp so the
-            // following condition should always be false on the first iteration
             if timestamp >= bucket_right_ts {
 
                 buckets.push(self.finalize_bucket());
@@ -134,8 +128,7 @@ pub(crate) fn get_range_internal(
     let mut samples = if let Some(filter) = &args.filter {
         // this is the most restrictive filter, so apply it first
         if let Some(timestamps) = &filter.timestamps {
-            series.timestamp_filter_iter(timestamps)
-                .collect::<Vec<_>>()
+            series.timestamp_filter_iter(timestamps).collect::<Vec<_>>()
         } else {
             series.iter_range(start_timestamp, end_timestamp).collect::<Vec<_>>()
         }
