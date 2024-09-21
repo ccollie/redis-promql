@@ -30,6 +30,9 @@ pub enum TsdbError {
   #[error("Duplicate sample. {0}")] // need better error
   DuplicateSample(String),
 
+  #[error("Duplicate metric: {0}")]
+  DuplicateMetric(String),
+
   #[error("Invalid compressed method. {0}")]
   InvalidCompression(String),
 

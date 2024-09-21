@@ -1,3 +1,4 @@
+use crate::common::decimal::{round_to_significant_digits, RoundDirection};
 use super::{
     merge_by_capacity,
     validate_chunk_size,
@@ -12,7 +13,7 @@ use crate::error::{TsdbError, TsdbResult};
 use crate::storage::constants::{DEFAULT_CHUNK_SIZE_BYTES, SPLIT_FACTOR};
 use crate::storage::timestamps_filter_iterator::TimestampsFilterIterator;
 use crate::storage::uncompressed_chunk::UncompressedChunk;
-use crate::storage::utils::{format_prometheus_metric_name, round_to_significant_digits};
+use crate::storage::utils::{format_prometheus_metric_name};
 use crate::storage::DuplicatePolicy;
 use get_size::GetSize;
 use metricsql_common::pool::{get_pooled_vec_f64, get_pooled_vec_i64};
@@ -93,15 +94,8 @@ impl TimeSeries {
         if let Some(dedupe_interval) = options.dedupe_interval {
             res.dedupe_interval = Some(dedupe_interval);
         }
-        if let Some(labels) = options.labels {
-            for (k, v) in labels.iter() {
-                res.labels.push(Label {
-                    name: k.to_string(),
-                    value: v.to_string(),
-                });
-            }
-            res.labels.sort();
-        }
+        // todo: make sure labels are sorted and dont contain __name__
+        res.labels = res.labels;
         Ok(res)
     }
 
@@ -116,7 +110,7 @@ impl TimeSeries {
     ///
     /// Note that for our internal purposes, we store the metric name and labels separately, and
     /// assume that the labels are sorted by name.
-    pub fn get_prometheus_metric_name(&self) -> String {
+    pub fn prometheus_metric_name(&self) -> String {
         format_prometheus_metric_name(&self.metric_name, &self.labels)
     }
 
@@ -140,7 +134,7 @@ impl TimeSeries {
         if let Some(significant_digits) = self.significant_digits {
             // todo: limit digits to a max, for ex.
             // https://stackoverflow.com/questions/65719216/why-does-rust-only-use-16-significant-digits-for-f64-equality-checks
-            round_to_significant_digits(value, significant_digits as u32)
+            round_to_significant_digits(value, significant_digits as i32, RoundDirection::Up)
         } else {
             value
         }

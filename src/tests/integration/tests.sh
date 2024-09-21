@@ -96,6 +96,26 @@ help() {
 
 #----------------------------------------------------------------------------------------------
 
+is_command() {
+    local cmd="$1"
+
+    if [ -x "$cmd" ]; then
+        if file "$cmd" | grep -qE "executable|Mach-O|ELF"; then
+            echo "$cmd is an executable file"
+            return 0
+        else
+            echo "$cmd has execute permissions but is not an executable file"
+            return 1
+        fi
+    elif command -v "$cmd" >/dev/null 2>&1; then
+        echo "$cmd is in PATH and executable"
+        return 0
+    else
+        echo "$cmd is not executable or doesn't exist"
+        return 1
+    fi
+}
+
 traps() {
 	local func="$1"
 	shift

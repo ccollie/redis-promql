@@ -1,11 +1,11 @@
-use ahash::AHashMap;
-use valkey_module::{ValkeyError, ValkeyString};
+use get_size::GetSize;
+use metricsql_common::prelude::Label;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::mem::size_of;
 use std::str::FromStr;
 use std::time::Duration;
-use get_size::GetSize;
+use valkey_module::{ValkeyError, ValkeyString};
 
 mod chunk;
 mod pco_chunk;
@@ -21,14 +21,14 @@ mod types;
 mod timestamps_filter_iterator;
 mod gorilla_chunk;
 
-use crate::error::{TsdbError, TsdbResult};
-pub(super) use chunk::*;
-pub(crate) use constants::*;
-pub(crate) use slice::*;
-pub(crate) use defrag::*;
 use crate::aggregators::Aggregator;
 use crate::common::types::{Sample, Timestamp};
+use crate::error::{TsdbError, TsdbResult};
 use crate::module::arg_parse::TimestampRangeValue;
+pub(super) use chunk::*;
+pub(crate) use constants::*;
+pub(crate) use defrag::*;
+pub(crate) use slice::*;
 
 pub const SAMPLE_SIZE: usize = size_of::<Sample>();
 
@@ -190,13 +190,14 @@ impl TryFrom<u8> for DuplicatePolicy {
 
 #[derive(Debug, Default, Clone)]
 pub struct TimeSeriesOptions {
+    pub metric: String,
     pub metric_name: Option<String>,
     pub encoding: Option<Encoding>,
     pub chunk_size: Option<usize>,
     pub retention: Option<Duration>,
     pub duplicate_policy: Option<DuplicatePolicy>,
     pub dedupe_interval: Option<Duration>,
-    pub labels: Option<AHashMap<String, String>>,
+    pub labels: Vec<Label>,
     pub significant_digits: Option<u8>,
 }
 
@@ -215,10 +216,6 @@ impl TimeSeriesOptions {
 
     pub fn duplicate_policy(&mut self, duplicate_policy: DuplicatePolicy) {
         self.duplicate_policy = Some(duplicate_policy);
-    }
-
-    pub fn labels(&mut self, labels: AHashMap<String, String>) {
-        self.labels = Some(labels);
     }
 }
 
@@ -375,9 +372,9 @@ impl RangeOptions {
 }
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
     use crate::error::TsdbError;
     use crate::storage::DuplicatePolicy;
+    use std::str::FromStr;
 
     #[test]
     fn test_duplicate_policy_parse() {
