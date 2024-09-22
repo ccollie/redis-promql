@@ -4,11 +4,11 @@ use std::time::Duration;
 use chrono::DateTime;
 use metricsql_runtime::types::{TimestampTrait};
 use metricsql_parser::prelude::Matchers;
-use metricsql_parser::parser::{parse_duration_value, parse_number};
+use metricsql_parser::parser::{parse_duration_value, parse_number, parse_metric_name as parse_metric};
 use metricsql_runtime::parse_metric_selector;
 use valkey_module::{ValkeyError, ValkeyResult, ValkeyString};
 use crate::common::current_time_millis;
-use crate::common::types::Timestamp;
+use crate::common::types::{Label, Timestamp};
 use crate::error::{TsdbError, TsdbResult};
 use crate::storage::{MAX_CHUNK_SIZE, MAX_TIMESTAMP, MIN_CHUNK_SIZE};
 use crate::storage::time_series::TimeSeries;
@@ -311,6 +311,12 @@ pub fn parse_series_selector(arg: &str) -> TsdbResult<Matchers> {
     })
 }
 
+pub fn parse_metric_name(arg: &str) -> TsdbResult<Vec<Label>> {
+    parse_metric(arg).map_err(|_e| {
+        TsdbError::InvalidMetric(arg.to_string())
+    })
+}
+
 pub fn parse_chunk_size(arg: &str) -> ValkeyResult<usize> {
     fn get_error_result() -> ValkeyResult<usize> {
         let msg = format!("TSDB: CHUNK_SIZE value must be an integer multiple of 2 in the range [{MIN_CHUNK_SIZE} .. {MAX_CHUNK_SIZE}]");
@@ -333,3 +339,4 @@ pub fn parse_chunk_size(arg: &str) -> ValkeyResult<usize> {
     }
     Ok(chunk_size)
 }
+

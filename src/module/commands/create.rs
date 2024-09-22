@@ -2,13 +2,12 @@ use crate::arg_parse::{parse_chunk_size, parse_duration_arg};
 use crate::error::{TsdbError, TsdbResult};
 use crate::globals::with_timeseries_index;
 use crate::index::TimeSeriesIndex;
+use crate::module::arg_parse::parse_metric_name;
 use crate::module::VKM_SERIES_TYPE;
 use crate::storage::time_series::TimeSeries;
 use crate::storage::{DuplicatePolicy, TimeSeriesOptions};
-use metricsql_parser::parser::parse_metric_name;
 use valkey_module::key::ValkeyKeyWritable;
 use valkey_module::{Context, NextArg, NotifyEvent, ValkeyError, ValkeyResult, ValkeyString, VALKEY_OK};
-use crate::common::METRIC_NAME_LABEL;
 
 const CMD_ARG_RETENTION: &str = "RETENTION";
 const CMD_ARG_DUPLICATE_POLICY: &str = "DUPLICATE_POLICY";
@@ -52,16 +51,8 @@ pub fn parse_create_options(args: Vec<ValkeyString>) -> ValkeyResult<(ValkeyStri
     let key = args.next().ok_or(ValkeyError::Str("Err missing key argument"))?;
 
     let metric = args.next_string()?;
-    let mut labels = parse_metric_name(&metric)
+    options.labels = parse_metric_name(&metric)
         .map_err(|_| ValkeyError::Str("ERR invalid METRIC"))?;
-
-    let label = labels.iter().find(|x| x.name == METRIC_NAME_LABEL)
-        .ok_or(ValkeyError::Str("ERR missing METRIC name"))?;
-
-    options.metric = metric;
-    options.metric_name = Some(label.value.clone());
-    labels.retain(|x| x.name != METRIC_NAME_LABEL);
-    options.labels = labels;
 
     while let Ok(arg) = args.next_str() {
         match arg {

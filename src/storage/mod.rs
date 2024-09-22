@@ -190,7 +190,6 @@ impl TryFrom<u8> for DuplicatePolicy {
 
 #[derive(Debug, Default, Clone)]
 pub struct TimeSeriesOptions {
-    pub metric: String,
     pub metric_name: Option<String>,
     pub encoding: Option<Encoding>,
     pub chunk_size: Option<usize>,

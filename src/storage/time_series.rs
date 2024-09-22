@@ -22,7 +22,8 @@ use std::hash::Hasher;
 use std::mem::size_of;
 use std::time::Duration;
 use valkey_module::error::GenericError;
-use valkey_module::raw;
+use valkey_module::{raw, ValkeyError};
+use crate::common::METRIC_NAME_LABEL;
 
 /// Represents a time series. The time series consists of time series blocks, each containing BLOCK_SIZE_FOR_TIME_SERIES
 /// data points. All but the last block are compressed.
@@ -77,6 +78,7 @@ impl TimeSeries {
     }
 
     pub fn with_options(options: TimeSeriesOptions) -> TsdbResult<Self> {
+        let mut options = options;
         let mut res = Self::new();
         if let Some(chunk_size) = options.chunk_size {
             validate_chunk_size(chunk_size)?;
@@ -94,8 +96,17 @@ impl TimeSeries {
         if let Some(dedupe_interval) = options.dedupe_interval {
             res.dedupe_interval = Some(dedupe_interval);
         }
+
         // todo: make sure labels are sorted and dont contain __name__
-        res.labels = res.labels;
+        let label = options.labels
+            .iter()
+            .find(|x| x.name == METRIC_NAME_LABEL)
+            .ok_or(TsdbError::InvalidMetric("NONE".to_string()))?; // better error
+
+        options.metric_name = Some(label.value.clone());
+        options.labels.retain(|x| x.name != METRIC_NAME_LABEL);
+
+        res.labels = options.labels;
         Ok(res)
     }
 

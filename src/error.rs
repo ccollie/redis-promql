@@ -33,6 +33,9 @@ pub enum TsdbError {
   #[error("Duplicate metric: {0}")]
   DuplicateMetric(String),
 
+  #[error("Invalid metric: {0}")]
+  InvalidMetric(String),
+
   #[error("Invalid compressed method. {0}")]
   InvalidCompression(String),
 
