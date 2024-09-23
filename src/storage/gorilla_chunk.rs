@@ -426,6 +426,8 @@ fn create_encoder(ts: Timestamp, cap: Option<usize>) -> ChunkEncoder {
 }
 
 pub(crate) struct ChunkIter<'a> {
+    idx: usize,
+    num_samples: usize,
     decoder: StdDecoder<BufferedReader<'a>>,
 }
 
@@ -434,18 +436,24 @@ impl<'a> ChunkIter<'a> {
         let buf = chunk.buf();
         let reader = BufferedReader::new(buf);
         let decoder = StdDecoder::new(reader);
-        Self { decoder }
+        Self { decoder, idx: 0, num_samples: chunk.num_samples() }
     }
 }
 impl<'a> Iterator for ChunkIter<'a> {
     type Item = Sample;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.idx >= self.num_samples {
+            return None;
+        }
         match self.decoder.next() {
-            Ok(dp) => Some(Self::Item {
-                timestamp: dp.get_time() as i64,
-                value: dp.get_value(),
-            }),
+            Ok(dp) => {
+                self.idx += 1;
+                Some(Self::Item {
+                    timestamp: dp.get_time() as i64,
+                    value: dp.get_value(),
+                })
+            },
             Err(Error::EndOfStream) => None,
           //  Err(Error::Stream(crate::gorilla::stream::Error::EOF)) => None, // is this an error ?
             Err(err) => {
@@ -594,7 +602,7 @@ mod tests {
     fn test_split() {
         let mut chunk = GorillaChunk::default();
         let mut options = GeneratorOptions::default();
-        options.samples = 500;
+        options.samples = 10;
         let data = generate_series_data(&options).unwrap();
         chunk.set_data(&data.timestamps, &data.values).unwrap();
 

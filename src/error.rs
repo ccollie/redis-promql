@@ -18,6 +18,9 @@ pub enum TsdbError {
   #[error("Encoding error. {0}")]
   EncodingError(String),
 
+  #[error("Error decoding sample. {0}")]
+  DecodingError(String),
+
   #[error("Serialization error. {0}")]
   CannotSerialize(String),
 

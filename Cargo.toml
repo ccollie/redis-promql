@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 ahash = { version = "0.8", features = ["serde"] }
 binary-merge = "0.1"
+bitstream-io = "2.5"
 blart = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
 croaring = "2.1"
@@ -21,12 +22,13 @@ metricsql_common = { git = "https://github.com/ccollie/metricsql", branch = "dev
 metricsql_encoding = { git = "https://github.com/ccollie/metricsql", branch = "dev" }
 metricsql_runtime = { git = "https://github.com/ccollie/metricsql", branch = "dev" }
 metricsql_parser = { git = "https://github.com/ccollie/metricsql", branch = "dev" }
+nom = "7.1"
 papaya = "0.1"
 pco = "0.3"
 scopeguard = "1.2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-smallvec = { version = "1.13", features = ["union"] }
+smallvec = { version = "2.0.0-alpha.7", features = ["std"] }
 thiserror = "1"
 rayon = "1.10"
 regex = "1.10"
@@ -36,6 +38,7 @@ url = { version = "2.5", features = ["serde"] }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 rand = "0.8"
 rand_distr = "0.4"
+rusty-chunkenc = "0.1"
 tracing = "0.1"
 valkey-module = "0.1"
 valkey-module-macros = "0.1"

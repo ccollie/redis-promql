@@ -20,6 +20,7 @@ mod defrag;
 mod types;
 mod timestamps_filter_iterator;
 mod gorilla_chunk;
+mod gorilla;
 
 use crate::aggregators::Aggregator;
 use crate::common::types::{Sample, Timestamp};

@@ -306,8 +306,8 @@ impl TimeSeriesIndex {
     }
 
     /// This exists primarily to ensure that we disallow duplicate metric names, since the
-    /// metric name and valkey key are distinct. IE we can have the metric http_requests_total{status="200"}
-    /// stored at requests:http:total:200
+    /// metric name and valkey key are distinct. IE we can have the metric `http_requests_total{status="200"}`
+    /// stored at `requests:http:total:200`
     pub fn get_id_by_name_and_labels(&self, metric: &str, labels: &[Label]) -> TsdbResult<Option<u64>> {
         let inner = self.inner.read().unwrap();
         let mut key: String = String::new();
