@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/redis-promql.iml" filepath="$PROJECT_DIR$/.idea/redis-promql.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/valkey-metrics.iml" filepath="$PROJECT_DIR$/.idea/valkey-metrics.iml" />
     </modules>
   </component>
 </project>
