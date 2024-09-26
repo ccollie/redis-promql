@@ -1,4 +1,5 @@
 use thiserror::Error;
+use crate::common::types::Sample;
 
 #[derive(Debug, Error, Eq, PartialEq)]
 /// Enum for various errors in Tsdb.
@@ -17,6 +18,9 @@ pub enum TsdbError {
 
   #[error("Encoding error. {0}")]
   EncodingError(String),
+
+  #[error("Decoding error. {0}")]
+  DecodingError(String),
 
   #[error("Serialization error. {0}")]
   CannotSerialize(String),
@@ -53,6 +57,9 @@ pub enum TsdbError {
 
   #[error("Sample timestamp exceeds retention period")]
   SampleTooOld,
+
+  #[error("Error adding sample. {0:?}")]
+  CannotAddSample(Sample),
 
   #[error("{0}")]
   General(String)
