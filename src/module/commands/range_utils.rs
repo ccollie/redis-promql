@@ -79,12 +79,12 @@ impl AggrIterator {
                     return buckets;
                 }
 
-                self.last_timestamp = calc_bucket_start(timestamp, time_delta, self.timestamp_alignment);
+                let last_timestamp = calc_bucket_start(timestamp, time_delta, self.timestamp_alignment);
                 if self.empty {
                     let first_bucket = bucket_right_ts;
-                    let last_bucket = (self.last_timestamp - time_delta).max(0);
+                    let last_bucket = (last_timestamp - time_delta).max(0);
 
-                    let has_empty_buckets = first_bucket < self.last_timestamp;
+                    let has_empty_buckets = first_bucket < last_timestamp;
                     if has_empty_buckets {
                         self.fill_empty_buckets(&mut buckets, first_bucket, last_bucket, count);
                         if buckets.len() >= count {
@@ -93,7 +93,7 @@ impl AggrIterator {
                     }
                 }
 
-                bucket_right_ts = self.last_timestamp + time_delta;
+                bucket_right_ts = last_timestamp + time_delta;
                 self.normalize_bucket_start();
 
                 self.aggregator.update(value);
