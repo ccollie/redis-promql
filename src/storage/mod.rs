@@ -5,6 +5,7 @@ use std::fmt::Display;
 use std::mem::size_of;
 use std::str::FromStr;
 use std::time::Duration;
+use ahash::HashSet;
 use valkey_module::{ValkeyError, ValkeyString};
 
 mod chunk;
@@ -331,6 +332,8 @@ pub struct RangeOptions {
     pub aggregation: Option<AggregationOptions>,
     pub filter: Option<RangeFilter>,
     pub alignment: Option<RangeAlignment>,
+    pub with_labels: bool,
+    pub selected_labels: HashSet<String>,
     pub latest: bool
 }
 

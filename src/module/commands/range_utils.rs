@@ -1,7 +1,37 @@
+use std::collections::HashMap;
 use crate::aggregators::{AggOp, Aggregator};
 use crate::common::types::{Sample, Timestamp};
 use crate::storage::time_series::TimeSeries;
 use crate::storage::{AggregationOptions, BucketTimestamp, RangeAlignment, RangeOptions};
+
+#[derive(Default)]
+pub struct SeriesGroupItem<'a> {
+    pub series: &'a TimeSeries,
+    pub samples: Vec<Sample>,
+}
+
+#[derive(Default)]
+pub struct SeriesGroup<'a> {
+    pub series: Vec<SeriesGroupItem<'a>>,
+    pub label_value: String
+}
+
+impl<'a> SeriesGroup<'a> {
+    pub fn new(label_value: String) -> SeriesGroup {
+        Self {
+            series: Default::default(),
+            label_value
+        }
+    }
+
+    pub fn add_series(&mut self, series: &TimeSeries, samples: Vec<Sample>) {
+        self.series.push(SeriesGroupItem {
+            series,
+            samples,
+        })
+    }
+
+}
 
 pub(crate) struct AggrIterator {
     aggregator: Aggregator,
@@ -195,3 +225,18 @@ pub(crate) fn get_series_aggregator(series: &TimeSeries, args: &RangeOptions, ag
         count: args.count,
     }
 }
+
+pub fn group_series_by_label_value<'a>(series: &'a Vec<&TimeSeries>, label: &str) -> HashMap<String, Vec<&'a TimeSeries>> {
+    let mut grouped: HashMap<String, Vec<&TimeSeries>> = HashMap::new();
+
+    for ts in series.iter() {
+        if let Some(label_value) = ts.label_value(label) {
+            grouped.entry(label_value.clone())
+                .or_insert_with(Vec::new)
+                .push(ts);
+        }
+    }
+
+    grouped
+}
+

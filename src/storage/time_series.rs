@@ -125,6 +125,16 @@ impl TimeSeries {
         format_prometheus_metric_name(&self.metric_name, &self.labels)
     }
 
+    pub fn label_value(&self, name: &str) -> Option<&String> {
+        if name == METRIC_NAME_LABEL {
+            return Some(&self.metric_name);
+        }
+        if let Some(label) = self.labels.iter().find(|x| x.name == name) {
+            return Some(&label.value);
+        }
+        None
+    }
+
     /// Utility function to create a key for the time series. The key is used to uniquely identify the
     /// time series in the index. Valkey keys and metric names are disconnected (a user can store a
     /// timeseries in Valkey using any key).
