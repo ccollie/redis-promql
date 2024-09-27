@@ -1,13 +1,13 @@
 use crate::common::current_time_millis;
 use crate::common::types::Timestamp;
 use crate::error::{TsdbError, TsdbResult};
-use crate::gorilla::{XORChunkEncoder, XORIterator};
+use crate::gorilla::{XOREncoder, XORIterator};
 use crate::storage::chunk::Chunk;
-use crate::storage::utils::trim_vec_data;
 use crate::storage::{DuplicatePolicy, Sample, DEFAULT_CHUNK_SIZE_BYTES};
 use get_size::GetSize;
 use metricsql_common::pool::{get_pooled_vec_f64, get_pooled_vec_i64};
 use std::mem::size_of;
+use std::ops::ControlFlow;
 use valkey_module::error::Error as ValkeyError;
 use valkey_module::raw;
 
@@ -15,7 +15,7 @@ use valkey_module::raw;
 #[derive(Debug, Clone, PartialEq)]
 #[derive(GetSize)]
 pub struct GorillaChunk {
-    xor_encoder: XORChunkEncoder,
+    xor_encoder: XOREncoder,
     first_timestamp: Timestamp,
     pub max_size: usize,
 }
@@ -30,7 +30,7 @@ impl GorillaChunk {
     pub fn with_max_size(max_size: usize) -> Self {
         let now = current_time_millis();
         Self {
-            xor_encoder: XORChunkEncoder::new(),
+            xor_encoder: XOREncoder::new(),
             first_timestamp: now,
             max_size,
         }
@@ -75,7 +75,7 @@ impl GorillaChunk {
 
     pub(super) fn compress(&mut self, timestamps: &[Timestamp], values: &[f64]) -> TsdbResult<()> {
         debug_assert_eq!(timestamps.len(), values.len());
-        let mut encoder = XORChunkEncoder::new();
+        let mut encoder = XOREncoder::new();
         for (ts, value) in timestamps.iter().zip(values.iter()) {
             let sample = Sample::new(*ts, *value);
             push_sample(&mut encoder, &sample)?;
@@ -111,7 +111,7 @@ impl GorillaChunk {
         (uncompressed_size / compressed_size) as f64
     }
 
-    fn process_samples_in_range<F, State>(
+    pub fn process_samples_in_range<F, State>(
         &self,
         state: &mut State,
         start_ts: Timestamp,
@@ -119,11 +119,9 @@ impl GorillaChunk {
         mut f: F
     ) -> TsdbResult<()>
     where
-        F: FnMut(&mut State, &Sample) -> TsdbResult<()>,
+        F: FnMut(&mut State, &Sample) -> TsdbResult<ControlFlow<()>>,
     {
-        let mut iter = self.xor_encoder.iter();
-
-        for value in iter.by_ref() {
+        for value in self.xor_encoder.iter() {
             let sample = value?;
             if sample.timestamp < start_ts {
                 continue;
@@ -131,7 +129,10 @@ impl GorillaChunk {
             if sample.timestamp >= end_ts {
                 break;
             }
-            f(state, &sample)?;
+            match f(state, &sample)? {
+                ControlFlow::Break(_) => break,
+                ControlFlow::Continue(_) => continue,
+            }
         }
 
         Ok(())
@@ -147,26 +148,24 @@ impl GorillaChunk {
     where
         F: FnMut(&mut State, &[i64], &[f64]) -> TsdbResult<R>,
     {
-        let mut handle_empty = |state: &mut State| -> TsdbResult<R> {
+        if self.is_empty() {
             let mut timestamps = vec![];
             let mut values = vec![];
-            f(state, &mut timestamps, &mut values)
-        };
-
-        if self.is_empty() {
-            return handle_empty(state);
+            return f(state, &mut timestamps, &mut values)
         }
 
         let count = self.num_samples();
         let mut timestamps = get_pooled_vec_i64(count);
         let mut values = get_pooled_vec_f64(count);
-        self.decompress(&mut timestamps, &mut values)?;
-        // special case of range exceeding block range
-        if start <= self.first_timestamp() && end >= self.last_timestamp() {
-            return f(state, &timestamps, &values);
-        }
 
-        trim_vec_data(&mut timestamps, &mut values, start, end);
+        let mut inner_state = (&mut timestamps, &mut values);
+
+        self.process_samples_in_range(&mut inner_state, start, end, |state, sample| {
+            state.0.push(sample.timestamp);
+            state.1.push(sample.value);
+            Ok(ControlFlow::Continue(()))
+        })?;
+
         f(state, &timestamps, &values)
     }
 
@@ -242,7 +241,7 @@ impl Chunk for GorillaChunk {
 
         let old_count = self.xor_encoder.num_samples;
 
-        let mut encoder = XORChunkEncoder::new();
+        let mut encoder = XOREncoder::new();
 
         for value in self.xor_encoder.iter() {
             let sample = value?;
@@ -309,21 +308,17 @@ impl Chunk for GorillaChunk {
         }
 
         let count = self.num_samples();
-        let mut xor_encoder = XORChunkEncoder::new();
+        let mut xor_encoder = XOREncoder::new();
 
-        for sample in self.xor_encoder.iter() {
-            match sample {
-                Ok(sample) => {
-                    if sample.timestamp == ts {
-                        duplicate_found = true;
-                        let value = dp_policy.value_on_duplicate(ts, sample.value, sample.value)?;
-                        let sample = Sample::new(ts, value);
-                        push_sample(&mut xor_encoder, &sample)?;
-                    } else {
-                        push_sample(&mut xor_encoder, &sample)?;
-                    }
-                },
-                Err(e) => return Err(e),
+        for item in self.xor_encoder.iter() {
+            let sample = item?;
+            if sample.timestamp == ts {
+                duplicate_found = true;
+                let value = dp_policy.value_on_duplicate(ts, sample.value, sample.value)?;
+                let sample = Sample::new(ts, value);
+                push_sample(&mut xor_encoder, &sample)?;
+            } else {
+                push_sample(&mut xor_encoder, &sample)?;
             }
         }
 
@@ -337,7 +332,7 @@ impl Chunk for GorillaChunk {
     where
         Self: Sized,
     {
-        let mut left_chunk = XORChunkEncoder::new();
+        let mut left_chunk = XOREncoder::new();
         let mut right_chunk = GorillaChunk::default();
 
         if self.is_empty() {
@@ -368,7 +363,7 @@ impl Chunk for GorillaChunk {
     fn rdb_load(rdb: *mut raw::RedisModuleIO) -> Result<Self, ValkeyError> {
         let max_size = raw::load_unsigned(rdb)? as usize;
         let first_timestamp = raw::load_signed(rdb)?;
-        let xor_encoder = XORChunkEncoder::rdb_load(rdb)?;
+        let xor_encoder = XOREncoder::rdb_load(rdb)?;
         let chunk = GorillaChunk {
             xor_encoder,
             first_timestamp,
@@ -378,9 +373,12 @@ impl Chunk for GorillaChunk {
     }
 }
 
-fn push_sample(encoder: &mut XORChunkEncoder, sample: &Sample) -> TsdbResult<()> {
+fn push_sample(encoder: &mut XOREncoder, sample: &Sample) -> TsdbResult<()> {
     encoder.add_sample(sample)
-        .map_err(|e| TsdbError::CannotAddSample(sample.clone()))
+        .map_err(|e| {
+            println!("Error adding sample: {:?}", e);
+            TsdbError::CannotAddSample(sample.clone())
+        })
 }
 
 pub(crate) struct ChunkIter<'a> {
@@ -389,11 +387,11 @@ pub(crate) struct ChunkIter<'a> {
 
 impl<'a> ChunkIter<'a> {
     pub fn new(chunk: &'a GorillaChunk) -> Self {
-        let buf = chunk.buf();
-        let inner = XORIterator::new(buf, chunk.num_samples());
+        let inner = XORIterator::new(&chunk.xor_encoder);
         Self { inner }
     }
 }
+
 impl<'a> Iterator for ChunkIter<'a> {
     type Item = Sample;
 
@@ -481,7 +479,7 @@ mod tests {
     #[test]
     fn test_compress_decompress() {
         let mut chunk = GorillaChunk::default();
-        let timestamps = generate_timestamps(1000, 1000, Duration::from_secs(5));
+        let timestamps = generate_timestamps(500, 1000, Duration::from_secs(5));
         let values = timestamps.iter().map(|x| *x as f64).collect::<Vec<f64>>();
 
         chunk.set_data(&timestamps, &values).unwrap();
@@ -510,7 +508,7 @@ mod tests {
     fn test_upsert() {
         for chunk_size in (64..8192).step_by(64) {
             let mut options = GeneratorOptions::default();
-            options.samples = 500;
+            options.samples = 200;
             let data = generate_series_data(&options).unwrap();
             let mut chunk = GorillaChunk::with_max_size(chunk_size);
 

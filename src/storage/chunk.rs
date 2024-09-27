@@ -381,7 +381,7 @@ impl TimeSeriesChunk {
     }
 
     pub fn memory_usage(&self) -> usize {
-        std::mem::size_of::<Self>() +
+        size_of::<Self>() +
             self.get_heap_size()
     }
 

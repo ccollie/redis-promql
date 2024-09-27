@@ -4,7 +4,8 @@ use nom::{bytes::complete::take, IResult};
 pub fn write_uvarint<W: std::io::Write>(value: u64, writer: &mut W) -> std::io::Result<()> {
     let mut x: u64 = value;
     while x >= 0x80 {
-        writer.write_all(&[(x as u8) | 0x80])?;
+        let enc_buf = [0x80 | (x as u8)];
+        writer.write_all(&enc_buf)?;
         x >>= 7;
     }
     writer.write_all(&[x as u8])?;

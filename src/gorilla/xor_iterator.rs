@@ -6,6 +6,7 @@ use nom::{
     number::complete::be_f64,
     sequence::tuple
 };
+use crate::gorilla::XOREncoder;
 
 #[derive(Debug)]
 pub struct XORIterator<'a> {
@@ -18,11 +19,18 @@ pub struct XORIterator<'a> {
     timestamp_delta: u64,
     timestamp: i64,
     value: f64,
+    last_timestamp: i64,
+    last_value: f64,
 }
 
 impl XORIterator<'_> {
-    pub fn new(buf: &[u8], num_samples: usize) -> XORIterator {
+    pub fn new(encoder: &XOREncoder) -> XORIterator {
+        let buf = encoder.buf();
+        let num_samples = encoder.num_samples;
         let cursor = (buf, 0);
+        let last_timestamp = encoder.timestamp;
+        let last_value = encoder.value;
+
         XORIterator {
             buf,
             cursor,
@@ -33,6 +41,8 @@ impl XORIterator<'_> {
             leading_bits_count: 0,
             trailing_bits_count: 0,
             timestamp_delta: 0,
+            last_timestamp,
+            last_value,
         }
     }
 
@@ -100,7 +110,8 @@ impl XORIterator<'_> {
                 previous_trailing_bits_count,
             ),
         ))(self.cursor)
-            .map_err(|_| {
+            .map_err(|e| {
+                println!("{:?}", e);
                 TsdbError::DecodingError("XOR encoder".to_string())
             })?;
 
@@ -119,6 +130,14 @@ impl XORIterator<'_> {
             value: self.value,
         })
     }
+
+    fn read_last_sample(&mut self) -> TsdbResult<Sample> {
+        self.idx += 1;
+        Ok(Sample {
+            timestamp: self.last_timestamp,
+            value: self.last_value,
+        })
+    }
 }
 
 impl<'a> Iterator for XORIterator<'a> {
@@ -127,6 +146,8 @@ impl<'a> Iterator for XORIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.idx >= self.num_samples {
             return None;
+        } else if self.idx == self.num_samples - 1 {
+            return Some(self.read_last_sample());
         }
         Some(match self.idx {
             0 => self.read_first_sample(),

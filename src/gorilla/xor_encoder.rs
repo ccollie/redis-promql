@@ -12,7 +12,7 @@ use valkey_module::raw;
 
 
 #[derive(Debug)]
-pub struct XORChunkEncoder {
+pub struct XOREncoder {
     pub writer: BitWriter<Vec<u8>, BigEndian>,
     pub num_samples: usize,
     pub timestamp: i64,
@@ -22,7 +22,7 @@ pub struct XORChunkEncoder {
     pub timestamp_delta: i64,
 }
 
-impl GetSize for XORChunkEncoder {
+impl GetSize for XOREncoder {
     fn get_size(&self) -> usize {
         self.writer.writer.get_size()
             + size_of_val(&self.num_samples)
@@ -34,11 +34,11 @@ impl GetSize for XORChunkEncoder {
     }
 }
 
-impl Clone for XORChunkEncoder {
+impl Clone for XOREncoder {
     fn clone(&self) -> Self {
         let buf = self.writer.writer.clone();
         let writer = BitWriter::endian(buf, BigEndian);
-        XORChunkEncoder {
+        XOREncoder {
             writer,
             num_samples: self.num_samples,
             timestamp: self.timestamp,
@@ -50,11 +50,11 @@ impl Clone for XORChunkEncoder {
     }
 }
 
-impl XORChunkEncoder {
-    pub fn new() -> XORChunkEncoder {
+impl XOREncoder {
+    pub fn new() -> XOREncoder {
         let writer = BitWriter::endian(vec![], BigEndian);
 
-        XORChunkEncoder {
+        XOREncoder {
             writer,
             num_samples: 0,
             timestamp: 0,
@@ -92,6 +92,8 @@ impl XORChunkEncoder {
         bytes.write_all(&sample.value.to_be_bytes())?;
 
         self.writer = BitWriter::endian(bytes, BigEndian);
+        self.timestamp = sample.timestamp;
+        self.value = sample.value;
         self.num_samples += 1;
         Ok(())
     }
@@ -109,7 +111,7 @@ impl XORChunkEncoder {
         // I didn't find a more beautiful way to write the uvarint in the bitstream directly,
         // we use SmallVec so at least it's allocated on the stack and not the heap.
         let mut uvarint_bytes = SmallVec::<u8, 9>::new();
-        write_uvarint(timestamp_delta as u64, &mut uvarint_bytes.as_mut_slice())?;
+        write_uvarint(timestamp_delta as u64, &mut uvarint_bytes)?;
         self.writer.write_bytes(&uvarint_bytes)?;
 
         let (leading, trailing) = write_varbit_xor(
@@ -170,7 +172,11 @@ impl XORChunkEncoder {
     }
 
     pub fn iter(&self) -> XORIterator {
-        XORIterator::new(&self.writer.writer, self.num_samples)
+        XORIterator::new(&self)
+    }
+
+    pub(super) fn buf(&self) -> &[u8] {
+        &self.writer.writer
     }
 
     pub fn rdb_save(&self, rdb: *mut raw::RedisModuleIO) {
@@ -183,7 +189,7 @@ impl XORChunkEncoder {
         raw::save_signed(rdb, self.timestamp_delta);
     }
 
-    pub fn rdb_load(rdb: *mut raw::RedisModuleIO) -> Result<XORChunkEncoder, ValkeyError> {
+    pub fn rdb_load(rdb: *mut raw::RedisModuleIO) -> Result<XOREncoder, ValkeyError> {
         let writer = load_bitwriter_from_rdb(rdb)?;
         let num_samples = raw::load_unsigned(rdb)? as usize;
         let timestamp = raw::load_signed(rdb)?;
@@ -192,7 +198,7 @@ impl XORChunkEncoder {
         let trailing_bits_count = raw::load_unsigned(rdb)? as u8;
         let timestamp_delta = raw::load_signed(rdb)?;
 
-        Ok(XORChunkEncoder {
+        Ok(XOREncoder {
             writer,
             num_samples,
             timestamp,
@@ -204,7 +210,7 @@ impl XORChunkEncoder {
     }
 }
 
-impl PartialEq<Self> for XORChunkEncoder {
+impl PartialEq<Self> for XOREncoder {
     fn eq(&self, other: &Self) -> bool {
         if self.num_samples != other.num_samples {
             return false;
@@ -228,7 +234,7 @@ impl PartialEq<Self> for XORChunkEncoder {
     }
 }
 
-impl Eq for XORChunkEncoder {}
+impl Eq for XOREncoder {}
 
 fn save_bitwriter_to_rdb(rdb: *mut raw::RedisModuleIO, writer: &BitWriter<Vec<u8>, BigEndian>) {
     let bytes = &writer.writer;
