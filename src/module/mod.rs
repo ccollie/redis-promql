@@ -1,7 +1,7 @@
-use valkey_module::{Context, ValkeyError, ValkeyResult, ValkeyString};
+use crate::storage::time_series::TimeSeries;
 pub(crate) use ts_db::*;
 pub(crate) use utils::*;
-use crate::storage::time_series::TimeSeries;
+use valkey_module::{Context, ValkeyError, ValkeyResult, ValkeyString};
 
 mod timeseries_api;
 mod result;
@@ -9,6 +9,7 @@ mod utils;
 mod ts_db;
 pub mod arg_parse;
 pub(crate) mod commands;
+pub mod types;
 
 pub(crate) fn with_timeseries(ctx: &Context, key: &ValkeyString, f: impl FnOnce(&TimeSeries) -> ValkeyResult) -> ValkeyResult {
     let redis_key = ctx.open_key(key);

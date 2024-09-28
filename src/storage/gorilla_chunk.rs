@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use crate::common::current_time_millis;
 use crate::common::types::Timestamp;
 use crate::error::{TsdbError, TsdbResult};
@@ -111,6 +112,21 @@ impl GorillaChunk {
         (uncompressed_size / compressed_size) as f64
     }
 
+    pub fn process_samples<F, State>(&self, state: &mut State, mut f: F) -> TsdbResult<()>
+    where
+        F: FnMut(&mut State, &Sample) -> ControlFlow<()>,
+    {
+        for value in self.xor_encoder.iter() {
+            let sample = value?;
+            match f(state, &sample) {
+                ControlFlow::Break(_) => break,
+                ControlFlow::Continue(_) => continue,
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn process_samples_in_range<F, State>(
         &self,
         state: &mut State,
@@ -119,7 +135,7 @@ impl GorillaChunk {
         mut f: F
     ) -> TsdbResult<()>
     where
-        F: FnMut(&mut State, &Sample) -> TsdbResult<ControlFlow<()>>,
+        F: FnMut(&mut State, &Sample) -> ControlFlow<()>,
     {
         for value in self.xor_encoder.iter() {
             let sample = value?;
@@ -129,7 +145,7 @@ impl GorillaChunk {
             if sample.timestamp >= end_ts {
                 break;
             }
-            match f(state, &sample)? {
+            match f(state, &sample) {
                 ControlFlow::Break(_) => break,
                 ControlFlow::Continue(_) => continue,
             }
@@ -163,7 +179,7 @@ impl GorillaChunk {
         self.process_samples_in_range(&mut inner_state, start, end, |state, sample| {
             state.0.push(sample.timestamp);
             state.1.push(sample.value);
-            Ok(ControlFlow::Continue(()))
+            ControlFlow::Continue(())
         })?;
 
         f(state, &timestamps, &values)
@@ -203,8 +219,38 @@ impl GorillaChunk {
         &self.xor_encoder.writer.writer
     }
 
-    pub fn iter(&self) -> ChunkIter {
+    pub fn iter(&self) -> impl Iterator<Item = Sample> + '_ {
         ChunkIter::new(self)
+    }
+
+    pub fn samples_by_timestamps(&self, timestamps: &[Timestamp]) -> TsdbResult<Vec<Sample>>  {
+        if self.num_samples() == 0 || timestamps.len() == 0 {
+            return Ok(vec![]);
+        }
+        let mut samples = Vec::with_capacity(timestamps.len());
+        let mut timestamps = timestamps;
+        let last_timestamp = timestamps[timestamps.len() - 1];
+        for item in self.xor_encoder.iter() {
+            let sample = item?;
+            if timestamps.is_empty() || sample.timestamp > last_timestamp {
+                break;
+            }
+            let first_ts = timestamps[0];
+            match sample.timestamp.cmp(&first_ts) {
+                Ordering::Less => continue,
+                Ordering::Equal => {
+                    timestamps = &timestamps[1..];
+                    samples.push(sample);
+                }
+                Ordering::Greater => {
+                    timestamps = &timestamps[1..];
+                    if timestamps.is_empty() {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(samples)
     }
 }
 

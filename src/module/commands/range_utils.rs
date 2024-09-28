@@ -1,37 +1,36 @@
-use std::collections::HashMap;
 use crate::aggregators::{AggOp, Aggregator};
 use crate::common::types::{Sample, Timestamp};
 use crate::storage::time_series::TimeSeries;
-use crate::storage::{AggregationOptions, BucketTimestamp, RangeAlignment, RangeOptions};
+use ahash::AHashMap;
+use crate::module::types::{AggregationOptions, BucketTimestamp, RangeAlignment, RangeOptions};
 
-#[derive(Default)]
-pub struct SeriesGroupItem<'a> {
-    pub series: &'a TimeSeries,
-    pub samples: Vec<Sample>,
+pub struct GroupMeta<'a> {
+    pub groups: AHashMap<String, Vec<&'a TimeSeries>>,
 }
 
-#[derive(Default)]
-pub struct SeriesGroup<'a> {
-    pub series: Vec<SeriesGroupItem<'a>>,
-    pub label_value: String
-}
-
-impl<'a> SeriesGroup<'a> {
-    pub fn new(label_value: String) -> SeriesGroup {
+impl<'a> GroupMeta<'a> {
+    pub fn new() -> Self {
         Self {
-            series: Default::default(),
-            label_value
+            groups: Default::default(),
         }
     }
 
-    pub fn add_series(&mut self, series: &TimeSeries, samples: Vec<Sample>) {
-        self.series.push(SeriesGroupItem {
-            series,
-            samples,
-        })
+    pub fn add_series(&mut self, series: &'a TimeSeries, label_name: &str) {
+        if let Some(value) = series.label_value(label_name) {
+            match self.groups.get_mut(value) {
+                Some(group) => {
+                    group.push(series)
+                }
+                None => {
+                    let mut group = Vec::with_capacity(8);
+                    group.push(series);
+                    self.groups.insert(value.to_string(), group);
+                }
+            }
+        }
     }
-
 }
+
 
 pub(crate) struct AggrIterator {
     aggregator: Aggregator,
@@ -149,7 +148,7 @@ fn bucket_start_normalize(bucket_ts: Timestamp) -> Timestamp {
     bucket_ts.max(0)
 }
 
-pub(crate) fn get_range_internal(
+fn get_range_internal(
     series: &TimeSeries,
     args: &RangeOptions,
     check_retention: bool
@@ -158,17 +157,26 @@ pub(crate) fn get_range_internal(
     let mut samples = if let Some(filter) = &args.filter {
         // this is the most restrictive filter, so apply it first
         if let Some(timestamps) = &filter.timestamps {
-            series.timestamp_filter_iter(timestamps).collect::<Vec<_>>()
+            series.samples_by_timestamps(&timestamps)
+                .unwrap_or_else(|e| {
+                    // todo: properly handle error and log
+                    vec![]
+                })
+                .into_iter()
+                .filter(|sample| sample.timestamp >= start_timestamp && sample.timestamp <= end_timestamp)
+                .collect()
         } else {
-            series.iter_range(start_timestamp, end_timestamp).collect::<Vec<_>>()
+            series.range_iter(start_timestamp, end_timestamp).collect::<Vec<_>>()
         }
     } else {
-        series.iter_range(start_timestamp, end_timestamp).collect::<Vec<_>>()
+        series.range_iter(start_timestamp, end_timestamp).collect::<Vec<_>>()
     };
-    let is_aggregation = args.aggregation.is_some();
+
     if let Some(filter) = args.get_value_filter() {
         samples.retain(|s| s.value >= filter.min && s.value <= filter.max);
     };
+
+    let is_aggregation = args.aggregation.is_some();
 
     if !is_aggregation {
         if let Some(count) = args.count {
@@ -199,8 +207,15 @@ pub(crate) fn get_range(series: &TimeSeries, args: &RangeOptions, check_retentio
     } else {
         range
     }
+    // group by
 }
-pub(crate) fn get_series_aggregator(series: &TimeSeries, args: &RangeOptions, aggr_options: &AggregationOptions, check_retention: bool) -> AggrIterator {
+
+fn get_series_aggregator(
+    series: &TimeSeries,
+    args: &RangeOptions,
+    aggr_options: &AggregationOptions,
+    check_retention: bool
+) -> AggrIterator {
     let (start_timestamp, end_timestamp) = get_date_range(series, args, check_retention);
 
     let mut timestamp_alignment: Timestamp = 0;
@@ -226,17 +241,18 @@ pub(crate) fn get_series_aggregator(series: &TimeSeries, args: &RangeOptions, ag
     }
 }
 
-pub fn group_series_by_label_value<'a>(series: &'a Vec<&TimeSeries>, label: &str) -> HashMap<String, Vec<&'a TimeSeries>> {
-    let mut grouped: HashMap<String, Vec<&TimeSeries>> = HashMap::new();
+pub fn group_series_by_label_value<'a>(series: &'a Vec<&TimeSeries>, label: &str) -> AHashMap<String, Vec<&'a TimeSeries>> {
+    let mut grouped: AHashMap<String, Vec<&TimeSeries>> = AHashMap::new();
 
     for ts in series.iter() {
         if let Some(label_value) = ts.label_value(label) {
-            grouped.entry(label_value.clone())
-                .or_insert_with(Vec::new)
-                .push(ts);
+            if let Some(list) = grouped.get_mut(label_value) {
+                list.push(ts);
+            } else {
+                grouped.insert(label_value.to_string(), vec![ts]);
+            }
         }
     }
 
     grouped
 }
-

@@ -1,5 +1,5 @@
 use super::index_key::*;
-use crate::common::types::Label;
+use crate::common::types::{Label, Timestamp};
 use crate::error::TsdbResult;
 use crate::index::filters::{get_ids_by_matchers_optimized, process_equals_match, process_iterator};
 use crate::module::{with_timeseries, VKM_SERIES_TYPE};
@@ -16,7 +16,7 @@ use std::ops::ControlFlow::Continue;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{RwLock, RwLockReadGuard};
 use valkey_module::redisvalue::ValkeyValueKey;
-use valkey_module::{Context, ValkeyString, ValkeyValue};
+use valkey_module::{Context, ValkeyResult, ValkeyString, ValkeyValue};
 
 /// Type for the key of the index. Use instead of `String` because Valkey keys are binary safe not utf8 safe.
 pub type KeyType = Box<[u8]>;
@@ -429,8 +429,7 @@ impl TimeSeriesIndex {
         inner.series_ids_by_matchers(matchers)
     }
 
-    /// Returns a list of all series matching `matchers` while having samples in the range
-    /// [`start`, `end`]
+    /// Returns a list of all series matching `matchers`
     pub(crate) fn series_keys_by_matchers(&self, ctx: &Context, matchers: &[Matchers]) -> Vec<ValkeyString> {
         let inner = self.inner.read().unwrap();
         let bitmap = inner.series_ids_by_matchers(matchers);
@@ -442,6 +441,30 @@ impl TimeSeriesIndex {
             }
         }
         result
+    }
+
+    pub fn with_series_by_matchers<F, STATE>(
+        &self,
+        ctx: &Context,
+        matcher: Matchers,
+        start_ts: Timestamp,
+        end_ts: Timestamp,
+        state: &mut STATE,
+        f: F,
+    ) -> ValkeyResult<()>
+    where F: Fn(&mut STATE, &mut TimeSeries),  // todo: return ControlFLow
+    {
+        let keys = self.series_keys_by_matchers(ctx, &[matcher]);
+        for key in keys.iter() {
+            let redis_key = ctx.open_key_writable(key);
+            let series = redis_key.get_value::<TimeSeries>(&VKM_SERIES_TYPE)?;
+            if let Some(series) = series {
+                if series.overlaps(start_ts, end_ts) {
+                    f(state, series);
+                }
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn find_ids_by_matchers(&self, matchers: &Matchers) -> Bitmap64 {

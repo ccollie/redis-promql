@@ -14,12 +14,15 @@ mod delete_series;
 mod top_queries;
 mod active_queries;
 mod reset_rollup_cache;
+mod range_arg_parse;
+mod mrange;
 
 pub use alter::*;
 pub use delete_range::*;
 pub use create::*;
 pub use metadata::*;
 pub use madd::*;
+pub use mrange::*;
 pub use query::*;
 pub use delete_key_range::*;
 pub use range::*;
