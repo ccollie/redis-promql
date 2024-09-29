@@ -1,3 +1,4 @@
+use crate::aggregators::Aggregator;
 use crate::common::types::Timestamp;
 use crate::module::arg_parse::parse_timestamp;
 use crate::storage::time_series::TimeSeries;
@@ -5,12 +6,10 @@ use crate::storage::MAX_TIMESTAMP;
 use metricsql_parser::prelude::Matchers;
 use metricsql_runtime::types::TimestampTrait;
 use std::cmp::Ordering;
+use std::collections::BTreeSet;
 use std::fmt::Display;
 use std::time::Duration;
-use ahash::HashSet;
 use valkey_module::{ValkeyError, ValkeyResult, ValkeyString};
-use crate::aggregators::Aggregator;
-use crate::error::{TsdbError, TsdbResult};
 
 #[derive(Clone, Default, Debug, PartialEq, Copy)]
 pub enum TimestampRangeValue {
@@ -37,7 +36,7 @@ impl TimestampRangeValue {
         match self {
             Earliest => series.first_timestamp,
             Latest => series.last_timestamp,
-            Now => Timestamp::now(),
+            Now => Timestamp::now(), // todo: use valkey server value
             Value(ts) => *ts,
         }
     }
@@ -140,6 +139,7 @@ impl PartialOrd for TimestampRangeValue {
 }
 
 // todo: better naming
+#[derive(Clone, Default, Debug, PartialEq, Copy)]
 pub struct TimestampRange {
     start: TimestampRangeValue,
     end: TimestampRangeValue,
@@ -159,6 +159,19 @@ impl TimestampRange {
 
     pub fn end(&self) -> &TimestampRangeValue {
         &self.end
+    }
+
+    pub fn get_series_range(&self, series: &TimeSeries, check_retention: bool) -> (Timestamp, Timestamp) {
+        // In case a retention is set shouldn't return chunks older than the retention
+        let mut start_timestamp = self.start.to_series_timestamp(series);
+        let end_timestamp = self.end.to_series_timestamp(series);
+        if check_retention && !series.retention.is_zero() {
+            // todo: check for i64 overflow
+            let retention_ms = series.retention.as_millis() as i64;
+            let earliest = series.last_timestamp - retention_ms;
+            start_timestamp = start_timestamp.max(earliest);
+        }
+        (start_timestamp, end_timestamp)
     }
 }
 
@@ -194,9 +207,9 @@ pub struct ValueFilter {
 }
 
 impl ValueFilter {
-    pub(crate) fn new(min: f64, max: f64) -> TsdbResult<Self> {
+    pub(crate) fn new(min: f64, max: f64) -> ValkeyResult<Self> {
         if min > max {
-            return Err(TsdbError::General("ERR invalid range".to_string()));
+            return Err(ValkeyError::Str("ERR invalid range"));
         }
         Ok(Self { min, max })
     }
@@ -300,15 +313,15 @@ pub struct RangeGroupingOptions {
 
 #[derive(Debug, Default, Clone)]
 pub struct RangeOptions {
-    pub start: TimestampRangeValue,
-    pub end: TimestampRangeValue,
+    pub date_range: TimestampRange,
     pub count: Option<usize>,
     pub aggregation: Option<AggregationOptions>,
-    pub filter: Option<RangeFilter>,
+    pub timestamp_filter: Option<Vec<Timestamp>>,
+    pub value_filter: Option<ValueFilter>,
     pub series_selector: Matchers,
     pub alignment: Option<RangeAlignment>,
     pub with_labels: bool,
-    pub selected_labels: HashSet<String>,
+    pub selected_labels: BTreeSet<String>,
     pub grouping: Option<RangeGroupingOptions>,
     pub latest: bool
 }
@@ -316,35 +329,15 @@ pub struct RangeOptions {
 impl RangeOptions {
     pub fn new(start: Timestamp, end: Timestamp) -> Self {
         Self {
-            start: TimestampRangeValue::Value(start),
-            end: TimestampRangeValue::Value(end),
+            date_range: TimestampRange {
+                start: TimestampRangeValue::Value(start),
+                end: TimestampRangeValue::Value(end),
+            },
             ..Default::default()
         }
     }
 
-    pub fn set_value_range(&mut self, start: f64, end: f64) -> TsdbResult<()> {
-        let mut filter = self.filter.clone().unwrap_or_default();
-        filter.value = Some(ValueFilter::new(start, end)?);
-        self.filter = Some(filter);
-        Ok(())
-    }
-
-    pub fn set_valid_timestamps(&mut self, timestamps: Vec<Timestamp>) {
-        let mut filter = self.filter.clone().unwrap_or_default();
-        filter.timestamps = Some(timestamps);
-        self.filter = Some(filter);
-    }
-
     pub fn is_aggregation(&self) -> bool {
         self.aggregation.is_some()
-    }
-
-    pub fn get_value_filter(&self) -> Option<&ValueFilter> {
-        if let Some(filter) = &self.filter {
-            if let Some(value_filter) = &filter.value {
-                return Some(value_filter)
-            }
-        }
-        None
     }
 }

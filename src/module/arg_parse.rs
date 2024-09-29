@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use crate::common::current_time_millis;
 use crate::common::types::{Label, Timestamp};
 use crate::error::{TsdbError, TsdbResult};
@@ -6,10 +7,16 @@ use chrono::DateTime;
 use metricsql_parser::parser::{parse_duration_value, parse_metric_name as parse_metric, parse_number};
 use metricsql_parser::prelude::Matchers;
 use metricsql_runtime::parse_metric_selector;
-use std::fmt::Display;
+use std::iter::Skip;
 use std::time::Duration;
-use valkey_module::{ValkeyError, ValkeyResult, ValkeyString};
-use crate::module::types::{TimestampRange, TimestampRangeValue};
+use std::vec::IntoIter;
+use valkey_module::{NextArg, ValkeyError, ValkeyResult, ValkeyString};
+use crate::aggregators::Aggregator;
+use crate::module::types::{AggregationOptions, BucketTimestamp, RangeGroupingOptions, TimestampRange, TimestampRangeValue, ValueFilter};
+
+const MAX_TS_VALUES_FILTER: usize = 16;
+const CMD_ARG_COUNT: &'static str = "COUNT";
+const CMD_PARAM_REDUCER: &'static str = "REDUCE";
 
 pub fn parse_number_arg(arg: &ValkeyString, name: &str) -> ValkeyResult<f64> {
     if let Ok(value) = arg.parse_float() {
@@ -85,14 +92,9 @@ pub fn parse_timestamp(arg: &str) -> ValkeyResult<Timestamp> {
     Ok(value)
 }
 
+
 pub fn parse_timestamp_range_value(arg: &str) -> ValkeyResult<TimestampRangeValue> {
     TimestampRangeValue::try_from(arg)
-}
-
-pub fn parse_timestamp_range(start: &ValkeyString, end: &ValkeyString) -> ValkeyResult<TimestampRange> {
-    let first: TimestampRangeValue = start.try_into()?;
-    let second: TimestampRangeValue = end.try_into()?;
-    TimestampRange::new(first, second)
 }
 
 pub fn parse_duration_arg(arg: &ValkeyString) -> ValkeyResult<Duration> {
@@ -168,3 +170,150 @@ pub fn parse_chunk_size(arg: &str) -> ValkeyResult<usize> {
     Ok(chunk_size)
 }
 
+
+pub fn parse_timestamp_range(args: &mut Skip<IntoIter<ValkeyString>>) -> ValkeyResult<TimestampRange> {
+    let first_arg = args.next_str()?;
+    let start = parse_timestamp_range_value(first_arg)?;
+    let end_value = if let Ok(arg) = args.next_str() {
+        parse_timestamp_range_value(arg).map_err(|_e| {
+            ValkeyError::Str("ERR invalid end timestamp")
+        })?
+    } else {
+        TimestampRangeValue::Latest
+    };
+    TimestampRange::new(start, end_value)
+}
+
+pub fn parse_timestamp_filter(args: &mut Skip<IntoIter<ValkeyString>>, is_valid_arg: fn(&str) -> bool) -> ValkeyResult<Vec<Timestamp>> {
+    // FILTER_BY_TS already seen
+    let mut values: Vec<Timestamp> = Vec::new();
+    while let Ok(arg) = args.next_str() {
+        // TODO: !!! problem. arg should not be consumed if the func returns true
+        if is_valid_arg(arg) {
+            break;
+        }
+        if let Ok(timestamp) = parse_timestamp(arg) {
+            values.push(timestamp);
+        } else  {
+            return Err(ValkeyError::Str("TSDB: cannot parse timestamp"));
+        }
+        if values.len() == MAX_TS_VALUES_FILTER {
+            break
+        }
+    }
+    if values.is_empty() {
+        return Err(ValkeyError::Str("TSDB: FILTER_BY_TS one or more arguments are missing"));
+    }
+    values.sort();
+    values.dedup();
+    Ok(values)
+}
+
+pub fn parse_value_filter(args: &mut Skip<IntoIter<ValkeyString>>) -> ValkeyResult<ValueFilter> {
+    let min = parse_number_with_unit(args.next_str()?)
+        .map_err(|_| ValkeyError::Str("TSDB: cannot parse filter min parameter"))?;
+    let max = parse_number_with_unit(args.next_str()?)
+        .map_err(|_| ValkeyError::Str("TSDB: cannot parse filter max parameter"))?;
+    if max < min || min > max {
+        return Err(ValkeyError::Str("TSDB: filter min parameter is greater than max"));
+    }
+    ValueFilter::new(min, max)
+}
+
+pub fn parse_count(args: &mut Skip<IntoIter<ValkeyString>>) -> ValkeyResult<usize> {
+    let next = args.next_arg()?;
+    let count = parse_integer_arg(&next, CMD_ARG_COUNT, false)
+        .map_err(|_| ValkeyError::Str("TSDB: COUNT must be a positive integer"))?;
+    if count > usize::MAX as i64 {
+        return Err(ValkeyError::Str("TSDB: COUNT value is too large"));
+    }
+    Ok(count as usize)
+}
+
+pub fn parse_label_list(args: &mut Skip<IntoIter<ValkeyString>>, is_cmd_token: fn(&str) -> bool) -> ValkeyResult<BTreeSet<String>> {
+    let mut labels: BTreeSet<String> = BTreeSet::new();
+
+    while let Ok(label) = args.next_str() {
+        // TODO: !!! problem. arg should not be consumed if the func returns true
+        if is_cmd_token(label) {
+            break;
+        }
+        if labels.contains(label) {
+            let msg = format!("TSDB: duplicate label: {label}");
+            return Err(ValkeyError::String(msg));
+        }
+        labels.insert(label.to_string());
+    }
+
+    Ok(labels)
+}
+
+const CMD_ARG_EMPTY: &'static str = "EMPTY";
+const CMD_ARG_BUCKET_TIMESTAMP: &str = "BUCKETTIMESTAMP";
+
+pub fn parse_aggregation_options(args: &mut Skip<IntoIter<ValkeyString>>) -> ValkeyResult<AggregationOptions> {
+    // AGGREGATION token already seen
+    let agg_str = args.next_str()
+        .map_err(|_e| ValkeyError::Str("TSDB: Error parsing AGGREGATION"))?;
+    let aggregator = Aggregator::try_from(agg_str)?;
+    let bucket_duration = parse_duration_arg(&args.next_arg()?)
+        .map_err(|_e| ValkeyError::Str("Error parsing bucketDuration"))?;
+
+    let mut aggr: AggregationOptions = AggregationOptions {
+        aggregator,
+        bucket_duration,
+        timestamp_output: BucketTimestamp::Start,
+        time_delta: 0,
+        empty: false,
+    };
+    let mut arg_count: usize = 0;
+
+    while let Ok(arg) = args.next_str() {
+        match arg {
+            arg if arg.eq_ignore_ascii_case(CMD_ARG_EMPTY) => {
+                aggr.empty = true;
+                arg_count += 1;
+            }
+            arg if arg.eq_ignore_ascii_case(CMD_ARG_BUCKET_TIMESTAMP) => {
+                let next = args.next_str()?;
+                arg_count += 1;
+                aggr.timestamp_output = BucketTimestamp::try_from(next)?;
+            }
+            _ => {
+                return Err(ValkeyError::Str("TSDB: unknown AGGREGATION option"))
+            }
+        }
+        if arg_count == 3 {
+            break;
+        }
+    }
+
+    Ok(aggr)
+}
+
+
+pub fn parse_grouping_params(args: &mut Skip<IntoIter<ValkeyString>>) -> ValkeyResult<RangeGroupingOptions> {
+    // GROUPBY token already seen
+    let label = args.next_str()?;
+    let token = args.next_str()
+        .map_err(|_| ValkeyError::Str("TSDB: missing REDUCE"))?;
+    if !token.eq_ignore_ascii_case(CMD_PARAM_REDUCER) {
+        let msg = format!("TSDB: expected \"{CMD_PARAM_REDUCER}\", found \"{token}\"");
+        return Err(ValkeyError::String(msg));
+    }
+    let agg_str = args.next_str()
+        .map_err(|_e| ValkeyError::Str("TSDB: Error parsing grouping reducer"))?;
+
+    let aggregator = Aggregator::try_from(agg_str)
+        .map_err(|_| {
+            let msg = format!("TSDB: invalid grouping aggregator \"{}\"", agg_str);
+            ValkeyError::String(msg)
+        })?;
+
+    Ok(
+        RangeGroupingOptions {
+            group_label: label.to_string(),
+            aggregator
+        }
+    )
+}

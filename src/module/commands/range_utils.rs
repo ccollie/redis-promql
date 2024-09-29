@@ -2,7 +2,7 @@ use crate::aggregators::{AggOp, Aggregator};
 use crate::common::types::{Sample, Timestamp};
 use crate::storage::time_series::TimeSeries;
 use ahash::AHashMap;
-use crate::module::types::{AggregationOptions, BucketTimestamp, RangeAlignment, RangeOptions};
+use crate::module::types::{AggregationOptions, BucketTimestamp, RangeAlignment, RangeOptions, TimestampRange, ValueFilter};
 
 pub struct GroupMeta<'a> {
     pub groups: AHashMap<String, Vec<&'a TimeSeries>>,
@@ -148,63 +148,50 @@ fn bucket_start_normalize(bucket_ts: Timestamp) -> Timestamp {
     bucket_ts.max(0)
 }
 
-fn get_range_internal(
+// todo: move elsewhere, better name
+pub(super) fn get_range_internal(
     series: &TimeSeries,
-    args: &RangeOptions,
-    check_retention: bool
+    date_range: &TimestampRange,
+    check_retention: bool,
+    timestamp_filter: &Option<Vec<Timestamp>>,
+    value_filter: &Option<ValueFilter>
 ) -> Vec<Sample> {
-    let (start_timestamp, end_timestamp) = get_date_range(series, args, check_retention);
-    let mut samples = if let Some(filter) = &args.filter {
-        // this is the most restrictive filter, so apply it first
-        if let Some(timestamps) = &filter.timestamps {
-            series.samples_by_timestamps(&timestamps)
-                .unwrap_or_else(|e| {
-                    // todo: properly handle error and log
-                    vec![]
-                })
-                .into_iter()
-                .filter(|sample| sample.timestamp >= start_timestamp && sample.timestamp <= end_timestamp)
-                .collect()
-        } else {
-            series.range_iter(start_timestamp, end_timestamp).collect::<Vec<_>>()
-        }
+    let (start_timestamp, end_timestamp) = date_range.get_series_range(series, check_retention);
+
+    let mut samples = if let Some(timestamps) = timestamp_filter {
+        series.samples_by_timestamps(&timestamps)
+            .unwrap_or_else(|e| {
+                // todo: properly handle error and log
+                vec![]
+            })
+            .into_iter()
+            .filter(|sample| sample.timestamp >= start_timestamp && sample.timestamp <= end_timestamp)
+            .collect()
     } else {
         series.range_iter(start_timestamp, end_timestamp).collect::<Vec<_>>()
     };
 
-    if let Some(filter) = args.get_value_filter() {
+    if let Some(filter) = value_filter {
         samples.retain(|s| s.value >= filter.min && s.value <= filter.max);
     };
 
-    let is_aggregation = args.aggregation.is_some();
-
-    if !is_aggregation {
-        if let Some(count) = args.count {
-            samples.truncate(count);
-        }
-    }
     samples
 }
 
-pub fn get_date_range(series: &TimeSeries, args: &RangeOptions, check_retention: bool) -> (Timestamp, Timestamp) {
-    // In case a retention is set shouldn't return chunks older than the retention
-    let mut start_timestamp = args.start.to_series_timestamp(series);
-    let end_timestamp = args.end.to_series_timestamp(series);
-    if check_retention && !series.retention.is_zero() {
-        // todo: check for i64 overflow
-        let retention_ms = series.retention.as_millis() as i64;
-        let earliest = series.last_timestamp - retention_ms;
-        start_timestamp = start_timestamp.max(earliest);
-    }
-    (start_timestamp, end_timestamp)
-}
-
 pub(crate) fn get_range(series: &TimeSeries, args: &RangeOptions, check_retention: bool) -> Vec<Sample> {
-    let range = get_range_internal(series, args, check_retention);
+    let mut range = get_range_internal(
+                                   series,
+                                   &args.date_range,
+                                   check_retention,
+                                   &args.timestamp_filter,
+                                   &args.value_filter);
     if let Some(aggr_options) = &args.aggregation {
         let mut aggr_iterator = get_series_aggregator(series, args, aggr_options, check_retention);
         aggr_iterator.calculate(range.into_iter())
     } else {
+        if let Some(count) = args.count {
+            range.truncate(count);
+        }
         range
     }
     // group by
@@ -216,7 +203,7 @@ fn get_series_aggregator(
     aggr_options: &AggregationOptions,
     check_retention: bool
 ) -> AggrIterator {
-    let (start_timestamp, end_timestamp) = get_date_range(series, args, check_retention);
+    let (start_timestamp, end_timestamp) = args.date_range.get_series_range(series, check_retention);
 
     let mut timestamp_alignment: Timestamp = 0;
     if let Some(alignment) = &args.alignment {

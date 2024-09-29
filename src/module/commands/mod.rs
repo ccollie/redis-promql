@@ -16,10 +16,12 @@ mod active_queries;
 mod reset_rollup_cache;
 mod range_arg_parse;
 mod mrange;
+mod join_asof;
 
 pub use alter::*;
 pub use delete_range::*;
 pub use create::*;
+pub use join_asof::*;
 pub use metadata::*;
 pub use madd::*;
 pub use mrange::*;
