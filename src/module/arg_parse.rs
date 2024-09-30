@@ -2,8 +2,15 @@ use crate::aggregators::Aggregator;
 use crate::common::current_time_millis;
 use crate::common::types::{Label, Timestamp};
 use crate::error::{TsdbError, TsdbResult};
-use crate::module::types::{AggregationOptions, BucketTimestamp, RangeGroupingOptions, TimestampRange, TimestampRangeValue, ValueFilter};
-use crate::storage::{MAX_CHUNK_SIZE, MIN_CHUNK_SIZE};
+use crate::module::types::{
+    AggregationOptions,
+    BucketTimestamp,
+    RangeGroupingOptions,
+    TimestampRange,
+    TimestampRangeValue,
+    ValueFilter
+};
+use crate::storage::{DuplicatePolicy, MAX_CHUNK_SIZE, MIN_CHUNK_SIZE};
 use chrono::DateTime;
 use metricsql_parser::parser::{parse_duration_value, parse_metric_name as parse_metric, parse_number};
 use metricsql_parser::prelude::Matchers;
@@ -12,6 +19,7 @@ use std::collections::BTreeSet;
 use std::iter::{Peekable, Skip};
 use std::time::Duration;
 use std::vec::IntoIter;
+use metricsql_parser::ast::Operator;
 use valkey_module::{NextArg, ValkeyError, ValkeyResult, ValkeyString};
 
 const MAX_TS_VALUES_FILTER: usize = 16;
@@ -149,6 +157,31 @@ pub fn parse_metric_name(arg: &str) -> TsdbResult<Vec<Label>> {
     })
 }
 
+pub fn parse_operator(arg: &str) -> ValkeyResult<Operator> {
+    if let Ok(value) = Operator::try_from(arg) {
+        return Ok(value);
+    }
+    let lower = arg.to_ascii_lowercase();
+    match lower.as_str() {
+        "add" => Ok(Operator::Add),
+        "sub" => Ok(Operator::Sub),
+        "mul" => Ok(Operator::Mul),
+        "div" => Ok(Operator::Div),
+        "mod" => Ok(Operator::Mod),
+        "pow" => Ok(Operator::Pow),
+        "eq" => Ok(Operator::Eql),
+        "ne" | "neq" => Ok(Operator::NotEq),
+        "gt" => Ok(Operator::Gt),
+        "gte" => Ok(Operator::Gte),
+        "lt" => Ok(Operator::Lt),
+        "lte" => Ok(Operator::Lte),
+        _ => {
+            let msg = format!("Unknown operator: {}", arg);
+            Err(ValkeyError::String(msg))
+        }
+    }
+}
+
 pub fn parse_chunk_size(args: &mut CommandArgIterator) -> ValkeyResult<usize> {
     let arg = args.next_str()?;
     fn get_error_result() -> ValkeyResult<usize> {
@@ -173,6 +206,20 @@ pub fn parse_chunk_size(args: &mut CommandArgIterator) -> ValkeyResult<usize> {
     Ok(chunk_size)
 }
 
+pub fn parse_duplicate_policy(args: &mut CommandArgIterator) -> ValkeyResult<DuplicatePolicy> {
+    match args.next_str() {
+        Ok(next) => {
+            if let Ok(policy) = DuplicatePolicy::try_from(next) {
+                Ok(policy)
+            } else {
+                Err(ValkeyError::Str("ERR invalid DUPLICATE_POLICY"))
+            }
+        },
+        Err(_e) => {
+            Err(ValkeyError::Str("ERR missing DUPLICATE_POLICY"))
+        }
+    }
+}
 
 pub fn parse_timestamp_range(args: &mut CommandArgIterator) -> ValkeyResult<TimestampRange> {
     let first_arg = args.next_str()?;
@@ -187,14 +234,25 @@ pub fn parse_timestamp_range(args: &mut CommandArgIterator) -> ValkeyResult<Time
     TimestampRange::new(start, end_value)
 }
 
+pub fn parse_retention(args: &mut CommandArgIterator) -> ValkeyResult<Duration> {
+    if let Ok(next) = args.next_str() {
+        match parse_duration(next) {
+            Ok(d) => Ok(d),
+            Err(_) => Err(ValkeyError::Str("ERR invalid duration value")),
+        }
+    } else {
+        Err(ValkeyError::Str("ERR missing RETENTION value"))
+    }
+}
+
 pub fn parse_timestamp_filter(args: &mut CommandArgIterator, is_valid_arg: fn(&str) -> bool) -> ValkeyResult<Vec<Timestamp>> {
     // FILTER_BY_TS already seen
     let mut values: Vec<Timestamp> = Vec::new();
-    while let Ok(arg) = args.next_str() {
-        // TODO: !!! problem. arg should not be consumed if the func returns true
-        if is_valid_arg(arg) {
+    loop {
+        if is_token_or_end(args, is_valid_arg) {
             break;
         }
+        let arg = args.next_str()?;
         if let Ok(timestamp) = parse_timestamp(arg) {
             values.push(timestamp);
         } else  {
@@ -233,14 +291,57 @@ pub fn parse_count(args: &mut CommandArgIterator) -> ValkeyResult<usize> {
     Ok(count as usize)
 }
 
+pub(crate) fn advance_if_next_token(args: &mut CommandArgIterator, token: &str) -> bool {
+    if let Some(next) = args.peek() {
+        let str = next.to_string_lossy();
+        if token.eq_ignore_ascii_case(str.as_ref()) {
+            args.next();
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    }
+}
+
+pub(crate) fn advance_if_next_token_one_of<'a>(args: &mut CommandArgIterator, token: &'a [&str]) -> Option<&'a str> {
+    if let Some(next) = args.peek() {
+        let str = next.to_string_lossy();
+        for token in token.iter() {
+            if token.eq_ignore_ascii_case(str.as_ref()) {
+                args.next();
+                return Some(*token)
+            }
+        }
+        None
+    } else {
+        None
+    }
+}
+
+fn is_token_or_end(args: &mut CommandArgIterator, is_cmd_token: fn(&str) -> bool) -> bool {
+    if let Some(next)  = args.peek() {
+        match next.try_as_str() {
+            Ok(s) => {
+                args.next();
+                is_cmd_token(s)
+            },
+            Err(_) => false,
+        }
+    } else {
+        false
+    }
+}
+
 pub fn parse_label_list(args: &mut CommandArgIterator, is_cmd_token: fn(&str) -> bool) -> ValkeyResult<BTreeSet<String>> {
     let mut labels: BTreeSet<String> = BTreeSet::new();
 
-    while let Ok(label) = args.next_str() {
-        // TODO: !!! problem. arg should not be consumed if the func returns true
-        if is_cmd_token(label) {
+    loop {
+        if is_token_or_end(args, is_cmd_token) {
             break;
         }
+        let label = args.next_str()?;
         if labels.contains(label) {
             let msg = format!("TSDB: duplicate label: {label}");
             return Err(ValkeyError::String(msg));

@@ -1,14 +1,13 @@
 use crate::common::types::{Sample, SampleLike, Timestamp};
 use crate::joins::asof::{merge_apply_asof, MergeAsOfMode, PotentiallyUnmatchedPair};
 use crate::joins::TimeSeriesDataPoint;
-use crate::module::arg_parse::{parse_count, parse_duration_arg, parse_timestamp_filter, parse_timestamp_range, parse_value_filter, CommandArgIterator};
+use crate::module::arg_parse::*;
 use crate::module::commands::range_utils::get_range_internal;
 use crate::module::get_timeseries;
 use crate::module::types::{TimestampRange, ValueFilter};
 use crate::storage::time_series::TimeSeries;
 use joinkit::{EitherOrBoth, Joinkit};
 use metricsql_common::prelude::humanize_duration;
-use std::borrow::BorrowMut;
 use std::fmt::Display;
 use std::str::FromStr;
 use std::time::Duration;
@@ -19,13 +18,26 @@ const CMD_ARG_RANGE: &'static str = "RANGE";
 const CMD_ARG_FILTER_BY_VALUE: &'static str = "FILTER_BY_VALUE";
 const CMD_ARG_FILTER_BY_TS: &'static str = "FILTER_BY_TS";
 const CMD_ARG_COUNT: &'static str = "COUNT";
-const CMD_ARG_DIRECTION: &'static str = "DIRECTION";
 const CMD_ARG_LEFT: &'static str = "LEFT";
 const CMD_ARG_RIGHT: &'static str = "RIGHT";
 const CMD_ARG_INNER: &'static str = "INNER";
 const CMD_ARG_FULL: &'static str = "FULL";
 const CMD_ARG_ASOF: &'static str = "ASOF";
+const CMD_ARG_PRIOR: &'static str = "PRIOR";
+const CMD_ARG_NEXT: &'static str = "NEXT";
 const CMD_ARG_EXCLUSIVE: &'static str = "EXCLUSIVE";
+
+const VALID_ARGS: [&str; 9] = [
+    CMD_ARG_RANGE,
+    CMD_ARG_FILTER_BY_VALUE,
+    CMD_ARG_FILTER_BY_TS,
+    CMD_ARG_COUNT,
+    CMD_ARG_LEFT,
+    CMD_ARG_RIGHT,
+    CMD_ARG_INNER,
+    CMD_ARG_FULL,
+    CMD_ARG_ASOF,
+];
 
 #[derive(Debug, Default, Copy, Clone)]
 pub enum JoinType {
@@ -131,31 +143,19 @@ pub struct JoinOptions {
     pub value_filter: Option<ValueFilter>,
 }
 
-/// VKM.JOIN [LEFT|RIGHT|INNER|ASOF] key1 key2 RANGE start end
+/// VKM.JOIN key1 key2 RANGE start end
+/// [[INNER] | [FULL] | [LEFT [EXCLUSIVE]] | [RIGHT [EXCLUSIVE]] | [ASOF [PRIOR | NEXT] [TOLERANCE 2ms]]]
 /// [FILTER_BY_TS ts...]
 /// [FILTER_BY_VALUE min max]
-/// EXCLUSIVE
 /// [COUNT count]
-/// [DIRECTION <forward|backward>]
-/// [TOLERANCE 2ms]
 pub fn join(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
     let mut args = args.into_iter().skip(1).peekable();
-
-    let join_type_str = args.next_string()?.to_ascii_uppercase();
-    let join_type = match join_type_str.as_str() {
-        CMD_ARG_LEFT => JoinType::Left(false),
-        CMD_ARG_RIGHT => JoinType::Right(false),
-        CMD_ARG_INNER => JoinType::Inner,
-        CMD_ARG_FULL => JoinType::Full,
-        CMD_ARG_ASOF => JoinType::AsOf(JoinAsOfDirection::Forward, Duration::default()),
-        _ => return Err(ValkeyError::Str("invalid join type")),
-    };
 
     let left_key = args.next_arg()?;
     let right_key = args.next_arg()?;
 
     let mut options = JoinOptions {
-        join_type,
+        join_type: Default::default(),
         date_range: Default::default(),
         count: Default::default(),
         timestamp_filter: Default::default(),
@@ -170,23 +170,47 @@ pub fn join(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
     Ok(process_join(left_series, right_series, &options))
 }
 
+fn parse_asof(args: &mut CommandArgIterator) -> ValkeyResult<JoinType> {
+    // ASOF already seen
+    let mut tolerance = Duration::default();
+    let mut direction = JoinAsOfDirection::Forward;
+
+    // ASOF [PRIOR | NEXT] [TOLERANCE duration]
+    if let Some(next) = advance_if_next_token_one_of(args, &[CMD_ARG_PRIOR, CMD_ARG_NEXT]) {
+        if next == CMD_ARG_PRIOR {
+            direction = JoinAsOfDirection::Backward;
+        } else if next == CMD_ARG_NEXT {
+            direction = JoinAsOfDirection::Forward;
+        }
+    }
+    if advance_if_next_token(args, CMD_ARG_TOLERANCE) {
+       let arg = args.next_str()?;
+        tolerance = parse_duration(arg)?
+    }
+
+    Ok(JoinType::AsOf(direction, tolerance))
+}
+
+fn possibly_parse_exclusive(args: &mut CommandArgIterator) -> bool {
+    advance_if_next_token(args, CMD_ARG_EXCLUSIVE)
+}
+
 fn parse_join_args(options: &mut JoinOptions, args: &mut CommandArgIterator) -> ValkeyResult<()> {
     let mut range_found: bool = false;
+    let mut join_type_set = false;
+
+    fn check_join_type_set(is_set: &mut bool) -> ValkeyResult<()> {
+        if *is_set {
+            Err(ValkeyError::Str("TSDB: join type already set"))
+        } else {
+            *is_set = true;
+            Ok(())
+        }
+    }
 
     while let Ok(arg) = args.next_str() {
         let upper = arg.to_ascii_uppercase();
         match upper.as_str() {
-            CMD_ARG_TOLERANCE => {
-                match options.join_type {
-                    JoinType::AsOf(_, ref mut duration) => {
-                        let d = args.next_arg()?;
-                        *duration = parse_duration_arg(&d)?;
-                    }
-                    _ => {
-                        return Err(ValkeyError::Str("ERR: join argument to `TOLERANCE` only valid for ASOF"));
-                    }
-                }
-            }
             CMD_ARG_RANGE => {
                 range_found = true;
                 options.date_range = parse_timestamp_range(args)?;
@@ -200,25 +224,27 @@ fn parse_join_args(options: &mut JoinOptions, args: &mut CommandArgIterator) -> 
             CMD_ARG_COUNT => {
                 options.count = Some(parse_count(args)?);
             }
-            CMD_ARG_DIRECTION => {
-                match options.join_type.borrow_mut() {
-                    JoinType::AsOf(mut direction, _duration) => {
-                        let candidate = args.next_str()?;
-                        direction = candidate.try_into()?;
-                    }
-                    _ => {
-                        return Err(ValkeyError::Str("ERR: join argument to `DIRECTION` only valid for ASOF"));
-                    }
-                }
+            CMD_ARG_LEFT => {
+                check_join_type_set(&mut join_type_set)?;
+                let exclusive = possibly_parse_exclusive(args);
+                options.join_type = JoinType::Left(exclusive);
             }
-            CMD_ARG_EXCLUSIVE => {
-                match options.join_type {
-                    JoinType::Left(ref mut exclusive) => { *exclusive = true; }
-                    JoinType::Right(ref mut exclusive) => { *exclusive = true; }
-                    _ => {
-                        return Err(ValkeyError::Str("ERR: join argument `EXCLUSIVE` current join type"));
-                    }
-                }
+            CMD_ARG_RIGHT => {
+                check_join_type_set(&mut join_type_set)?;
+                let exclusive = possibly_parse_exclusive(args);
+                options.join_type = JoinType::Left(exclusive);
+            }
+            CMD_ARG_INNER => {
+                check_join_type_set(&mut join_type_set)?;
+                options.join_type = JoinType::Inner;
+            }
+            CMD_ARG_FULL => {
+                check_join_type_set(&mut join_type_set)?;
+                options.join_type = JoinType::Full;
+            }
+            CMD_ARG_ASOF => {
+                check_join_type_set(&mut join_type_set)?;
+                options.join_type = parse_asof(args)?;
             }
             _ => return Err(ValkeyError::Str("invalid JOIN command argument")),
         }
@@ -231,21 +257,7 @@ fn parse_join_args(options: &mut JoinOptions, args: &mut CommandArgIterator) -> 
 }
 
 fn is_arg_valid(arg: &str) -> bool {
-    match arg {
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_TOLERANCE) => true,
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_RANGE) => true,
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_FILTER_BY_VALUE) => true,
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_FILTER_BY_TS) => true,
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_COUNT) => true,
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_DIRECTION) => true,
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_LEFT) => true,
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_RIGHT) => true,
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_INNER) => true,
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_FULL) => true,
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_ASOF) => true,
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_EXCLUSIVE) => true,
-        _ => false,
-    }
+    VALID_ARGS.iter().any(|x| x.eq_ignore_ascii_case(arg))
 }
 
 type MergeRow = TimeSeriesDataPoint<Timestamp, (f64, Option<f64>)>;
@@ -274,9 +286,11 @@ fn process_join(left_series: &TimeSeries, right_series: &TimeSeries, options: &J
 }
 
 fn join_internal(left: &Vec<Sample>, right: &Vec<Sample>, options: &JoinOptions) -> ValkeyValue {
-    if options.join_type.is_asof() {
-        return join_asof(left, right, options);
-    }
+
+    let is_exclusive = match options.join_type {
+        JoinType::Left(exclusive) | JoinType::Right(exclusive) => exclusive,
+        _ => false
+    };
 
     let mut state: Vec<ValkeyValue> = Vec::with_capacity(left.len().max(right.len()));
 
@@ -305,27 +319,46 @@ fn join_internal(left: &Vec<Sample>, right: &Vec<Sample>, options: &JoinOptions)
         }
     }
 
-    match options.join_type {
-        JoinType::Left(exclusive) => {
-            if exclusive {
-                join_left_exclusive(&mut state, left, right, acc_exclusive)
-            } else {
-                join_left(&mut state, left, right, acc)
-            }
-        }
-        JoinType::Right(exclusive) => if exclusive {
-            join_right_exclusive(&mut state, left, right, acc_exclusive)
-        } else {
-            join_right(&mut state, left, right, acc)
-        }
-        JoinType::Inner => join_inner(&mut state, left, right, acc),
-        JoinType::Full => join_full(&mut state, left, right, acc),
-        _ => unreachable!("join type unexpected")
-    }
+    let mapper = if is_exclusive {
+        acc_exclusive
+    } else {
+        acc
+    };
+
+    join_samples_internal(left, right, options, &mut state, mapper);
 
     ValkeyValue::Array(state)
 }
 
+pub(crate) fn join_samples_internal<F, STATE>(
+    left: &Vec<Sample>,
+    right: &Vec<Sample>,
+    options: &JoinOptions,
+    state: &mut STATE,
+    f: F,
+)
+where F: Fn(&mut STATE, JoinResultRow)
+{
+    match options.join_type {
+        JoinType::AsOf(..) => {
+            join_asof_internal(left, right, options, state, f)
+        }
+        JoinType::Left(exclusive) => {
+            if exclusive {
+                join_left_exclusive(state, left, right, f)
+            } else {
+                join_left(state, left, right, f)
+            }
+        }
+        JoinType::Right(exclusive) => if exclusive {
+            join_right_exclusive(state, left, right, f)
+        } else {
+            join_right(state, left, right, f)
+        }
+        JoinType::Inner => join_inner(state, left, right, f),
+        JoinType::Full => join_full(state, left, right, f),
+    }
+}
 
 fn join_left<F, STATE>(state: &mut STATE, left: &Vec<Sample>, right: &Vec<Sample>, f: F)
 where
@@ -428,27 +461,27 @@ fn convert_join_item(item: EitherOrBoth<&Sample, &Sample>) -> JoinResultRow {
 }
 
 fn join_asof(left: &Vec<Sample>, right: &Vec<Sample>, options: &JoinOptions) -> ValkeyValue {
-    let joined = join_asof_internal(&left, &right, options);
 
-    let result = joined.into_iter().map(|x| {
-        let TimeSeriesDataPoint { timestamp, value } = x;
-        let other_value = if let Some(val) = value.1 {
-            ValkeyValue::Float(val)
-        } else {
-            ValkeyValue::Null
-        };
-        let row = vec![
-            ValkeyValue::from(timestamp),
-            ValkeyValue::Float(value.0),
-            other_value,
-        ];
-        ValkeyValue::Array(row)
-    }).collect::<Vec<ValkeyValue>>();
+    let mut state: Vec<ValkeyValue> = Vec::with_capacity(left.len().max(right.len()));
 
-    result.into()
+    fn mapper(state: &mut Vec<ValkeyValue>, row: JoinResultRow) {
+        let value = join_row_to_value(&row);
+        state.push(value);
+    }
+
+    join_asof_internal(&left, &right, options, &mut state, mapper);
+
+    ValkeyValue::Array(state)
 }
 
-fn join_asof_internal(left_samples: &Vec<Sample>, right_samples: &Vec<Sample>, options: &JoinOptions) -> Vec<MergeRow> {
+fn join_asof_internal<F, STATE>(left_samples: &Vec<Sample>,
+                                right_samples: &Vec<Sample>,
+                                options: &JoinOptions,
+                                state: &mut STATE,
+                                f: F)
+where
+    F: Fn(&mut STATE, JoinResultRow),
+{
     let (tolerance, merge_mode) = match &options.join_type {
         JoinType::AsOf(direction, duration) => {
             let merge_mode = match direction {
@@ -460,10 +493,11 @@ fn join_asof_internal(left_samples: &Vec<Sample>, right_samples: &Vec<Sample>, o
         _ => panic!("asof JoinType expected")
     };
 
-    merge_apply_asof(&left_samples, &right_samples, tolerance, merge_mode)
-        .iter()
-        .map(convert_unmatched_pair)
-        .collect()
+    for row in merge_apply_asof(&left_samples, &right_samples, tolerance, merge_mode)
+        .iter() {
+        let val = JoinResultRow::new(row.this.timestamp, Some(row.this.value), None);
+        f(state, val);
+    }
 }
 
 fn convert_unmatched_pair(value: &PotentiallyUnmatchedPair) -> TimeSeriesDataPoint<Timestamp, (f64, Option<f64>)> {
@@ -486,13 +520,34 @@ fn fetch_samples(ts: &TimeSeries, options: &JoinOptions) -> Vec<Sample> {
     samples
 }
 
+pub fn join_row_to_value(row: &JoinResultRow) -> ValkeyValue {
+    let left_value = if let Some(val) = row.left {
+        ValkeyValue::Float(val)
+    } else {
+        ValkeyValue::Null
+    };
+    let other_value = if let Some(val) = row.left {
+        ValkeyValue::Float(val)
+    } else {
+        ValkeyValue::Null
+    };
+    let row = vec![
+        ValkeyValue::from(row.timestamp),
+        left_value,
+        other_value,
+    ];
+    ValkeyValue::Array(row)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::common::types::{Sample, Timestamp};
+    use crate::joins::asof::PotentiallyUnmatchedPair;
     use crate::joins::TimeSeriesDataPoint;
     use crate::module::commands::join::join_asof_internal;
-    use crate::module::commands::{JoinAsOfDirection, JoinOptions, JoinType};
+    use crate::module::commands::{join_row_to_value, JoinAsOfDirection, JoinOptions, JoinResultRow, JoinType};
     use std::time::Duration;
+    use valkey_module::ValkeyValue;
 
     fn create_samples(timestamps: &[Timestamp], values: &[f64]) -> Vec<Sample> {
         timestamps.iter()
@@ -501,8 +556,35 @@ mod tests {
             .collect()
     }
 
+    fn convert_unmatched_pair(value: &PotentiallyUnmatchedPair) -> TimeSeriesDataPoint<Timestamp, (f64, Option<f64>)> {
+        TimeSeriesDataPoint {
+            timestamp: value.this.timestamp,
+            value: (
+                value.this.value,
+                match value.other {
+                    Some(sample) => Some(sample.value),
+                    None => None
+                }),
+        }
+    }
+
     fn create_options() -> JoinOptions {
         JoinOptions::default()
+    }
+
+    type DataPointVec = Vec<TimeSeriesDataPoint<Timestamp, (f64, Option<f64>)>>;
+
+    fn handle_join_asof(left: &Vec<Sample>, right: &Vec<Sample>, options: &JoinOptions) -> DataPointVec {
+        let mut state: DataPointVec = DataPointVec::new();
+        fn mapper(state: &mut DataPointVec, row: JoinResultRow) {
+            let left_value = row.left.unwrap();
+            let val = TimeSeriesDataPoint::new(row.timestamp, (left_value, None));
+            state.push(val)
+        }
+
+        join_asof_internal(left, right, options, &mut state, mapper);
+
+        state
     }
 
     #[test]
@@ -519,10 +601,10 @@ mod tests {
         let mut options = create_options();
         options.join_type = JoinType::AsOf(JoinAsOfDirection::Backward, Duration::from_millis(1));
 
-        let custom = join_asof_internal(&ts, &ts_join, &options);
+        let custom = handle_join_asof(&ts, &ts_join, &options);
 
         options.join_type = JoinType::AsOf(JoinAsOfDirection::Backward, Duration::from_millis(2));
-        let custom2 = join_asof_internal(&ts, &ts_join, &options);
+        let custom2 = handle_join_asof(&ts, &ts_join, &options);
 
         let expected = vec![
             TimeSeriesDataPoint { timestamp: 1, value: (1.00, None) },
@@ -569,11 +651,10 @@ mod tests {
         let mut options = create_options();
 
         options.join_type = JoinType::AsOf(JoinAsOfDirection::Forward, Duration::from_millis(1));
-        let custom = join_asof_internal(&ts, &ts_join, &options);
+        let custom = handle_join_asof(&ts, &ts_join, &options);
 
         options.join_type = JoinType::AsOf(JoinAsOfDirection::Forward, Duration::from_millis(2));
-        let custom2 = join_asof_internal(&ts, &ts_join, &options);
-
+        let custom2 = handle_join_asof(&ts, &ts_join, &options);
 
         let expected = vec![
             TimeSeriesDataPoint { timestamp: 1, value: (1.00, Some(1.00)) },

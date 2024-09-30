@@ -1,11 +1,10 @@
-use crate::arg_parse::{parse_chunk_size, parse_duration_arg};
 use crate::error::{TsdbError, TsdbResult};
 use crate::globals::with_timeseries_index;
 use crate::index::TimeSeriesIndex;
-use crate::module::arg_parse::{parse_dedupe_interval, parse_metric_name};
+use crate::module::arg_parse::*;
 use crate::module::VKM_SERIES_TYPE;
 use crate::storage::time_series::TimeSeries;
-use crate::storage::{DuplicatePolicy, TimeSeriesOptions};
+use crate::storage::TimeSeriesOptions;
 use valkey_module::key::ValkeyKeyWritable;
 use valkey_module::{Context, NextArg, NotifyEvent, ValkeyError, ValkeyResult, ValkeyString, VALKEY_OK};
 
@@ -57,23 +56,13 @@ pub fn parse_create_options(args: Vec<ValkeyString>) -> ValkeyResult<(ValkeyStri
     while let Ok(arg) = args.next_str() {
         match arg {
             arg if arg.eq_ignore_ascii_case(CMD_ARG_RETENTION) => {
-                let next = args.next_arg()?;
-                if let Ok(val) = parse_duration_arg(&next) {
-                    options.retention(val);
-                } else {
-                    return Err(ValkeyError::Str("ERR invalid RETENTION value"));
-                }
+                options.retention(parse_retention(&mut args)?)
             }
             arg if arg.eq_ignore_ascii_case(CMD_ARG_DEDUPE_INTERVAL) => {
                 options.dedupe_interval = Some(parse_dedupe_interval(&mut args)?)
             }
             arg if arg.eq_ignore_ascii_case(CMD_ARG_DUPLICATE_POLICY) => {
-                let next = args.next_str()?;
-                if let Ok(policy) = DuplicatePolicy::try_from(next) {
-                    options.duplicate_policy(policy);
-                } else {
-                    return Err(ValkeyError::Str("ERR invalid DUPLICATE_POLICY"));
-                }
+                options.duplicate_policy = Some(parse_duplicate_policy(&mut args)?)
             }
             arg if arg.eq_ignore_ascii_case(CMD_ARG_SIGNIFICANT_DIGITS) => {
                 let next = args.next_u64()?;

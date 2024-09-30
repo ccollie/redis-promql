@@ -12,7 +12,6 @@ use crate::common::types::{Label, Timestamp};
 use crate::common::METRIC_NAME_LABEL;
 use crate::error::{TsdbError, TsdbResult};
 use crate::storage::constants::{DEFAULT_CHUNK_SIZE_BYTES, SPLIT_FACTOR};
-use crate::storage::timestamps_filter_iterator::TimestampsFilterIterator;
 use crate::storage::uncompressed_chunk::UncompressedChunk;
 use crate::storage::utils::format_prometheus_metric_name;
 use crate::storage::DuplicatePolicy;
