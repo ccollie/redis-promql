@@ -7,7 +7,7 @@ use chrono::DateTime;
 use metricsql_parser::parser::{parse_duration_value, parse_metric_name as parse_metric, parse_number};
 use metricsql_parser::prelude::Matchers;
 use metricsql_runtime::parse_metric_selector;
-use std::iter::Skip;
+use std::iter::{Peekable, Skip};
 use std::time::Duration;
 use std::vec::IntoIter;
 use valkey_module::{NextArg, ValkeyError, ValkeyResult, ValkeyString};
@@ -17,6 +17,8 @@ use crate::module::types::{AggregationOptions, BucketTimestamp, RangeGroupingOpt
 const MAX_TS_VALUES_FILTER: usize = 16;
 const CMD_ARG_COUNT: &'static str = "COUNT";
 const CMD_PARAM_REDUCER: &'static str = "REDUCE";
+
+pub type CommandArgIterator = Peekable<Skip<IntoIter<ValkeyString>>>;
 
 pub fn parse_number_arg(arg: &ValkeyString, name: &str) -> ValkeyResult<f64> {
     if let Ok(value) = arg.parse_float() {

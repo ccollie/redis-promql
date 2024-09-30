@@ -26,7 +26,6 @@ const CMD_ARG_SELECTED_LABELS: &str = "SELECTED_LABELS";
 const CMD_ARG_GROUP_BY: &str = "GROUPBY";
 const CMD_PARAM_REDUCER: &str = "REDUCE";
 const CMD_ARG_FILTER: &str = "FILTER";
-const MAX_TS_VALUES_FILTER: usize = 25;
 
 pub fn parse_range_options(args: &mut Skip<IntoIter<ValkeyString>>) -> ValkeyResult<RangeOptions> {
 

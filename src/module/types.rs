@@ -85,7 +85,7 @@ impl TryFrom<&ValkeyString> for TimestampRangeValue {
                     "TSDB: invalid timestamp, must be a non-negative integer",
                 ));
             }
-            Ok(TimestampRangeValue::Value(int_val))
+            Ok(Value(int_val))
         } else {
             let date_str = value.to_string_lossy();
             let ts =
@@ -139,10 +139,10 @@ impl PartialOrd for TimestampRangeValue {
 }
 
 // todo: better naming
-#[derive(Clone, Default, Debug, PartialEq, Copy)]
+#[derive(Clone, Debug, PartialEq, Copy)]
 pub struct TimestampRange {
-    start: TimestampRangeValue,
-    end: TimestampRangeValue,
+    pub start: TimestampRangeValue,
+    pub end: TimestampRangeValue,
 }
 
 impl TimestampRange {
@@ -151,14 +151,6 @@ impl TimestampRange {
             return Err(ValkeyError::Str("invalid timestamp range: start > end"));
         }
         Ok(TimestampRange { start, end })
-    }
-
-    pub fn start(&self) -> &TimestampRangeValue {
-        &self.start
-    }
-
-    pub fn end(&self) -> &TimestampRangeValue {
-        &self.end
     }
 
     pub fn get_series_range(&self, series: &TimeSeries, check_retention: bool) -> (Timestamp, Timestamp) {
@@ -174,6 +166,22 @@ impl TimestampRange {
         (start_timestamp, end_timestamp)
     }
 }
+
+impl Display for TimestampRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} to {}", self.start, self.end)
+    }
+}
+
+impl Default for TimestampRange {
+    fn default() -> Self {
+        Self {
+            start: TimestampRangeValue::Earliest,
+            end: TimestampRangeValue::Latest,
+        }
+    }
+}
+
 
 pub struct MetadataFunctionArgs {
     pub label_name: Option<String>,

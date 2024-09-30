@@ -4,6 +4,7 @@ extern crate valkey_module_macros;
 extern crate smallvec;
 extern crate async_trait;
 extern crate croaring;
+extern crate joinkit;
 
 use valkey_module::{valkey_module, Context as ValkeyContext, NotifyEvent, ValkeyString};
 use valkey_module::server_events::{FlushSubevent, LoadingSubevent};
@@ -130,7 +131,7 @@ valkey_module! {
         ["VKM.DELETE-KEY_RANGE", commands::delete_key_range, "write deny-oom", 1, 1, 1],
         ["VKM.DELETE-RANGE", commands::delete_range, "write deny-oom", 1, 1, 1],
         ["VKM.DELETE-SERIES", commands::delete_series, "write deny-oom", 1, 1, 1],
-        ["VKM.JOIN-ASOF", commands::join_asof, "write deny-oom", 1, 1, 1],
+        ["VKM.JOIN", commands::join, "write deny-oom", 1, 1, 1],
         ["VKM.QUERY", commands::query, "write deny-oom", 1, 1, 1],
         ["VKM.QUERY-RANGE", commands::query_range, "write deny-oom", 1, 1, 1],
         ["VKM.MRANGE", commands::range, "write deny-oom", 1, 1, 1],
