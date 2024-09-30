@@ -134,7 +134,7 @@ valkey_module! {
         ["VKM.JOIN", commands::join, "write deny-oom", 1, 1, 1],
         ["VKM.QUERY", commands::query, "write deny-oom", 1, 1, 1],
         ["VKM.QUERY-RANGE", commands::query_range, "write deny-oom", 1, 1, 1],
-        ["VKM.MRANGE", commands::range, "write deny-oom", 1, 1, 1],
+        ["VKM.MRANGE", commands::mrange, "write deny-oom", 1, 1, 1],
         ["VKM.RANGE", commands::range, "write deny-oom", 1, 1, 1],
         ["VKM.SERIES", commands::series, "write deny-oom", 1, 1, 1],
         ["VKM.TOP-QUERIES", commands::top_queries, "write deny-oom", 1, 1, 1],

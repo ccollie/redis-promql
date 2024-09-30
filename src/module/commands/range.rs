@@ -5,10 +5,10 @@ use valkey_module::{Context, NextArg, ValkeyResult, ValkeyString, ValkeyValue};
 
 
 pub fn range(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
-    let mut args = args.into_iter().skip(1);
+    let mut args = args.into_iter().skip(1).peekable();
 
     let key = args.next_arg()?;
-    let mut options = parse_range_options(&mut args)?;
+    let options = parse_range_options(&mut args)?;
 
     args.done()?;
 

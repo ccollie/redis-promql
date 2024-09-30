@@ -2,7 +2,7 @@ use crate::arg_parse::{parse_chunk_size, parse_duration_arg};
 use crate::error::{TsdbError, TsdbResult};
 use crate::globals::with_timeseries_index;
 use crate::index::TimeSeriesIndex;
-use crate::module::arg_parse::parse_metric_name;
+use crate::module::arg_parse::{parse_dedupe_interval, parse_metric_name};
 use crate::module::VKM_SERIES_TYPE;
 use crate::storage::time_series::TimeSeries;
 use crate::storage::{DuplicatePolicy, TimeSeriesOptions};
@@ -44,7 +44,7 @@ pub fn create(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
 }
 
 pub fn parse_create_options(args: Vec<ValkeyString>) -> ValkeyResult<(ValkeyString, TimeSeriesOptions)> {
-    let mut args = args.into_iter().skip(1);
+    let mut args = args.into_iter().skip(1).peekable();
 
     let mut options = TimeSeriesOptions::default();
 
@@ -65,12 +65,7 @@ pub fn parse_create_options(args: Vec<ValkeyString>) -> ValkeyResult<(ValkeyStri
                 }
             }
             arg if arg.eq_ignore_ascii_case(CMD_ARG_DEDUPE_INTERVAL) => {
-                let next = args.next_arg()?;
-                if let Ok(val) = parse_duration_arg(&next) {
-                    options.dedupe_interval = Some(val);
-                } else {
-                    return Err(ValkeyError::Str("ERR invalid DEDUPE_INTERVAL value"));
-                }
+                options.dedupe_interval = Some(parse_dedupe_interval(&mut args)?)
             }
             arg if arg.eq_ignore_ascii_case(CMD_ARG_DUPLICATE_POLICY) => {
                 let next = args.next_str()?;
@@ -89,12 +84,7 @@ pub fn parse_create_options(args: Vec<ValkeyString>) -> ValkeyResult<(ValkeyStri
                 options.significant_digits = Some(next as u8);
             }
             arg if arg.eq_ignore_ascii_case(CMD_ARG_CHUNK_SIZE) => {
-                let next = args.next_str()?;
-                if let Ok(val) = parse_chunk_size(next) {
-                    options.chunk_size(val);
-                } else {
-                    return Err(ValkeyError::Str("ERR invalid CHUNK_SIZE value"));
-                }
+                options.chunk_size(parse_chunk_size(&mut args)?);
             }
             _ => {
                 let msg = format!("ERR invalid argument '{}'", arg);

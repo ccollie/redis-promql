@@ -440,13 +440,6 @@ impl TimeSeries {
         SampleIterator::new(self, start, end)
     }
 
-    pub fn timestamp_filter_iter<'a>(
-        &'a self,
-        timestamp_filters: &'a [Timestamp],
-    ) -> impl Iterator<Item = Sample> + 'a {
-        TimestampsFilterIterator::new(self, timestamp_filters)
-    }
-
     pub fn overlaps(&self, start_ts: Timestamp, end_ts: Timestamp) -> bool {
         self.last_timestamp >= start_ts && self.first_timestamp <= end_ts
     }

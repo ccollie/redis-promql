@@ -1,25 +1,17 @@
 use crate::common::types::{Sample, SampleLike, Timestamp};
 use crate::joins::asof::{merge_apply_asof, MergeAsOfMode, PotentiallyUnmatchedPair};
 use crate::joins::TimeSeriesDataPoint;
-use crate::module::arg_parse::{
-    parse_count,
-    parse_duration_arg,
-    parse_timestamp_filter,
-    parse_timestamp_range,
-    parse_value_filter,
-};
+use crate::module::arg_parse::{parse_count, parse_duration_arg, parse_timestamp_filter, parse_timestamp_range, parse_value_filter, CommandArgIterator};
 use crate::module::commands::range_utils::get_range_internal;
 use crate::module::get_timeseries;
 use crate::module::types::{TimestampRange, ValueFilter};
 use crate::storage::time_series::TimeSeries;
 use joinkit::{EitherOrBoth, Joinkit};
 use metricsql_common::prelude::humanize_duration;
+use std::borrow::BorrowMut;
 use std::fmt::Display;
-use std::iter::Skip;
 use std::str::FromStr;
 use std::time::Duration;
-use std::vec::IntoIter;
-use std::borrow::BorrowMut;
 use valkey_module::{Context, NextArg, ValkeyError, ValkeyResult, ValkeyString, ValkeyValue};
 
 const CMD_ARG_TOLERANCE: &'static str = "TOLERANCE";
@@ -147,7 +139,7 @@ pub struct JoinOptions {
 /// [DIRECTION <forward|backward>]
 /// [TOLERANCE 2ms]
 pub fn join(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
-    let mut args = args.into_iter().skip(1);
+    let mut args = args.into_iter().skip(1).peekable();
 
     let join_type_str = args.next_string()?.to_ascii_uppercase();
     let join_type = match join_type_str.as_str() {
@@ -178,7 +170,7 @@ pub fn join(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
     Ok(process_join(left_series, right_series, &options))
 }
 
-fn parse_join_args(options: &mut JoinOptions, args: &mut Skip<IntoIter<ValkeyString>>) -> ValkeyResult<()> {
+fn parse_join_args(options: &mut JoinOptions, args: &mut CommandArgIterator) -> ValkeyResult<()> {
     let mut range_found: bool = false;
 
     while let Ok(arg) = args.next_str() {
@@ -498,9 +490,9 @@ fn fetch_samples(ts: &TimeSeries, options: &JoinOptions) -> Vec<Sample> {
 mod tests {
     use crate::common::types::{Sample, Timestamp};
     use crate::joins::TimeSeriesDataPoint;
+    use crate::module::commands::join::join_asof_internal;
     use crate::module::commands::{JoinAsOfDirection, JoinOptions, JoinType};
     use std::time::Duration;
-    use crate::module::commands::join::{join_asof, join_asof_internal};
 
     fn create_samples(timestamps: &[Timestamp], values: &[f64]) -> Vec<Sample> {
         timestamps.iter()
