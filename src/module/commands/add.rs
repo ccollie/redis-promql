@@ -9,7 +9,6 @@ const CMD_ARG_RETENTION: &str = "RETENTION";
 const CMD_ARG_DUPLICATE_POLICY: &str = "DUPLICATE_POLICY";
 const CMD_ARG_DEDUPE_INTERVAL: &str = "DEDUPE_INTERVAL";
 const CMD_ARG_CHUNK_SIZE: &str = "CHUNK_SIZE";
-const CMD_ARG_LABELS: &str = "LABELS";
 const CMD_ARG_METRIC: &str = "METRIC";
 
 ///
@@ -27,15 +26,12 @@ pub fn add(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
     let timestamp = parse_timestamp(args.next_str()?)?;
     let value = args.next_f64()?;
 
-    match get_timeseries_mut(ctx, &key) {
-        Ok(series) => {
-            args.done()?;
-            return match series.add(timestamp, value, None) {
-                Ok(_) => Ok(ValkeyValue::Integer(timestamp)),
-                Err(e) => Err(ValkeyError::from(e)),
-            }
+    if let Ok(series) = get_timeseries_mut(ctx, &key) {
+        args.done()?;
+        return match series.add(timestamp, value, None) {
+            Ok(_) => Ok(ValkeyValue::Integer(timestamp)),
+            Err(e) => Err(ValkeyError::from(e)),
         }
-        _ => {}
     }
 
     let mut options = TimeSeriesOptions::default();

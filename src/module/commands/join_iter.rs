@@ -7,10 +7,10 @@ use crate::module::commands::join_left_exclusive_iter::JoinLeftExclusiveIter;
 use crate::module::commands::join_left_iter::JoinLeftIter;
 use crate::module::commands::join_right_exclusive_iter::JoinRightExclusiveIter;
 use crate::module::commands::join_right_iter::JoinRightIter;
-use crate::module::commands::{JoinOptions, JoinType, JoinValue};
 use metricsql_parser::ast::Operator;
 use metricsql_parser::binaryop::get_scalar_binop_handler;
 use metricsql_parser::prelude::BinopFunc;
+use crate::module::types::{JoinOptions, JoinType, JoinValue};
 
 pub struct JoinTransformIter<'a> {
     inner: Box<JoinIterator<'a>>,

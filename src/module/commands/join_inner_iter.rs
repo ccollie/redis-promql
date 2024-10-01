@@ -1,6 +1,6 @@
 use crate::common::types::Sample;
-use crate::module::commands::JoinValue;
 use joinkit::Joinkit;
+use crate::module::types::JoinValue;
 
 pub struct JoinInnerIter<'a>
 {
@@ -10,7 +10,7 @@ pub struct JoinInnerIter<'a>
 impl<'a> JoinInnerIter<'a> {
     // todo: accept imp Iterator<Item=Sample>
     pub fn new(left: &'a [Sample], right: &'a [Sample]) -> Self {
-        let iter = left.into_iter()
+        let iter = left.iter()
             .merge_join_inner_by(right, |x, y| x.timestamp.cmp(&y.timestamp));
 
         Self {

@@ -1,8 +1,8 @@
 use crate::common::types::Sample;
 use crate::joins::asof::{merge_apply_asof, MergeAsOfMode};
-use crate::module::commands::{JoinAsOfDirection, JoinValue};
 use joinkit::EitherOrBoth;
 use std::time::Duration;
+use crate::module::types::{JoinAsOfDirection, JoinValue};
 
 pub struct JoinAsOfIter<'a> {
     init: bool,

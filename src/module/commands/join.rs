@@ -1,33 +1,29 @@
 use super::range_utils::get_range_internal;
-use crate::common::types::{Sample, Timestamp};
+use crate::common::types::Sample;
 use crate::module::arg_parse::*;
 use crate::module::commands::join_iter::JoinIterator;
 use crate::module::get_timeseries;
-use crate::module::types::{TimestampRange, ValueFilter};
+use crate::module::types::{JoinAsOfDirection, JoinOptions, JoinType, JoinValue};
 use crate::storage::time_series::TimeSeries;
-use joinkit::{EitherOrBoth, Joinkit};
-use metricsql_common::prelude::humanize_duration;
-use metricsql_parser::ast::Operator;
+use joinkit::EitherOrBoth;
 use metricsql_parser::binaryop::BinopFunc;
-use std::fmt::Display;
-use std::str::FromStr;
 use std::time::Duration;
 use valkey_module::{Context, NextArg, ValkeyError, ValkeyResult, ValkeyString, ValkeyValue};
 
-const CMD_ARG_TOLERANCE: &'static str = "TOLERANCE";
-const CMD_ARG_RANGE: &'static str = "RANGE";
-const CMD_ARG_FILTER_BY_VALUE: &'static str = "FILTER_BY_VALUE";
-const CMD_ARG_FILTER_BY_TS: &'static str = "FILTER_BY_TS";
-const CMD_ARG_COUNT: &'static str = "COUNT";
-const CMD_ARG_LEFT: &'static str = "LEFT";
-const CMD_ARG_RIGHT: &'static str = "RIGHT";
-const CMD_ARG_INNER: &'static str = "INNER";
-const CMD_ARG_FULL: &'static str = "FULL";
-const CMD_ARG_ASOF: &'static str = "ASOF";
-const CMD_ARG_PRIOR: &'static str = "PRIOR";
-const CMD_ARG_NEXT: &'static str = "NEXT";
-const CMD_ARG_EXCLUSIVE: &'static str = "EXCLUSIVE";
-const CMD_ARG_TRANSFORM: &'static str = "TRANSFORM";
+const CMD_ARG_TOLERANCE: &str = "TOLERANCE";
+const CMD_ARG_RANGE: &str = "RANGE";
+const CMD_ARG_FILTER_BY_VALUE: &str = "FILTER_BY_VALUE";
+const CMD_ARG_FILTER_BY_TS: &str = "FILTER_BY_TS";
+const CMD_ARG_COUNT: &str = "COUNT";
+const CMD_ARG_LEFT: &str = "LEFT";
+const CMD_ARG_RIGHT: &str = "RIGHT";
+const CMD_ARG_INNER: &str = "INNER";
+const CMD_ARG_FULL: &str = "FULL";
+const CMD_ARG_ASOF: &str = "ASOF";
+const CMD_ARG_PRIOR: &str = "PRIOR";
+const CMD_ARG_NEXT: &str = "NEXT";
+const CMD_ARG_EXCLUSIVE: &str = "EXCLUSIVE";
+const CMD_ARG_TRANSFORM: &str = "TRANSFORM";
 
 
 const VALID_ARGS: [&str; 10] = [
@@ -42,169 +38,6 @@ const VALID_ARGS: [&str; 10] = [
     CMD_ARG_ASOF,
     CMD_ARG_TRANSFORM
 ];
-
-#[derive(Debug, Default, Copy, Clone)]
-pub enum JoinType {
-    Left(bool),
-    Right(bool),
-    #[default]
-    Inner,
-    Full,
-    AsOf(JoinAsOfDirection, Duration),
-}
-
-impl JoinType {
-    pub fn is_asof(&self) -> bool {
-        matches!(self, JoinType::AsOf(..))
-    }
-
-    pub fn is_exclusive(&self) -> bool {
-        matches!(self, JoinType::Left(..) | JoinType::Right(..))
-    }
-}
-
-impl Display for JoinType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            JoinType::Left(exclusive) => {
-                write!(f, "LEFT OUTER JOIN")?;
-                if *exclusive {
-                    write!(f, " EXCLUSIVE")?;
-                }
-            }
-            JoinType::Right(exclusive) => {
-                write!(f, "RIGHT OUTER JOIN")?;
-                if *exclusive {
-                    write!(f, " EXCLUSIVE")?;
-                }
-            }
-            JoinType::Inner => {
-                write!(f, "INNER JOIN")?;
-            }
-            JoinType::Full => {
-                write!(f, "FULL JOIN")?;
-            }
-            JoinType::AsOf(dir, tolerance) => {
-                write!(f, "ASOF JOIN")?;
-                match dir {
-                    JoinAsOfDirection::Forward => write!(f, " FORWARD")?,
-                    JoinAsOfDirection::Backward => write!(f, " BACKWARD")?,
-                }
-                if !tolerance.is_zero() {
-                    write!(f, " TOLERANCE {}", humanize_duration(tolerance))?;
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-pub enum JoinAsOfDirection {
-    #[default]
-    Forward,
-    Backward,
-}
-
-impl Display for JoinAsOfDirection {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            JoinAsOfDirection::Forward => write!(f, "Forward"),
-            JoinAsOfDirection::Backward => write!(f, "Backward"),
-        }
-    }
-}
-impl FromStr for JoinAsOfDirection {
-    type Err = ValkeyError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            s if s.eq_ignore_ascii_case("forward") => Ok(JoinAsOfDirection::Forward),
-            s if s.eq_ignore_ascii_case("backward") => Ok(JoinAsOfDirection::Backward),
-            _ => Err(ValkeyError::Str("invalid join direction")),
-        }
-    }
-}
-
-impl TryFrom<&str> for JoinAsOfDirection {
-    type Error = ValkeyError;
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let direction = value.to_lowercase();
-        match direction.as_str() {
-            "forward" => Ok(JoinAsOfDirection::Forward),
-            "backward" => Ok(JoinAsOfDirection::Backward),
-            _ => Err(ValkeyError::Str("invalid join direction")),
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct JoinOptions {
-    pub join_type: JoinType,
-    pub date_range: TimestampRange,
-    pub count: Option<usize>,
-    pub timestamp_filter: Option<Vec<Timestamp>>,
-    pub value_filter: Option<ValueFilter>,
-    pub transform_op: Option<Operator>
-}
-
-#[derive(Clone, PartialEq, Debug)]
-pub struct JoinValue {
-    pub timestamp: Timestamp,
-    pub value: EitherOrBoth<f64, f64>,
-}
-
-impl JoinValue {
-    pub fn new(timestamp: Timestamp, left: Option<f64>, right: Option<f64>) -> Self {
-        JoinValue {
-            timestamp,
-            value: match (&left, &right) {
-                (Some(l), Some(r)) => EitherOrBoth::Both(*l, *r),
-                (Some(l), None) => EitherOrBoth::Left(*l),
-                (None, Some(r)) => EitherOrBoth::Right(*r),
-                (None, None) => unreachable!(),
-            }
-        }
-    }
-
-    pub fn left(timestamp: Timestamp, value: f64) -> Self {
-        JoinValue {
-            timestamp,
-            value: EitherOrBoth::Left(value)
-        }
-    }
-    pub fn right(timestamp: Timestamp, value: f64) -> Self {
-        JoinValue {
-            timestamp,
-            value: EitherOrBoth::Right(value)
-        }
-    }
-
-    pub fn both(timestamp: Timestamp, l: f64, r: f64) -> Self {
-        JoinValue {
-            timestamp,
-            value: EitherOrBoth::Both(l, r)
-        }
-    }
-}
-
-impl From<&EitherOrBoth<&Sample, &Sample>> for JoinValue {
-    fn from(value: &EitherOrBoth<&Sample, &Sample>) -> Self {
-        match value {
-            EitherOrBoth::Both(l, r) => {
-                Self::both(l.timestamp, l.value, r.value)
-            }
-            EitherOrBoth::Left(l) => Self::left(l.timestamp, l.value),
-            EitherOrBoth::Right(r) => Self::right(r.timestamp, r.value)
-        }
-    }
-}
-
-impl From<EitherOrBoth<&Sample, &Sample>> for JoinValue {
-    fn from(value: EitherOrBoth<&Sample, &Sample>) -> Self {
-        (&value).into()
-    }
-}
-
 
 /// VKM.JOIN key1 key2 RANGE start end
 /// [[INNER] | [FULL] | [LEFT [EXCLUSIVE]] | [RIGHT [EXCLUSIVE]] | [ASOF [PRIOR | NEXT] [TOLERANCE 2ms]]]
@@ -336,10 +169,10 @@ fn process_join(left_series: &TimeSeries, right_series: &TimeSeries, options: &J
     join_internal(&left_samples, &right_samples, options)
 }
 
-fn join_internal(left: &Vec<Sample>, right: &Vec<Sample>, options: &JoinOptions) -> ValkeyValue {
+fn join_internal(left: &[Sample], right: &[Sample], options: &JoinOptions) -> ValkeyValue {
     let is_transform = options.transform_op.is_some();
 
-    let mut join_iter = JoinIterator::new_from_options(&left, &right, options);
+    let join_iter = JoinIterator::new_from_options(left, right, options);
 
     // todo: aggregations
     let result = join_iter
@@ -366,14 +199,6 @@ fn join_value_to_value(row: JoinValue, is_transform: bool) -> ValkeyValue {
         EitherOrBoth::Right(right) => {
             ValkeyValue::Array(vec![timestamp, ValkeyValue::Null, ValkeyValue::Float(right)])
         }
-    }
-}
-
-fn create_join_value_transform(timestamp: Timestamp, left: Option<f64>, right: Option<f64>, f: BinopFunc) -> JoinValue {
-    let value = transform_value_optional(f, &left, &right).unwrap_or(f64::NAN);
-    JoinValue {
-        timestamp,
-        value: EitherOrBoth::Left(value)
     }
 }
 
@@ -419,20 +244,6 @@ pub fn transform_value(f: BinopFunc, left: f64, right: f64) -> Option<f64> {
         None
     } else {
         Some(value)
-    }
-}
-
-pub fn transform_value_optional(f: BinopFunc, left_value: &Option<f64>, right_value: &Option<f64>) -> Option<f64> {
-    let left = option_to_f64(left_value);
-    let right = option_to_f64(right_value);
-    transform_value(f, left, right)
-}
-
-#[inline]
-fn option_to_f64(opt: &Option<f64>) -> f64 {
-    match opt {
-        Some(x) => *x,
-        None => f64::NAN
     }
 }
 

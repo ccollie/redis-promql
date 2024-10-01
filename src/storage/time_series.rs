@@ -412,10 +412,10 @@ impl TimeSeries {
                 if index >= self.chunks.len() {
                     continue;
                 }
-                map.entry(index).or_insert(Default::default()).push(*ts);
+                map.entry(index).or_default().push(*ts);
             }
 
-            for (index, ts) in map.iter() {
+            for (index, _ts) in map.iter() {
                 let chunk = &self.chunks[*index];
                 let sub_samples = chunk.samples_by_timestamps(timestamps)?;
                 samples.extend(sub_samples);
@@ -758,7 +758,7 @@ impl<'a> SampleIterator<'a> {
                 return (Box::new(new_iter), start, false)
             }
         }
-        (Box::new(std::iter::Empty::<Sample>::default()), end, true)
+        (Box::new(std::iter::empty::<Sample>()), end, true)
     }
 }
 

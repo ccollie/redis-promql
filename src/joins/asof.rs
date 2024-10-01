@@ -1,7 +1,7 @@
 /// The code in this file is largely copied from
 // https://github.com/beignetbytes/tsxlib-rs
 // License: Apache-2.0/MIT
-use crate::common::types::{Sample, SampleLike, Timestamp};
+use crate::common::types::{SampleLike, Timestamp};
 use joinkit::EitherOrBoth;
 use std::cmp;
 use std::time::Duration;
@@ -10,11 +10,6 @@ use std::time::Duration;
 /// MergeAsOfMode describes the roll behavior of the asof merge
 #[derive(Clone, Copy)]
 pub enum MergeAsOfMode{ RollPrior, RollFollowing, NoRoll }
-
-pub struct PotentiallyUnmatchedPair<'a, TSample: SampleLike + Clone + Eq + Ord = Sample> {
-    pub(crate) this: &'a TSample,
-    pub(crate) other: Option<&'a TSample>,
-}
 
 pub fn merge_apply_asof<'a, TSample: SampleLike + Clone + Eq + Ord>(
     left_samples: &'a [TSample],
@@ -76,7 +71,7 @@ fn get_asof_merge_joined<'a, TSample: SampleLike + Clone>(
 
     let comp_func = match compare_func {
         Some(func) => func,
-        None => Box::new(|this: &Timestamp, other: &Timestamp, _other_prior: &Timestamp| (this.cmp(&other), 0)) // use built in ordinal compare if no override
+        None => Box::new(|this: &Timestamp, other: &Timestamp, _other_prior: &Timestamp| (this.cmp(other), 0)) // use built in ordinal compare if no override
     };
 
     let cand_idx_func = match other_idx_func {
@@ -152,16 +147,16 @@ fn merge_asof_fwd_impl(this: &i64, other: &i64, other_peak: &i64, lookback_ms: i
 
 // todo: Nearest
 
-fn merge_asof_frontend(free_param: i64, func: fn(&i64, &i64, &i64, i64) -> (cmp::Ordering, i64)) -> Box<dyn Fn(&i64, &i64, &i64) -> (cmp::Ordering, i64)> {
+fn merge_asof_frontend(free_param: i64, func: fn(&i64, &i64, &i64, i64) -> (cmp::Ordering, i64)) -> MergeAsOfCompareFn {
     Box::new(move |this: &i64, other: &i64, other_peak: &i64| func(this, other, other_peak, free_param))
 }
 
 /// Implementation for mergeasof for a given duration lookback for a pair of Timeseries that has a HashableIndex<i64>
-fn merge_asof_prior(look_back: i64) -> Box<dyn Fn(&i64, &i64, &i64) -> (cmp::Ordering, i64)> {
+fn merge_asof_prior(look_back: i64) -> MergeAsOfCompareFn {
     merge_asof_frontend(look_back, merge_asof_prior_impl)
 }
 /// Implementation for mergeasof for a given duration look-forward for a pair of Timeseries that has a HashableIndex<i64>
-fn merge_asof_fwd(look_fwd: i64) -> Box<dyn Fn(&i64, &i64, &i64) -> (cmp::Ordering, i64)> {
+fn merge_asof_fwd(look_fwd: i64) -> MergeAsOfCompareFn {
     merge_asof_frontend(look_fwd, merge_asof_fwd_impl)
 }
 
@@ -169,7 +164,7 @@ fn merge_asof_fwd(look_fwd: i64) -> Box<dyn Fn(&i64, &i64, &i64) -> (cmp::Orderi
 mod tests {
     use super::{merge_apply_asof, MergeAsOfMode};
     use crate::common::types::Timestamp;
-    use crate::module::commands::JoinValue;
+    use crate::module::types::JoinValue;
     use joinkit::EitherOrBoth;
     use metricsql_runtime::types::Sample;
     use std::time::Duration;

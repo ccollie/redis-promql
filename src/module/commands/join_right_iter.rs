@@ -1,8 +1,7 @@
 use crate::common::types::Sample;
-use crate::module::commands::JoinValue;
 use joinkit::{EitherOrBoth, Joinkit};
 use std::collections::VecDeque;
-
+use crate::module::types::JoinValue;
 // todo: this seems inefficient
 
 pub struct JoinRightIter<'a> {
@@ -13,8 +12,8 @@ pub struct JoinRightIter<'a> {
 impl<'a> JoinRightIter<'a> {
     // todo: pass in impl Iterator<Item=Sample>
     pub(crate) fn new(left: &'a [Sample], right: &'a [Sample]) -> Self {
-        let left_iter = left.into_iter().map(|sample| (sample.timestamp, sample));
-        let right_iter = right.into_iter().map(|sample| (sample.timestamp, sample));
+        let left_iter = left.iter().map(|sample| (sample.timestamp, sample));
+        let right_iter = right.iter().map(|sample| (sample.timestamp, sample));
         let iter =  left_iter
             .into_iter()
             .hash_join_right_outer(right_iter);

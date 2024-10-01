@@ -8,7 +8,7 @@ use ahash::HashMapExt;
 use metricsql_common::hash::IntMap;
 use valkey_module::{Context, NextArg, ValkeyResult, ValkeyString, ValkeyValue};
 
-pub(crate) fn mrange(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
+pub fn mrange(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
     let mut args = args.into_iter().skip(1).peekable();
     let mut options = parse_range_options(&mut args)?;
 

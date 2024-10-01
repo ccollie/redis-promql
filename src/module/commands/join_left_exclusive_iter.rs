@@ -1,6 +1,6 @@
 use crate::common::types::Sample;
-use crate::module::commands::JoinValue;
 use joinkit::Joinkit;
+use crate::module::types::JoinValue;
 
 // todo: accept iterators instead of slices
 pub struct JoinLeftExclusiveIter<'a> {
@@ -9,7 +9,7 @@ pub struct JoinLeftExclusiveIter<'a> {
 
 impl<'a> JoinLeftExclusiveIter<'a> {
     pub fn new(left: &'a [Sample], right: &'a [Sample]) -> Self {
-        let iter = left.into_iter()
+        let iter = left.iter()
             .merge_join_left_excl_by(right, |x, y| x.timestamp.cmp(&y.timestamp));
 
         Self {
@@ -22,9 +22,6 @@ impl<'a> Iterator for JoinLeftExclusiveIter<'a> {
     type Item = JoinValue;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.inner.next() {
-            None => None,
-            Some(item) => Some(JoinValue::left(item.timestamp, item.value))
-        }
+        self.inner.next().map(|item| JoinValue::left(item.timestamp, item.value))
     }
 }

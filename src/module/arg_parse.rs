@@ -23,8 +23,8 @@ use metricsql_parser::ast::Operator;
 use valkey_module::{NextArg, ValkeyError, ValkeyResult, ValkeyString};
 
 const MAX_TS_VALUES_FILTER: usize = 16;
-const CMD_ARG_COUNT: &'static str = "COUNT";
-const CMD_PARAM_REDUCER: &'static str = "REDUCE";
+const CMD_ARG_COUNT: &str = "COUNT";
+const CMD_PARAM_REDUCER: &str = "REDUCE";
 
 pub type CommandArgIterator = Peekable<Skip<IntoIter<ValkeyString>>>;
 
@@ -275,7 +275,7 @@ pub fn parse_value_filter(args: &mut CommandArgIterator) -> ValkeyResult<ValueFi
         .map_err(|_| ValkeyError::Str("TSDB: cannot parse filter min parameter"))?;
     let max = parse_number_with_unit(args.next_str()?)
         .map_err(|_| ValkeyError::Str("TSDB: cannot parse filter max parameter"))?;
-    if max < min || min > max {
+    if max < min {
         return Err(ValkeyError::Str("TSDB: filter min parameter is greater than max"));
     }
     ValueFilter::new(min, max)
@@ -361,7 +361,7 @@ pub fn parse_dedupe_interval(args: &mut CommandArgIterator) -> ValkeyResult<Dura
     }
 }
 
-const CMD_ARG_EMPTY: &'static str = "EMPTY";
+const CMD_ARG_EMPTY: &str = "EMPTY";
 const CMD_ARG_BUCKET_TIMESTAMP: &str = "BUCKETTIMESTAMP";
 
 pub fn parse_aggregation_options(args: &mut CommandArgIterator) -> ValkeyResult<AggregationOptions> {

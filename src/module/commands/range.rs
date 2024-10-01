@@ -3,7 +3,7 @@ use crate::module::commands::range_utils::get_range;
 use crate::module::get_timeseries;
 use valkey_module::{Context, NextArg, ValkeyResult, ValkeyString, ValkeyValue};
 
-pub(crate) fn range(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
+pub fn range(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
     let mut args = args.into_iter().skip(1).peekable();
 
     let key = args.next_arg()?;
