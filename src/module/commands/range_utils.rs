@@ -1,8 +1,8 @@
 use crate::aggregators::{AggOp, Aggregator};
 use crate::common::types::{Sample, Timestamp};
+use crate::module::types::{AggregationOptions, BucketTimestamp, RangeOptions, TimestampRange, ValueFilter};
 use crate::storage::time_series::TimeSeries;
 use ahash::AHashMap;
-use crate::module::types::{AggregationOptions, BucketTimestamp, RangeAlignment, RangeOptions, TimestampRange, ValueFilter};
 
 pub struct GroupMeta<'a> {
     pub groups: AHashMap<String, Vec<&'a TimeSeries>>,
@@ -35,106 +35,93 @@ pub(crate) struct AggrIterator {
     aggregator: Aggregator,
     time_delta: i64,
     bucket_ts: BucketTimestamp,
-    start_timestamp: Timestamp,
-    end_timestamp: Timestamp,
     last_timestamp: Timestamp,
     bucket_right_ts: Timestamp,
-    timestamp_alignment: i64,
-    count: Option<usize>,
+    aligned_timestamp: Timestamp,
+    count: usize,
     empty: bool
 }
 
 impl AggrIterator {
-    fn normalize_bucket_start(&mut self) -> Timestamp {
+    const DEFAULT_COUNT: usize = usize::MAX - 1;
+
+    fn normalize_last_timestamp(&mut self) -> Timestamp {
         self.last_timestamp = self.last_timestamp.min(0);
         self.last_timestamp
     }
 
-    fn fill_empty_buckets(&self,
-                          samples: &mut Vec<Sample>,
-                          first_bucket_ts: Timestamp,
-                          end_bucket_ts: Timestamp,
-                          max_count: usize) {
-        let time_delta = self.time_delta;
-
-        debug_assert!(end_bucket_ts >= first_bucket_ts);
-        assert_eq!((end_bucket_ts - first_bucket_ts) % time_delta, 0);
-
-        let mut empty_bucket_count = (((end_bucket_ts - first_bucket_ts) / time_delta) + 1) as usize;
-        let remainder = max_count - samples.len();
-
-        empty_bucket_count = empty_bucket_count.min(remainder);
-
-        debug_assert!(empty_bucket_count > 0);
-
+    fn add_empty_buckets(&self,
+                         samples: &mut Vec<Sample>,
+                         first_bucket_ts: Timestamp,
+                         end_bucket_ts: Timestamp,
+                         max_count: usize) {
+        let empty_bucket_count = self.calculate_empty_bucket_count(first_bucket_ts, end_bucket_ts, max_count);
         let value = self.aggregator.empty_value();
         for _ in 0..empty_bucket_count {
-            samples.push(Sample {
-                timestamp: end_bucket_ts,
-                value,
-            });
+            samples.push(Sample { timestamp: end_bucket_ts, value });
         }
     }
 
-    fn calc_bucket_start(&self) -> Timestamp {
+    fn calculate_empty_bucket_count(&self, first_bucket_ts: Timestamp, end_bucket_ts: Timestamp, max_count: usize) -> usize {
+        let time_delta = self.time_delta;
+        debug_assert!(end_bucket_ts >= first_bucket_ts);
+        assert_eq!((end_bucket_ts - first_bucket_ts) % time_delta, 0);
+        let total_empty_buckets = (((end_bucket_ts - first_bucket_ts) / time_delta) + 1) as usize;
+        let remaining_capacity = max_count - total_empty_buckets;
+        total_empty_buckets.min(remaining_capacity)
+    }
+
+    fn calculate_bucket_start(&self) -> Timestamp {
         self.bucket_ts.calculate(self.last_timestamp, self.time_delta)
     }
 
-    fn finalize_bucket(&mut self) -> Sample {
+    fn finalize_current_bucket(&mut self) -> Sample {
         let value = self.aggregator.finalize();
-        let timestamp = self.calc_bucket_start();
+        let timestamp = self.calculate_bucket_start();
         self.aggregator.reset();
-        Sample {
-            timestamp,
-            value,
-        }
+        Sample { timestamp, value }
     }
 
     pub fn calculate(&mut self, iterator: impl Iterator<Item=Sample>) -> Vec<Sample> {
-        let time_delta = self.time_delta;
-        self.bucket_right_ts = self.last_timestamp + time_delta;
-        self.normalize_bucket_start();
-        let mut buckets: Vec<Sample> = Default::default();
-        let count = self.count.unwrap_or(usize::MAX - 1);
+        self.bucket_right_ts = self.last_timestamp + self.time_delta;
+        let mut buckets = Vec::new();
+        let max_count = self.count;
+
+        self.normalize_last_timestamp();
 
         for sample in iterator {
-            let timestamp = sample.timestamp;
-            let value = sample.value;
-
-            if timestamp >= self.bucket_right_ts {
-                let time_delta = self.time_delta;
-
-                buckets.push(self.finalize_bucket());
-                if buckets.len() >= count {
+            if self.should_finalize_bucket(sample.timestamp) {
+                buckets.push(self.finalize_current_bucket());
+                if buckets.len() >= self.count {
                     return buckets;
                 }
-
-                let last_timestamp = calc_bucket_start(timestamp, time_delta, self.timestamp_alignment);
+                self.update_bucket_timestamps(sample.timestamp);
                 if self.empty {
-                    let first_bucket = self.bucket_right_ts;
-                    let last_bucket = (last_timestamp - time_delta).max(0);
-
-                    let has_empty_buckets = first_bucket < last_timestamp;
-                    if has_empty_buckets {
-                        self.fill_empty_buckets(&mut buckets, first_bucket, last_bucket, count);
-                        if buckets.len() >= count {
-                            return buckets;
-                        }
-                    }
+                    self.finalize_empty_buckets(&mut buckets, max_count);
                 }
-
-                self.last_timestamp = last_timestamp;
-                self.bucket_right_ts = last_timestamp + time_delta;
-                self.normalize_bucket_start();
             }
-
-            self.aggregator.update(value);
+            self.aggregator.update(sample.value);
         }
-        // todo: write out last bucket value
-        buckets.truncate(count);
 
+        buckets.truncate(max_count);
         buckets
+    }
 
+    fn should_finalize_bucket(&self, timestamp: Timestamp) -> bool {
+        timestamp >= self.bucket_right_ts
+    }
+
+    fn update_bucket_timestamps(&mut self, timestamp: Timestamp) {
+        self.last_timestamp = calc_bucket_start(timestamp, self.time_delta, self.aligned_timestamp);
+        self.bucket_right_ts = self.last_timestamp + self.time_delta;
+    }
+
+    fn finalize_empty_buckets(&self, buckets: &mut Vec<Sample>, max_count: usize) {
+        let first_bucket = self.bucket_right_ts;
+        let last_bucket = self.last_timestamp - self.time_delta;
+        if first_bucket < self.last_timestamp {
+            self.add_empty_buckets(buckets, first_bucket, last_bucket, max_count);
+        }
     }
 }
 
@@ -143,11 +130,6 @@ impl AggrIterator {
 pub(crate) fn calc_bucket_start(ts: Timestamp, bucket_duration: i64, timestamp_alignment: i64) -> Timestamp {
     let timestamp_diff = ts - timestamp_alignment;
     ts - ((timestamp_diff % bucket_duration + bucket_duration) % bucket_duration)
-}
-
-#[inline]
-fn bucket_start_normalize(bucket_ts: Timestamp) -> Timestamp {
-    bucket_ts.max(0)
 }
 
 // todo: move elsewhere, better name
@@ -161,7 +143,7 @@ pub(super) fn get_range_internal(
     let (start_timestamp, end_timestamp) = date_range.get_series_range(series, check_retention);
 
     let mut samples = if let Some(timestamps) = timestamp_filter {
-        series.samples_by_timestamps(&timestamps)
+        series.samples_by_timestamps(timestamps)
             .unwrap_or_else(|e| {
                 // todo: properly handle error and log
                 vec![]
@@ -207,31 +189,21 @@ fn get_series_aggregator(
 ) -> AggrIterator {
     let (start_timestamp, end_timestamp) = args.date_range.get_series_range(series, check_retention);
 
-    let mut timestamp_alignment: Timestamp = 0;
-    if let Some(alignment) = &args.alignment {
-        timestamp_alignment = match alignment {
-            RangeAlignment::Default => 0,
-            RangeAlignment::Start => start_timestamp,
-            RangeAlignment::End => end_timestamp,
-            RangeAlignment::Timestamp(ts) => *ts,
-        }
-    }
+    let timestamp_alignment = aggr_options.alignment.get_aligned_timestamp(start_timestamp, end_timestamp);
 
     AggrIterator {
-        timestamp_alignment,
+        aligned_timestamp: timestamp_alignment,
         empty: aggr_options.empty,
         aggregator: aggr_options.aggregator.clone(),
         time_delta: aggr_options.time_delta,
         bucket_ts: aggr_options.timestamp_output,
-        start_timestamp,
-        end_timestamp,
         last_timestamp: 0,
-        count: args.count,
+        count: args.count.unwrap_or(AggrIterator::DEFAULT_COUNT),
         bucket_right_ts: 0,
     }
 }
 
-pub fn group_series_by_label_value<'a>(series: &'a Vec<&TimeSeries>, label: &str) -> AHashMap<String, Vec<&'a TimeSeries>> {
+pub fn group_series_by_label_value<'a>(series: &'a [&TimeSeries], label: &str) -> AHashMap<String, Vec<&'a TimeSeries>> {
     let mut grouped: AHashMap<String, Vec<&TimeSeries>> = AHashMap::new();
 
     for ts in series.iter() {

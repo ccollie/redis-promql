@@ -224,7 +224,7 @@ impl GorillaChunk {
     }
 
     pub fn samples_by_timestamps(&self, timestamps: &[Timestamp]) -> TsdbResult<Vec<Sample>>  {
-        if self.num_samples() == 0 || timestamps.len() == 0 {
+        if self.num_samples() == 0 || timestamps.is_empty() {
             return Ok(vec![]);
         }
         let mut samples = Vec::with_capacity(timestamps.len());
@@ -252,6 +252,25 @@ impl GorillaChunk {
         }
         Ok(samples)
     }
+
+    fn is_range_covering_full_period(&self, start_ts: Timestamp, end_ts: Timestamp) -> bool {
+        start_ts <= self.first_timestamp() && end_ts >= self.last_timestamp()
+    }
+
+    fn populate_encoder_range(
+        &self,
+        encoder: &mut XOREncoder,
+        start_ts: Timestamp,
+        end_ts: Timestamp,
+    ) -> TsdbResult<()> {
+        for value in self.xor_encoder.iter() {
+            let sample = value?;
+            if sample.timestamp < start_ts || sample.timestamp >= end_ts {
+                push_sample(encoder, &sample)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Chunk for GorillaChunk {
@@ -275,32 +294,19 @@ impl Chunk for GorillaChunk {
             return Ok(0);
         }
 
-        let mut ts = self.first_timestamp();
-        if start_ts <= self.first_timestamp() {
-            if end_ts >= self.last_timestamp() {
-                self.clear();
-                return Ok(0);
-            } else {
-                ts = end_ts;
-            }
+        if self.is_range_covering_full_period(start_ts, end_ts) {
+            self.clear();
+            return Ok(0);
         }
 
-        let old_count = self.xor_encoder.num_samples;
+        let old_sample_count = self.xor_encoder.num_samples;
+        let mut new_encoder = XOREncoder::new();
 
-        let mut encoder = XOREncoder::new();
+        self.populate_encoder_range(&mut new_encoder, start_ts, end_ts)?;
 
-        for value in self.xor_encoder.iter() {
-            let sample = value?;
-            if sample.timestamp < start_ts {
-                push_sample(&mut encoder, &sample)?;
-            } else if sample.timestamp >= end_ts {
-                push_sample(&mut encoder, &sample)?;
-            }
-        }
+        self.xor_encoder = new_encoder;
 
-        // todo: ensure first_timestamp and last_timestamp are updated
-        self.xor_encoder = encoder;
-        Ok(self.num_samples() - old_count)
+        Ok(self.num_samples() - old_sample_count)
     }
 
     fn add_sample(&mut self, sample: &Sample) -> TsdbResult<()> {
@@ -423,7 +429,7 @@ fn push_sample(encoder: &mut XOREncoder, sample: &Sample) -> TsdbResult<()> {
     encoder.add_sample(sample)
         .map_err(|e| {
             println!("Error adding sample: {:?}", e);
-            TsdbError::CannotAddSample(sample.clone())
+            TsdbError::CannotAddSample(*sample)
         })
 }
 

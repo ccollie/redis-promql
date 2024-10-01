@@ -13,8 +13,8 @@ pub fn delete_key_range(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult 
 
         args.done()?;
 
-        let start = from.to_timestamp();
-        let end = to.to_timestamp();
+        let start = from.as_timestamp();
+        let end = to.as_timestamp();
 
         if start > end {
             return Err(ValkeyError::Str("ERR invalid range"));

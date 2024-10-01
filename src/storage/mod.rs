@@ -107,7 +107,7 @@ impl DuplicatePolicy {
         }
     }
 
-    pub fn to_u8(&self) -> u8 {
+    pub fn as_u8(&self) -> u8 {
         match self {
             DuplicatePolicy::Block => 0,
             DuplicatePolicy::KeepFirst => 1,

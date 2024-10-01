@@ -106,7 +106,7 @@ pub fn query(_ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
     }
 
     let start = if let Some(val) = time_value {
-        val.to_timestamp()
+        val.as_timestamp()
     } else {
         current_time_millis()
     };

@@ -486,11 +486,11 @@ impl TimeSeriesIndex {
         let prefix_len = prefix.len();
         inner.label_index
             .prefix(prefix.as_bytes())
-            .filter_map(|(key,  map)| {
+            .map(|(key,  map)| {
                 // keys and values are expected to be utf-8. If we panic, we have bigger issues
                 let key = key.sub_string(prefix_len);
                 let k = ValkeyValueKey::from(key);
-                Some((k, map.cardinality() as usize))
+                (k, map.cardinality() as usize)
             })
             .take(limit)
             .collect()
@@ -529,7 +529,7 @@ fn filter_by_label_value_predicate(
         .prefix(prefix.as_bytes())
         .filter_map(|(key, map)| {
             let value = key.sub_string(start_pos);
-            if predicate(&value) {
+            if predicate(value) {
                 Some(map)
             } else {
                 None

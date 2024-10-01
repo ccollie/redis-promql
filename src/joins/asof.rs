@@ -9,7 +9,7 @@ use std::time::Duration;
 
 /// MergeAsOfMode describes the roll behavior of the asof merge
 #[derive(Clone, Copy)]
-pub enum MergeAsOfMode{ RollPrior, RollFollowing, NoRoll }
+pub enum MergeAsOfMode{ RollPrior, RollFollowing }
 
 pub fn merge_apply_asof<'a, TSample: SampleLike + Clone + Eq + Ord>(
     left_samples: &'a [TSample],
@@ -21,7 +21,6 @@ pub fn merge_apply_asof<'a, TSample: SampleLike + Clone + Eq + Ord>(
     let compare_func = match merge_mode {
         MergeAsOfMode::RollFollowing => Some(merge_asof_fwd(tolerance_ms)),
         MergeAsOfMode::RollPrior => Some(merge_asof_prior(tolerance_ms)),
-        _ => None
     };
 
     let other_idx_func:Option<Box<dyn Fn(usize)->usize>> = match merge_mode {
@@ -30,7 +29,6 @@ pub fn merge_apply_asof<'a, TSample: SampleLike + Clone + Eq + Ord>(
             Some(Box::new(move |idx: usize| fwd_func(idx, other_len)))
         },
         MergeAsOfMode::RollPrior => Some(Box::new(|idx: usize| prior_func(idx))),
-        MergeAsOfMode::NoRoll => None
     };
 
     get_asof_merge_joined(

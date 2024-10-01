@@ -54,14 +54,14 @@ pub(crate) fn normalize_range_args(
     let now = current_time_millis();
 
     let start = if let Some(val) = start {
-        val.to_timestamp()
+        val.as_timestamp()
     } else {
         let ts = now - (config.default_step.as_millis() as i64); // todo: how to avoid overflow?
         ts as Timestamp
     };
 
     let end = if let Some(val) = end {
-        val.to_timestamp()
+        val.as_timestamp()
     } else {
         now
     };

@@ -44,10 +44,11 @@ impl UncompressedChunk {
     }
 
     pub fn with_max_size(size: usize) -> Self {
-        let mut res = Self::default();
-        res.max_size = size;
-        res.max_elements = size / SAMPLE_SIZE;
-        res
+        Self {
+            max_size: size,
+            max_elements: size / SAMPLE_SIZE,
+            ..Default::default()
+        }
     }
 
     pub fn len(&self) -> usize {

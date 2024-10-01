@@ -25,7 +25,7 @@ pub enum TimestampRangeValue {
 }
 
 impl TimestampRangeValue {
-    pub fn to_timestamp(&self) -> Timestamp {
+    pub fn as_timestamp(&self) -> Timestamp {
         use TimestampRangeValue::*;
         match self {
             Earliest => 0,
@@ -35,7 +35,7 @@ impl TimestampRangeValue {
         }
     }
 
-    pub fn to_series_timestamp(&self, series: &TimeSeries) -> Timestamp {
+    pub fn as_series_timestamp(&self, series: &TimeSeries) -> Timestamp {
         use TimestampRangeValue::*;
         match self {
             Earliest => series.first_timestamp,
@@ -63,7 +63,7 @@ impl TryFrom<&str> for TimestampRangeValue {
                         "TSDB: invalid timestamp, must be a non-negative integer",
                     ));
                 }
-                Ok(TimestampRangeValue::Value(ts))
+                Ok(Value(ts))
             }
         }
     }
@@ -94,7 +94,7 @@ impl TryFrom<&ValkeyString> for TimestampRangeValue {
             let date_str = value.to_string_lossy();
             let ts =
                 parse_timestamp(&date_str).map_err(|_| ValkeyError::Str("invalid timestamp"))?;
-            Ok(TimestampRangeValue::Value(ts))
+            Ok(Value(ts))
         }
     }
 }
@@ -159,8 +159,8 @@ impl TimestampRange {
 
     pub fn get_series_range(&self, series: &TimeSeries, check_retention: bool) -> (Timestamp, Timestamp) {
         // In case a retention is set shouldn't return chunks older than the retention
-        let mut start_timestamp = self.start.to_series_timestamp(series);
-        let end_timestamp = self.end.to_series_timestamp(series);
+        let mut start_timestamp = self.start.as_series_timestamp(series);
+        let end_timestamp = self.end.as_series_timestamp(series);
         if check_retention && !series.retention.is_zero() {
             // todo: check for i64 overflow
             let retention_ms = series.retention.as_millis() as i64;
@@ -262,6 +262,17 @@ pub enum RangeAlignment {
     Timestamp(Timestamp),
 }
 
+impl RangeAlignment {
+    pub fn get_aligned_timestamp(&self, start: Timestamp, end: Timestamp) -> Timestamp {
+        match self {
+            RangeAlignment::Default => 0,
+            RangeAlignment::Start => start,
+            RangeAlignment::End => end,
+            RangeAlignment::Timestamp(ts) => *ts,
+        }
+    }
+}
+
 #[derive(Debug, Default, PartialEq, Clone, Copy)]
 pub enum BucketTimestamp {
     #[default]
@@ -271,7 +282,7 @@ pub enum BucketTimestamp {
 }
 
 impl BucketTimestamp {
-    pub fn calculate(&self, ts: crate::common::types::Timestamp, time_delta: i64) -> crate::common::types::Timestamp {
+    pub fn calculate(&self, ts: Timestamp, time_delta: i64) -> Timestamp {
         match self {
             Self::Start => ts,
             Self::Mid => ts + time_delta / 2,
@@ -313,6 +324,7 @@ pub struct AggregationOptions {
     pub aggregator: Aggregator,
     pub bucket_duration: Duration,
     pub timestamp_output: BucketTimestamp,
+    pub alignment: RangeAlignment,
     pub time_delta: i64,
     pub empty: bool
 }
@@ -331,11 +343,9 @@ pub struct RangeOptions {
     pub timestamp_filter: Option<Vec<Timestamp>>,
     pub value_filter: Option<ValueFilter>,
     pub series_selector: Matchers,
-    pub alignment: Option<RangeAlignment>,
     pub with_labels: bool,
     pub selected_labels: BTreeSet<String>,
     pub grouping: Option<RangeGroupingOptions>,
-    pub latest: bool
 }
 
 impl RangeOptions {
@@ -365,10 +375,6 @@ pub enum JoinType {
 }
 
 impl JoinType {
-    pub fn is_asof(&self) -> bool {
-        matches!(self, JoinType::AsOf(..))
-    }
-
     pub fn is_exclusive(&self) -> bool {
         matches!(self, JoinType::Left(..) | JoinType::Right(..))
     }

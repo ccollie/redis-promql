@@ -2,14 +2,7 @@ use crate::aggregators::Aggregator;
 use crate::common::current_time_millis;
 use crate::common::types::{Label, Timestamp};
 use crate::error::{TsdbError, TsdbResult};
-use crate::module::types::{
-    AggregationOptions,
-    BucketTimestamp,
-    RangeGroupingOptions,
-    TimestampRange,
-    TimestampRangeValue,
-    ValueFilter
-};
+use crate::module::types::*;
 use crate::storage::{DuplicatePolicy, MAX_CHUNK_SIZE, MIN_CHUNK_SIZE};
 use chrono::DateTime;
 use metricsql_parser::parser::{parse_duration_value, parse_metric_name as parse_metric, parse_number};
@@ -25,6 +18,8 @@ use valkey_module::{NextArg, ValkeyError, ValkeyResult, ValkeyString};
 const MAX_TS_VALUES_FILTER: usize = 16;
 const CMD_ARG_COUNT: &str = "COUNT";
 const CMD_PARAM_REDUCER: &str = "REDUCE";
+const CMD_PARAM_ALIGN: &str = "ALIGN";
+
 
 pub type CommandArgIterator = Peekable<Skip<IntoIter<ValkeyString>>>;
 
@@ -131,12 +126,6 @@ pub fn parse_duration(arg: &str) -> ValkeyResult<Duration> {
             }
         },
     }
-}
-
-pub fn parse_double(arg: &str) -> ValkeyResult<f64> {
-    arg.parse::<f64>().map_err(|_e| {
-        ValkeyError::Str("TSDB: invalid value")
-    })
 }
 
 pub fn parse_number_with_unit(arg: &str) -> TsdbResult<f64> {
@@ -305,6 +294,13 @@ pub(crate) fn advance_if_next_token(args: &mut CommandArgIterator, token: &str) 
     }
 }
 
+pub(crate) fn expect_token(args: &mut CommandArgIterator, token: &str) -> ValkeyResult<()> {
+    if !advance_if_next_token(args, token) {
+        return Err(ValkeyError::Str("TSDB: unexpected token"));
+    }
+    Ok(())
+}
+
 pub(crate) fn advance_if_next_token_one_of<'a>(args: &mut CommandArgIterator, token: &'a [&str]) -> Option<&'a str> {
     if let Some(next) = args.peek() {
         let str = next.to_string_lossy();
@@ -376,27 +372,37 @@ pub fn parse_aggregation_options(args: &mut CommandArgIterator) -> ValkeyResult<
         aggregator,
         bucket_duration,
         timestamp_output: BucketTimestamp::Start,
+        alignment: RangeAlignment::default(),
         time_delta: 0,
         empty: false,
     };
+
     let mut arg_count: usize = 0;
 
-    while let Ok(arg) = args.next_str() {
-        match arg {
-            arg if arg.eq_ignore_ascii_case(CMD_ARG_EMPTY) => {
-                aggr.empty = true;
-                arg_count += 1;
+    let valid_tokens = [CMD_PARAM_ALIGN, CMD_ARG_EMPTY, CMD_ARG_BUCKET_TIMESTAMP];
+
+    loop {
+        if let Some(token) = advance_if_next_token_one_of(args, &valid_tokens) {
+            match token {
+                CMD_ARG_EMPTY => {
+                    aggr.empty = true;
+                    arg_count += 1;
+                }
+                CMD_ARG_BUCKET_TIMESTAMP => {
+                    let next = args.next_str()?;
+                    arg_count += 1;
+                    aggr.timestamp_output = BucketTimestamp::try_from(next)?;
+                }
+                CMD_PARAM_ALIGN => {
+                    let next = args.next_str()?;
+                    aggr.alignment = parse_alignment(next)?;
+                }
+                _ => break
             }
-            arg if arg.eq_ignore_ascii_case(CMD_ARG_BUCKET_TIMESTAMP) => {
-                let next = args.next_str()?;
-                arg_count += 1;
-                aggr.timestamp_output = BucketTimestamp::try_from(next)?;
+            if arg_count == 3 {
+                break;
             }
-            _ => {
-                return Err(ValkeyError::Str("TSDB: unknown AGGREGATION option"))
-            }
-        }
-        if arg_count == 3 {
+        } else {
             break;
         }
     }
@@ -404,6 +410,26 @@ pub fn parse_aggregation_options(args: &mut CommandArgIterator) -> ValkeyResult<
     Ok(aggr)
 }
 
+fn parse_alignment(align: &str) -> ValkeyResult<RangeAlignment> {
+    let alignment = match align {
+        arg if arg.eq_ignore_ascii_case("start") => RangeAlignment::Start,
+        arg if arg.eq_ignore_ascii_case("end") => RangeAlignment::End,
+        arg if arg.len() == 1 => {
+            let c = arg.chars().next().unwrap();
+            match c {
+                '-' => RangeAlignment::Start,
+                '+' => RangeAlignment::End,
+                _ => return Err(ValkeyError::Str("TSDB: unknown ALIGN parameter")),
+            }
+        }
+        _ => {
+            let timestamp = parse_timestamp(align)
+                .map_err(|_| ValkeyError::Str("TSDB: unknown ALIGN parameter"))?;
+            RangeAlignment::Timestamp(timestamp)
+        }
+    };
+    Ok(alignment)
+}
 
 pub fn parse_grouping_params(args: &mut CommandArgIterator) -> ValkeyResult<RangeGroupingOptions> {
     // GROUPBY token already seen

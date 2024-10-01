@@ -18,7 +18,6 @@ use crate::storage::DuplicatePolicy;
 use get_size::GetSize;
 use metricsql_common::hash::IntMap;
 use smallvec::SmallVec;
-use std::hash::Hasher;
 use std::mem::size_of;
 use std::time::Duration;
 use valkey_module::error::GenericError;
@@ -132,22 +131,6 @@ impl TimeSeries {
             return Some(&label.value);
         }
         None
-    }
-
-    /// Utility function to create a key for the time series. The key is used to uniquely identify the
-    /// time series in the index. Valkey keys and metric names are disconnected (a user can store a
-    /// timeseries in Valkey using any key).
-    /// It creates a hash tag around the metric name (ensuring that series belonging to the same metric
-    /// are stored in the same node), and then hashes the labels to create a unique key.
-    /// Assumes self.labels is sorted.
-    pub fn create_key(&self) -> String {
-        let mut hasher = xxhash_rust::xxh3::Xxh3::new();
-        for label in self.labels.iter() {
-            hasher.write(label.name.as_bytes());
-            hasher.write_u8(b'=');
-            hasher.write(label.value.as_bytes());
-        }
-        format!("{{{}}}:{}:{}", self.metric_name, hasher.digest(), self.id)
     }
 
     fn adjust_value(&mut self, value: f64) -> f64 {
@@ -575,7 +558,7 @@ impl TimeSeries {
             raw::save_unsigned(rdb, 0);
         }
         raw::save_unsigned(rdb, self.dedupe_interval.map(|x| x.as_secs()).unwrap_or(0));
-        raw::save_unsigned(rdb, self.duplicate_policy.to_u8() as u64);
+        raw::save_unsigned(rdb, self.duplicate_policy.as_u8() as u64);
         raw::save_unsigned(rdb, self.chunk_compression as u64);
         raw::save_unsigned(rdb, self.significant_digits.unwrap_or(255) as u64);
         raw::save_unsigned(rdb, self.chunk_size_bytes as u64);
