@@ -1,13 +1,14 @@
-use crate::common::types::{Sample, SampleLike, Timestamp};
-use crate::joins::asof::{merge_apply_asof, MergeAsOfMode, PotentiallyUnmatchedPair};
-use crate::joins::TimeSeriesDataPoint;
+use super::range_utils::get_range_internal;
+use crate::common::types::{Sample, Timestamp};
 use crate::module::arg_parse::*;
-use crate::module::commands::range_utils::get_range_internal;
+use crate::module::commands::join_iter::JoinIterator;
 use crate::module::get_timeseries;
 use crate::module::types::{TimestampRange, ValueFilter};
 use crate::storage::time_series::TimeSeries;
 use joinkit::{EitherOrBoth, Joinkit};
 use metricsql_common::prelude::humanize_duration;
+use metricsql_parser::ast::Operator;
+use metricsql_parser::binaryop::BinopFunc;
 use std::fmt::Display;
 use std::str::FromStr;
 use std::time::Duration;
@@ -26,8 +27,10 @@ const CMD_ARG_ASOF: &'static str = "ASOF";
 const CMD_ARG_PRIOR: &'static str = "PRIOR";
 const CMD_ARG_NEXT: &'static str = "NEXT";
 const CMD_ARG_EXCLUSIVE: &'static str = "EXCLUSIVE";
+const CMD_ARG_TRANSFORM: &'static str = "TRANSFORM";
 
-const VALID_ARGS: [&str; 9] = [
+
+const VALID_ARGS: [&str; 10] = [
     CMD_ARG_RANGE,
     CMD_ARG_FILTER_BY_VALUE,
     CMD_ARG_FILTER_BY_TS,
@@ -37,6 +40,7 @@ const VALID_ARGS: [&str; 9] = [
     CMD_ARG_INNER,
     CMD_ARG_FULL,
     CMD_ARG_ASOF,
+    CMD_ARG_TRANSFORM
 ];
 
 #[derive(Debug, Default, Copy, Clone)]
@@ -54,7 +58,7 @@ impl JoinType {
         matches!(self, JoinType::AsOf(..))
     }
 
-    pub fn can_be_exclusive(&self) -> bool {
+    pub fn is_exclusive(&self) -> bool {
         matches!(self, JoinType::Left(..) | JoinType::Right(..))
     }
 }
@@ -141,13 +145,74 @@ pub struct JoinOptions {
     pub count: Option<usize>,
     pub timestamp_filter: Option<Vec<Timestamp>>,
     pub value_filter: Option<ValueFilter>,
+    pub transform_op: Option<Operator>
 }
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct JoinValue {
+    pub timestamp: Timestamp,
+    pub value: EitherOrBoth<f64, f64>,
+}
+
+impl JoinValue {
+    pub fn new(timestamp: Timestamp, left: Option<f64>, right: Option<f64>) -> Self {
+        JoinValue {
+            timestamp,
+            value: match (&left, &right) {
+                (Some(l), Some(r)) => EitherOrBoth::Both(*l, *r),
+                (Some(l), None) => EitherOrBoth::Left(*l),
+                (None, Some(r)) => EitherOrBoth::Right(*r),
+                (None, None) => unreachable!(),
+            }
+        }
+    }
+
+    pub fn left(timestamp: Timestamp, value: f64) -> Self {
+        JoinValue {
+            timestamp,
+            value: EitherOrBoth::Left(value)
+        }
+    }
+    pub fn right(timestamp: Timestamp, value: f64) -> Self {
+        JoinValue {
+            timestamp,
+            value: EitherOrBoth::Right(value)
+        }
+    }
+
+    pub fn both(timestamp: Timestamp, l: f64, r: f64) -> Self {
+        JoinValue {
+            timestamp,
+            value: EitherOrBoth::Both(l, r)
+        }
+    }
+}
+
+impl From<&EitherOrBoth<&Sample, &Sample>> for JoinValue {
+    fn from(value: &EitherOrBoth<&Sample, &Sample>) -> Self {
+        match value {
+            EitherOrBoth::Both(l, r) => {
+                Self::both(l.timestamp, l.value, r.value)
+            }
+            EitherOrBoth::Left(l) => Self::left(l.timestamp, l.value),
+            EitherOrBoth::Right(r) => Self::right(r.timestamp, r.value)
+        }
+    }
+}
+
+impl From<EitherOrBoth<&Sample, &Sample>> for JoinValue {
+    fn from(value: EitherOrBoth<&Sample, &Sample>) -> Self {
+        (&value).into()
+    }
+}
+
 
 /// VKM.JOIN key1 key2 RANGE start end
 /// [[INNER] | [FULL] | [LEFT [EXCLUSIVE]] | [RIGHT [EXCLUSIVE]] | [ASOF [PRIOR | NEXT] [TOLERANCE 2ms]]]
 /// [FILTER_BY_TS ts...]
 /// [FILTER_BY_VALUE min max]
 /// [COUNT count]
+/// [TRANSFORM op]
 pub fn join(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
     let mut args = args.into_iter().skip(1).peekable();
 
@@ -160,6 +225,7 @@ pub fn join(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
         count: Default::default(),
         timestamp_filter: Default::default(),
         value_filter: Default::default(),
+        transform_op: None,
     };
 
     parse_join_args(&mut options, &mut args)?;
@@ -246,6 +312,10 @@ fn parse_join_args(options: &mut JoinOptions, args: &mut CommandArgIterator) -> 
                 check_join_type_set(&mut join_type_set)?;
                 options.join_type = parse_asof(args)?;
             }
+            CMD_ARG_TRANSFORM => {
+                let arg = args.next_str()?;
+                options.transform_op = Some(parse_operator(arg)?);
+            }
             _ => return Err(ValkeyError::Str("invalid JOIN command argument")),
         }
     }
@@ -260,24 +330,6 @@ fn is_arg_valid(arg: &str) -> bool {
     VALID_ARGS.iter().any(|x| x.eq_ignore_ascii_case(arg))
 }
 
-type MergeRow = TimeSeriesDataPoint<Timestamp, (f64, Option<f64>)>;
-
-pub(crate) struct JoinResultRow {
-    pub(crate) timestamp: Timestamp,
-    pub(crate) left: Option<f64>,
-    pub(crate) right: Option<f64>,
-}
-
-impl JoinResultRow {
-    pub(crate) fn new(timestamp: Timestamp, left: Option<f64>, right: Option<f64>) -> Self {
-        Self {
-            timestamp,
-            left,
-            right,
-        }
-    }
-}
-
 fn process_join(left_series: &TimeSeries, right_series: &TimeSeries, options: &JoinOptions) -> ValkeyValue {
     // todo: rayon::join
     let left_samples = fetch_samples(left_series, options);
@@ -286,231 +338,71 @@ fn process_join(left_series: &TimeSeries, right_series: &TimeSeries, options: &J
 }
 
 fn join_internal(left: &Vec<Sample>, right: &Vec<Sample>, options: &JoinOptions) -> ValkeyValue {
+    let is_transform = options.transform_op.is_some();
 
-    let is_exclusive = match options.join_type {
-        JoinType::Left(exclusive) | JoinType::Right(exclusive) => exclusive,
-        _ => false
-    };
+    let mut join_iter = JoinIterator::new_from_options(&left, &right, options);
 
-    let mut state: Vec<ValkeyValue> = Vec::with_capacity(left.len().max(right.len()));
+    // todo: aggregations
+    let result = join_iter
+        .map(|jv| join_value_to_value(jv, is_transform))
+        .collect();
 
-    fn acc(state: &mut Vec<ValkeyValue>, row: JoinResultRow) {
-        let ts = ValkeyValue::from(row.timestamp);
-        let left = if let Some(value) = row.left {
-            ValkeyValue::Float(value)
-        } else {
-            ValkeyValue::Null
-        };
-        let right = if let Some(value) = row.right {
-            ValkeyValue::Float(value)
-        } else {
-            ValkeyValue::Null
-        };
-        let value = ValkeyValue::Array(vec![ts, left, right]);
-        state.push(value);
-    }
-
-    fn acc_exclusive(state: &mut Vec<ValkeyValue>, row: JoinResultRow) {
-        let ts = ValkeyValue::from(row.timestamp);
-        let value = row.left.unwrap_or(row.right.unwrap_or(f64::NAN));
-        if !value.is_nan() {
-            let val = vec![ts, ValkeyValue::Float(value)];
-            state.push(ValkeyValue::Array(val))
-        }
-    }
-
-    let mapper = if is_exclusive {
-        acc_exclusive
-    } else {
-        acc
-    };
-
-    join_samples_internal(left, right, options, &mut state, mapper);
-
-    ValkeyValue::Array(state)
+    ValkeyValue::Array(result)
 }
 
-pub(crate) fn join_samples_internal<F, STATE>(
-    left: &Vec<Sample>,
-    right: &Vec<Sample>,
-    options: &JoinOptions,
-    state: &mut STATE,
-    f: F,
-)
-where F: Fn(&mut STATE, JoinResultRow)
-{
-    match options.join_type {
-        JoinType::AsOf(..) => {
-            join_asof_internal(left, right, options, state, f)
+fn join_value_to_value(row: JoinValue, is_transform: bool) -> ValkeyValue {
+    let timestamp = ValkeyValue::from(row.timestamp);
+    // todo: for asof, we also need the second timestamp
+    match row.value {
+        EitherOrBoth::Both(left, right) => {
+            ValkeyValue::Array(vec![timestamp, ValkeyValue::Float(left), ValkeyValue::Float(right)])
         }
-        JoinType::Left(exclusive) => {
-            if exclusive {
-                join_left_exclusive(state, left, right, f)
+        EitherOrBoth::Left(left) => {
+            if is_transform {
+                ValkeyValue::Array(vec![timestamp, ValkeyValue::Float(left)])
             } else {
-                join_left(state, left, right, f)
+                ValkeyValue::Array(vec![timestamp, ValkeyValue::Float(left), ValkeyValue::Null ])
             }
         }
-        JoinType::Right(exclusive) => if exclusive {
-            join_right_exclusive(state, left, right, f)
-        } else {
-            join_right(state, left, right, f)
-        }
-        JoinType::Inner => join_inner(state, left, right, f),
-        JoinType::Full => join_full(state, left, right, f),
-    }
-}
-
-fn join_left<F, STATE>(state: &mut STATE, left: &Vec<Sample>, right: &Vec<Sample>, f: F)
-where
-    F: Fn(&mut STATE, JoinResultRow),
-{
-    for row in left.into_iter()
-        .merge_join_left_outer_by(right, |x, y| x.timestamp.cmp(&y.timestamp))
-        .map(convert_join_item) {
-        f(state, row);
-    }
-}
-
-fn join_left_exclusive<F, STATE>(state: &mut STATE, left: &Vec<Sample>, right: &Vec<Sample>, f: F)
-where
-    F: Fn(&mut STATE, JoinResultRow),
-{
-    for row in left.into_iter()
-        .merge_join_left_excl_by(right, |x, y| x.timestamp.cmp(&y.timestamp))
-        .map(|x| JoinResultRow::new(x.timestamp, Some(x.value), None)) {
-        f(state, row);
-    }
-}
-
-fn join_right<F, STATE>(state: &mut STATE, left: &Vec<Sample>, right: &Vec<Sample>, f: F)
-where
-    F: Fn(&mut STATE, JoinResultRow),
-{
-    let left_iter = left.into_iter().map(|sample| (sample.timestamp, sample));
-    let right_iter = right.into_iter().map(|sample| (sample.timestamp, sample));
-    for row in left_iter
-        .into_iter()
-        .hash_join_right_outer(right_iter) {
-
-        match row {
-            EitherOrBoth::Left(_) => {
-                // should not happen
-            }
-            EitherOrBoth::Right(r) => {
-                for item in r.iter().map(|sample| {
-                    JoinResultRow::new(sample.timestamp, None, Some(sample.value))
-                }) {
-                    f(state, item);
-                }
-            }
-            EitherOrBoth::Both(left, right) => {
-                let ts = left.timestamp;
-                for item in right.iter()
-                    .map(|sample| JoinResultRow::new(ts, Some(left.value), Some(sample.value))) {
-                    f(state, item);
-                }
-            }
+        EitherOrBoth::Right(right) => {
+            ValkeyValue::Array(vec![timestamp, ValkeyValue::Null, ValkeyValue::Float(right)])
         }
     }
 }
 
-fn join_right_exclusive<F, STATE>(state: &mut STATE, left: &Vec<Sample>, right: &Vec<Sample>, f: F)
-where
-    F: Fn(&mut STATE, JoinResultRow),
-{
-    let left_iter = left.into_iter().map(|sample| (sample.timestamp, sample));
-    let right_iter = right.into_iter().map(|sample| (sample.timestamp, sample));
-    for item in left_iter
-        .into_iter()
-        .hash_join_right_excl(right_iter)
-        .flatten() {
-
-        let row = JoinResultRow::new(item.timestamp, Some(item.value), None);
-        f(state, row);
+fn create_join_value_transform(timestamp: Timestamp, left: Option<f64>, right: Option<f64>, f: BinopFunc) -> JoinValue {
+    let value = transform_value_optional(f, &left, &right).unwrap_or(f64::NAN);
+    JoinValue {
+        timestamp,
+        value: EitherOrBoth::Left(value)
     }
 }
 
-fn join_inner<F, STATE>(state: &mut STATE, left: &Vec<Sample>, right: &Vec<Sample>, f: F)
-where
-    F: Fn(&mut STATE, JoinResultRow),
-{
-    for row in left.into_iter()
-        .merge_join_inner_by(right, |x, y| x.timestamp.cmp(&y.timestamp))
-        .map(|(l, r)| JoinResultRow::new(l.timestamp, Some(l.value), Some(r.value))) {
-        f(state, row);
-    }
-}
-
-fn join_full<F, STATE>(state: &mut STATE, left: &Vec<Sample>, right: &Vec<Sample>, f: F)
-where
-    F: Fn(&mut STATE, JoinResultRow),
-{
-    for row in left.into_iter()
-        .merge_join_full_outer_by(right, |x, y| x.timestamp.cmp(&y.timestamp))
-        .map(convert_join_item) {
-        f(state, row);
-    }
-}
-
-fn convert_join_item(item: EitherOrBoth<&Sample, &Sample>) -> JoinResultRow {
+pub(super) fn convert_join_item(item: EitherOrBoth<&Sample, &Sample>) -> JoinValue {
     match item {
-        EitherOrBoth::Both(l, r) => JoinResultRow::new(l.timestamp, Some(l.value), Some(r.value)),
-        EitherOrBoth::Left(l) => JoinResultRow::new(l.timestamp, Some(l.value), None),
-        EitherOrBoth::Right(r) => JoinResultRow::new(r.timestamp, None, Some(r.value)),
+        EitherOrBoth::Both(l, r) => JoinValue::both(l.timestamp, l.value, r.value),
+        EitherOrBoth::Left(l) => JoinValue::left(l.timestamp, l.value),
+        EitherOrBoth::Right(r) => JoinValue::right(r.timestamp, r.value),
     }
 }
 
-fn join_asof(left: &Vec<Sample>, right: &Vec<Sample>, options: &JoinOptions) -> ValkeyValue {
-
-    let mut state: Vec<ValkeyValue> = Vec::with_capacity(left.len().max(right.len()));
-
-    fn mapper(state: &mut Vec<ValkeyValue>, row: JoinResultRow) {
-        let value = join_row_to_value(&row);
-        state.push(value);
-    }
-
-    join_asof_internal(&left, &right, options, &mut state, mapper);
-
-    ValkeyValue::Array(state)
-}
-
-fn join_asof_internal<F, STATE>(left_samples: &Vec<Sample>,
-                                right_samples: &Vec<Sample>,
-                                options: &JoinOptions,
-                                state: &mut STATE,
-                                f: F)
-where
-    F: Fn(&mut STATE, JoinResultRow),
-{
-    let (tolerance, merge_mode) = match &options.join_type {
-        JoinType::AsOf(direction, duration) => {
-            let merge_mode = match direction {
-                JoinAsOfDirection::Forward => MergeAsOfMode::RollFollowing,
-                JoinAsOfDirection::Backward => MergeAsOfMode::RollPrior
-            };
-            (duration, merge_mode)
-        }
-        _ => panic!("asof JoinType expected")
-    };
-
-    for row in merge_apply_asof(&left_samples, &right_samples, tolerance, merge_mode)
-        .iter() {
-        let val = JoinResultRow::new(row.this.timestamp, Some(row.this.value), None);
-        f(state, val);
+pub(super) fn transform_join_value(item: &JoinValue, f: BinopFunc) -> JoinValue {
+    match item.value {
+        EitherOrBoth::Both(l, r) => {
+            let value = transform_value(f, l, r).unwrap_or(f64::NAN);
+            JoinValue::left(item.timestamp, value)
+        },
+        EitherOrBoth::Left(l) => {
+            let value = transform_value(f, l, f64::NAN).unwrap_or(f64::NAN);
+            JoinValue::left(item.timestamp, value)
+        },
+        EitherOrBoth::Right(r) => {
+            let value = transform_value(f, f64::NAN, r).unwrap_or(f64::NAN);
+            JoinValue::left(item.timestamp, value)
+        },
     }
 }
 
-fn convert_unmatched_pair(value: &PotentiallyUnmatchedPair) -> TimeSeriesDataPoint<Timestamp, (f64, Option<f64>)> {
-    TimeSeriesDataPoint {
-        timestamp: value.this.timestamp(),
-        value: (
-            value.this.value(),
-            match value.other {
-                Some(sample) => Some(sample.value),
-                None => None
-            }),
-    }
-}
 
 fn fetch_samples(ts: &TimeSeries, options: &JoinOptions) -> Vec<Sample> {
     let mut samples = get_range_internal(ts, &options.date_range, true, &options.timestamp_filter, &options.value_filter);
@@ -520,170 +412,31 @@ fn fetch_samples(ts: &TimeSeries, options: &JoinOptions) -> Vec<Sample> {
     samples
 }
 
-pub fn join_row_to_value(row: &JoinResultRow) -> ValkeyValue {
-    let left_value = if let Some(val) = row.left {
-        ValkeyValue::Float(val)
+#[inline]
+pub fn transform_value(f: BinopFunc, left: f64, right: f64) -> Option<f64> {
+    let value = f(left, right);
+
+    if value.is_nan() {
+        None
     } else {
-        ValkeyValue::Null
-    };
-    let other_value = if let Some(val) = row.left {
-        ValkeyValue::Float(val)
-    } else {
-        ValkeyValue::Null
-    };
-    let row = vec![
-        ValkeyValue::from(row.timestamp),
-        left_value,
-        other_value,
-    ];
-    ValkeyValue::Array(row)
+        Some(value)
+    }
+}
+
+pub fn transform_value_optional(f: BinopFunc, left_value: &Option<f64>, right_value: &Option<f64>) -> Option<f64> {
+    let left = option_to_f64(left_value);
+    let right = option_to_f64(right_value);
+    transform_value(f, left, right)
+}
+
+#[inline]
+fn option_to_f64(opt: &Option<f64>) -> f64 {
+    match opt {
+        Some(x) => *x,
+        None => f64::NAN
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::common::types::{Sample, Timestamp};
-    use crate::joins::asof::PotentiallyUnmatchedPair;
-    use crate::joins::TimeSeriesDataPoint;
-    use crate::module::commands::join::join_asof_internal;
-    use crate::module::commands::{join_row_to_value, JoinAsOfDirection, JoinOptions, JoinResultRow, JoinType};
-    use std::time::Duration;
-    use valkey_module::ValkeyValue;
-
-    fn create_samples(timestamps: &[Timestamp], values: &[f64]) -> Vec<Sample> {
-        timestamps.iter()
-            .zip(values.iter())
-            .map(|(t, v)| Sample::new(*t, *v))
-            .collect()
-    }
-
-    fn convert_unmatched_pair(value: &PotentiallyUnmatchedPair) -> TimeSeriesDataPoint<Timestamp, (f64, Option<f64>)> {
-        TimeSeriesDataPoint {
-            timestamp: value.this.timestamp,
-            value: (
-                value.this.value,
-                match value.other {
-                    Some(sample) => Some(sample.value),
-                    None => None
-                }),
-        }
-    }
-
-    fn create_options() -> JoinOptions {
-        JoinOptions::default()
-    }
-
-    type DataPointVec = Vec<TimeSeriesDataPoint<Timestamp, (f64, Option<f64>)>>;
-
-    fn handle_join_asof(left: &Vec<Sample>, right: &Vec<Sample>, options: &JoinOptions) -> DataPointVec {
-        let mut state: DataPointVec = DataPointVec::new();
-        fn mapper(state: &mut DataPointVec, row: JoinResultRow) {
-            let left_value = row.left.unwrap();
-            let val = TimeSeriesDataPoint::new(row.timestamp, (left_value, None));
-            state.push(val)
-        }
-
-        join_asof_internal(left, right, options, &mut state, mapper);
-
-        state
-    }
-
-    #[test]
-    fn test_merge_asof_lookingback(){
-
-        let values = vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
-        let index = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-        let ts = create_samples(&index, &values);
-
-        let values2 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
-        let index2 = vec![2, 4, 5, 7, 8, 10];
-        let ts_join = create_samples(&index2, &values2);
-
-        let mut options = create_options();
-        options.join_type = JoinType::AsOf(JoinAsOfDirection::Backward, Duration::from_millis(1));
-
-        let custom = handle_join_asof(&ts, &ts_join, &options);
-
-        options.join_type = JoinType::AsOf(JoinAsOfDirection::Backward, Duration::from_millis(2));
-        let custom2 = handle_join_asof(&ts, &ts_join, &options);
-
-        let expected = vec![
-            TimeSeriesDataPoint { timestamp: 1, value: (1.00, None) },
-            TimeSeriesDataPoint { timestamp: 2, value: (1.00, Some(1.00)) },
-            TimeSeriesDataPoint { timestamp: 3, value: (1.00, Some(1.00)) },
-            TimeSeriesDataPoint { timestamp: 4, value: (1.00, Some(2.00)) },
-            TimeSeriesDataPoint { timestamp: 5, value: (1.00, Some(3.00)) },
-            TimeSeriesDataPoint { timestamp: 6, value: (1.00, Some(3.00)) },
-            TimeSeriesDataPoint { timestamp: 7, value: (1.00, Some(4.00)) },
-            TimeSeriesDataPoint { timestamp: 8, value: (1.00, Some(5.00)) },
-            TimeSeriesDataPoint { timestamp: 9, value: (1.00, Some(5.00)) },
-            TimeSeriesDataPoint { timestamp: 10, value: (1.00, Some(6.00)) },
-        ];
-
-        let expected1 = vec![
-            TimeSeriesDataPoint { timestamp: 1, value: (1.00, None) },
-            TimeSeriesDataPoint { timestamp: 2, value: (1.00, Some(1.00)) },
-            TimeSeriesDataPoint { timestamp: 3, value: (1.00, Some(1.00)) },
-            TimeSeriesDataPoint { timestamp: 4, value: (1.00, Some(2.00)) },
-            TimeSeriesDataPoint { timestamp: 5, value: (1.00, Some(3.00)) },
-            TimeSeriesDataPoint { timestamp: 6, value: (1.00, Some(3.00)) },
-            TimeSeriesDataPoint { timestamp: 7, value: (1.00, Some(4.00)) },
-            TimeSeriesDataPoint { timestamp: 8, value: (1.00, Some(5.00)) },
-            TimeSeriesDataPoint { timestamp: 9, value: (1.00, Some(5.00)) },
-            TimeSeriesDataPoint { timestamp: 10, value: (1.00, Some(6.00)) },
-        ];
-
-        assert_eq!(custom, expected);
-        assert_eq!(custom2, expected1);
-    }
-
-    #[test]
-    fn test_merge_asof_lookingforward(){
-
-        let values = vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
-        let index = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-        let ts = create_samples(&index, &values);
-
-        let values2 = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        let index2 = vec![2, 5, 6, 8, 10];
-
-        let ts_join = create_samples(&index2, &values2);
-
-        let mut options = create_options();
-
-        options.join_type = JoinType::AsOf(JoinAsOfDirection::Forward, Duration::from_millis(1));
-        let custom = handle_join_asof(&ts, &ts_join, &options);
-
-        options.join_type = JoinType::AsOf(JoinAsOfDirection::Forward, Duration::from_millis(2));
-        let custom2 = handle_join_asof(&ts, &ts_join, &options);
-
-        let expected = vec![
-            TimeSeriesDataPoint { timestamp: 1, value: (1.00, Some(1.00)) },
-            TimeSeriesDataPoint { timestamp: 2, value: (1.00, Some(1.00)) },
-            TimeSeriesDataPoint { timestamp: 3, value: (1.00, None) },
-            TimeSeriesDataPoint { timestamp: 4, value: (1.00, Some(2.00)) },
-            TimeSeriesDataPoint { timestamp: 5, value: (1.00, Some(2.00)) },
-            TimeSeriesDataPoint { timestamp: 6, value: (1.00, Some(3.00)) },
-            TimeSeriesDataPoint { timestamp: 7, value: (1.00, Some(4.00)) },
-            TimeSeriesDataPoint { timestamp: 8, value: (1.00, Some(4.00)) },
-            TimeSeriesDataPoint { timestamp: 9, value: (1.00, Some(5.00)) },
-            TimeSeriesDataPoint { timestamp: 10, value: (1.00, Some(5.00)) },
-        ];
-
-        let expected1 = vec![
-            TimeSeriesDataPoint { timestamp: 1, value: (1.00, Some(1.00)) },
-            TimeSeriesDataPoint { timestamp: 2, value: (1.00, Some(1.00)) },
-            TimeSeriesDataPoint { timestamp: 3, value: (1.00, Some(2.00)) },
-            TimeSeriesDataPoint { timestamp: 4, value: (1.00, Some(2.00)) },
-            TimeSeriesDataPoint { timestamp: 5, value: (1.00, Some(2.00)) },
-            TimeSeriesDataPoint { timestamp: 6, value: (1.00, Some(3.00)) },
-            TimeSeriesDataPoint { timestamp: 7, value: (1.00, Some(4.00)) },
-            TimeSeriesDataPoint { timestamp: 8, value: (1.00, Some(4.00)) },
-            TimeSeriesDataPoint { timestamp: 9, value: (1.00, Some(5.00)) },
-            TimeSeriesDataPoint { timestamp: 10, value: (1.00, Some(5.00)) },
-        ];
-
-        assert_eq!(custom, expected);
-        assert_eq!(custom2, expected1);
-    }
-
 }

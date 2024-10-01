@@ -1,8 +1,10 @@
 use crate::common::types::{Sample, SampleLike, Timestamp};
+use joinkit::EitherOrBoth;
 use std::cmp;
 use std::time::Duration;
 
 /// MergeAsOfMode describes the roll behavior of the asof merge
+#[derive(Clone, Copy)]
 pub enum MergeAsOfMode{ RollPrior, RollFollowing, NoRoll }
 
 pub struct PotentiallyUnmatchedPair<'a, TSample: SampleLike + Clone + Eq + Ord = Sample> {
@@ -14,7 +16,7 @@ pub fn merge_apply_asof<'a, TSample: SampleLike + Clone + Eq + Ord>(
     left_samples: &'a [TSample],
     other_samples: &'a [TSample],
     tolerance: &Duration,
-    merge_mode: MergeAsOfMode) -> Vec<PotentiallyUnmatchedPair<'a, TSample>>
+    merge_mode: MergeAsOfMode) -> Vec<EitherOrBoth<&'a TSample, &'a TSample>>
 {
     let tolerance_ms = tolerance.as_millis() as i64;
     let compare_func = match merge_mode {
@@ -56,15 +58,15 @@ fn fwd_func(idx: usize, other_len: usize) -> usize {
     }
 }
 
-/// as of join. this is a variation of merge join that allows for indices to be equal based on a custom comparator func
+/// as of join. this is a variation of merge join that allows for timestamps to be equal based on a custom comparator func
 fn get_asof_merge_joined<'a, TSample: SampleLike + Clone>(
     left: &'a [TSample],
     right: &'a [TSample],
     compare_func: Option<Box<dyn Fn(&Timestamp, &Timestamp, &Timestamp) -> (cmp::Ordering, i64)>>,
-    other_idx_func: Option<Box<dyn Fn(usize) -> usize>>) -> Vec<PotentiallyUnmatchedPair<'a, TSample>>
+    other_idx_func: Option<Box<dyn Fn(usize) -> usize>>) -> Vec<EitherOrBoth<&'a TSample, &'a TSample>>
 {
     #![allow(clippy::type_complexity)]
-    let mut output: Vec<PotentiallyUnmatchedPair<'a, TSample>> = Vec::new();
+    let mut output: Vec<EitherOrBoth<&'a TSample, &'a TSample>> = Vec::new();
     let mut pos1: usize = 0;
     let mut pos2: usize = 0;
 
@@ -92,29 +94,23 @@ fn get_asof_merge_joined<'a, TSample: SampleLike + Clone>(
         match comp_res.0 {
             // (Evaluated as,  but is actually)
             cmp::Ordering::Greater => {
-                output.push(PotentiallyUnmatchedPair {
-                    this: first,
-                    other: None,
-                });
+                output.push(EitherOrBoth::Left(first));
                 if pos2 < (right.len() - 1) {
                     pos1 += 1; //the first index might still be longer so we gotta keep rolling it forward even though we are out of space on the other index
                 }
             }
             cmp::Ordering::Less => {
-                output.push(PotentiallyUnmatchedPair {
-                    this: first,
-                    other: None,
-                });
+                output.push(EitherOrBoth::Left(first));
                 pos1 += 1;
             }
             cmp::Ordering::Equal => {
                 let pas64: i64 = pos2.try_into().unwrap();
                 let idx0: i64 = pas64 + offset;
-                let other = right.get(idx0 as usize);
-                output.push(PotentiallyUnmatchedPair {
-                    this: first,
-                    other,
-                });
+                if let Some(other) = right.get(idx0 as usize) {
+                    output.push(EitherOrBoth::Both(first, other));
+                } else {
+                    output.push(EitherOrBoth::Left(first));
+                }
                 if first_ts.eq(&second_ts) && pos2 < (right.len() - 1) { // only incr if things are actually equal and you have room to run
                     pos2 += 1;
                 }
@@ -167,11 +163,13 @@ fn merge_asof_fwd(look_fwd: i64) -> Box<dyn Fn(&i64, &i64, &i64) -> (cmp::Orderi
 
 #[cfg(test)]
 mod tests {
-    use super::{merge_apply_asof, MergeAsOfMode, PotentiallyUnmatchedPair};
+    use super::{merge_apply_asof, MergeAsOfMode};
     use crate::common::types::{SampleLike, Timestamp};
     use crate::joins::TimeSeriesDataPoint;
+    use joinkit::EitherOrBoth;
     use metricsql_runtime::types::Sample;
     use std::time::Duration;
+    use crate::module::commands::JoinValue;
 
     fn create_samples(timestamps: &[Timestamp], values: &[f64]) -> Vec<Sample> {
         timestamps.iter()
@@ -180,16 +178,8 @@ mod tests {
             .collect()
     }
 
-    fn convert_pair(value: &PotentiallyUnmatchedPair) -> TimeSeriesDataPoint<Timestamp, (f64, Option<f64>)> {
-        TimeSeriesDataPoint {
-            timestamp: value.this.timestamp(),
-            value: (
-                value.this.value(),
-                match value.other {
-                    Some(sample) => Some(sample.value),
-                    None => None
-                })
-        }
+    fn convert_pair(value: &EitherOrBoth<&Sample, &Sample>) -> JoinValue {
+        value.into()
     }
 
     #[test]
@@ -205,29 +195,29 @@ mod tests {
         let ts_join = create_samples(&index2, &values2);
 
         let tolerance = Duration::from_secs(1);
-        let result = merge_apply_asof(&ts, &ts_join, &tolerance, MergeAsOfMode::RollPrior)
+        let actual = merge_apply_asof(&ts, &ts_join, &tolerance, MergeAsOfMode::RollPrior)
             .iter()
             .map(convert_pair)
             .collect::<Vec<_>>();
 
         let expected = vec![
-            TimeSeriesDataPoint { timestamp: 1, value: (1.00, None) },
-            TimeSeriesDataPoint { timestamp: 2, value: (1.00, Some(1.00)) },
-            TimeSeriesDataPoint { timestamp: 3, value: (1.00, Some(1.00)) },
-            TimeSeriesDataPoint { timestamp: 4, value: (1.00, Some(2.00)) },
-            TimeSeriesDataPoint { timestamp: 5, value: (1.00, Some(3.00)) },
-            TimeSeriesDataPoint { timestamp: 6, value: (1.00, Some(3.00)) },
-            TimeSeriesDataPoint { timestamp: 7, value: (1.00, Some(4.00)) },
-            TimeSeriesDataPoint { timestamp: 8, value: (1.00, Some(5.00)) },
-            TimeSeriesDataPoint { timestamp: 9, value: (1.00, Some(5.00)) },
-            TimeSeriesDataPoint { timestamp: 10, value: (1.00, Some(6.00)) },
+            JoinValue::left(1, 1.0),
+            JoinValue::both(2, 1.0, 1.0),
+            JoinValue::both(3, 1.0, 1.0),
+            JoinValue::both(4, 1.0, 2.0),
+            JoinValue::both(5, 1.0, 3.0),
+            JoinValue::both(6, 1.0, 3.0),
+            JoinValue::both(7, 1.0, 4.0),
+            JoinValue::both(8, 1.0, 5.0),
+            JoinValue::both(9, 1.0, 5.0),
+            JoinValue::both(10, 1.0, 6.0),
         ];
 
-        assert_eq!(result, expected);
+        assert_eq!(actual, expected);
     }
 
     #[test]
-    fn test_merge_asof_lookingforward(){
+    fn test_merge_asof_forward(){
 
         let values = vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
         let index = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -252,29 +242,29 @@ mod tests {
             .collect();
 
         let expected = vec![
-            TimeSeriesDataPoint { timestamp: 1, value: (1.00, Some(1.00)) },
-            TimeSeriesDataPoint { timestamp: 2, value: (1.00, Some(1.00)) },
-            TimeSeriesDataPoint { timestamp: 3, value: (1.00, None) },
-            TimeSeriesDataPoint { timestamp: 4, value: (1.00, Some(2.00)) },
-            TimeSeriesDataPoint { timestamp: 5, value: (1.00, Some(2.00)) },
-            TimeSeriesDataPoint { timestamp: 6, value: (1.00, Some(3.00)) },
-            TimeSeriesDataPoint { timestamp: 7, value: (1.00, Some(4.00)) },
-            TimeSeriesDataPoint { timestamp: 8, value: (1.00, Some(4.00)) },
-            TimeSeriesDataPoint { timestamp: 9, value: (1.00, Some(5.00)) },
-            TimeSeriesDataPoint { timestamp: 10, value: (1.00, Some(5.00)) },
+            JoinValue::both(1, 1.0, 1.0),
+            JoinValue::both(2, 1.0, 1.0),
+            JoinValue::left(3, 1.0),
+            JoinValue::both(4, 1.0, 2.0),
+            JoinValue::both(5, 1.0, 2.0),
+            JoinValue::both(6, 1.0, 3.0),
+            JoinValue::both(7, 1.0, 4.0),
+            JoinValue::both(8, 1.0, 4.0),
+            JoinValue::both(9, 1.0, 5.0),
+            JoinValue::both(10, 1.0, 5.0),
         ];
 
         let expected1 = vec![
-            TimeSeriesDataPoint { timestamp: 1, value: (1.00, Some(1.00)) },
-            TimeSeriesDataPoint { timestamp: 2, value: (1.00, Some(1.00)) },
-            TimeSeriesDataPoint { timestamp: 3, value: (1.00, Some(2.00)) },
-            TimeSeriesDataPoint { timestamp: 4, value: (1.00, Some(2.00)) },
-            TimeSeriesDataPoint { timestamp: 5, value: (1.00, Some(2.00)) },
-            TimeSeriesDataPoint { timestamp: 6, value: (1.00, Some(3.00)) },
-            TimeSeriesDataPoint { timestamp: 7, value: (1.00, Some(4.00)) },
-            TimeSeriesDataPoint { timestamp: 8, value: (1.00, Some(4.00)) },
-            TimeSeriesDataPoint { timestamp: 9, value: (1.00, Some(5.00)) },
-            TimeSeriesDataPoint { timestamp: 10, value: (1.00, Some(5.00)) },
+            JoinValue::both(1, 1.0, 1.0),
+            JoinValue::both(2, 1.0, 1.0),
+            JoinValue::both(3, 1.0, 2.0),
+            JoinValue::both(4, 1.0, 2.0),
+            JoinValue::both(5, 1.0, 2.0),
+            JoinValue::both(6, 1.0, 3.0),
+            JoinValue::both(7, 1.0, 4.0),
+            JoinValue::both(8, 1.0, 4.0),
+            JoinValue::both(9, 1.0, 5.0),
+            JoinValue::both(10, 1.0, 5.0),
         ];
 
         assert_eq!(custom, expected);

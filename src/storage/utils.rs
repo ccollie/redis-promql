@@ -1,5 +1,4 @@
 use enquote::enquote;
-use rand_distr::num_traits::Zero;
 use crate::common::types::{Label, Timestamp};
 
 trait ModuloSignedExt {
