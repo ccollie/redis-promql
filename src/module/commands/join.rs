@@ -114,7 +114,6 @@ impl Display for JoinAsOfDirection {
         }
     }
 }
-
 impl FromStr for JoinAsOfDirection {
     type Err = ValkeyError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {

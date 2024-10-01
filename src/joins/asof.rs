@@ -1,7 +1,11 @@
+/// The code in this file is largely copied from
+// https://github.com/beignetbytes/tsxlib-rs
+// License: Apache-2.0/MIT
 use crate::common::types::{Sample, SampleLike, Timestamp};
 use joinkit::EitherOrBoth;
 use std::cmp;
 use std::time::Duration;
+
 
 /// MergeAsOfMode describes the roll behavior of the asof merge
 #[derive(Clone, Copy)]
@@ -164,12 +168,11 @@ fn merge_asof_fwd(look_fwd: i64) -> Box<dyn Fn(&i64, &i64, &i64) -> (cmp::Orderi
 #[cfg(test)]
 mod tests {
     use super::{merge_apply_asof, MergeAsOfMode};
-    use crate::common::types::{SampleLike, Timestamp};
-    use crate::joins::TimeSeriesDataPoint;
+    use crate::common::types::Timestamp;
+    use crate::module::commands::JoinValue;
     use joinkit::EitherOrBoth;
     use metricsql_runtime::types::Sample;
     use std::time::Duration;
-    use crate::module::commands::JoinValue;
 
     fn create_samples(timestamps: &[Timestamp], values: &[f64]) -> Vec<Sample> {
         timestamps.iter()
