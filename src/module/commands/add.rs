@@ -5,10 +5,6 @@ use crate::storage::TimeSeriesOptions;
 use valkey_module::key::ValkeyKeyWritable;
 use valkey_module::{Context, NextArg, ValkeyError, ValkeyResult, ValkeyString, ValkeyValue};
 
-const CMD_ARG_RETENTION: &str = "RETENTION";
-const CMD_ARG_DUPLICATE_POLICY: &str = "DUPLICATE_POLICY";
-const CMD_ARG_DEDUPE_INTERVAL: &str = "DEDUPE_INTERVAL";
-const CMD_ARG_CHUNK_SIZE: &str = "CHUNK_SIZE";
 const CMD_ARG_METRIC: &str = "METRIC";
 
 ///

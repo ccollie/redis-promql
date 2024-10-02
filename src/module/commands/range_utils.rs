@@ -109,7 +109,7 @@ pub fn group_series_by_label_value<'a>(series: &'a [&TimeSeries], label: &str) -
     grouped
 }
 
-pub(crate) fn sample_to_value(sample: &Sample) -> ValkeyValue {
+pub(crate) fn sample_to_value(sample: Sample) -> ValkeyValue {
     let row = vec![ValkeyValue::from(sample.timestamp), ValkeyValue::from(sample.value)];
     ValkeyValue::from(row)
 }

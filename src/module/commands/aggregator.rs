@@ -4,29 +4,14 @@ use crate::module::types::{AggregationOptions, BucketTimestamp};
 
 #[derive(Debug)]
 pub(crate) struct AggrIterator {
-    pub(crate) aggregator: Aggregator,
-    pub(crate) time_delta: i64,
-    pub(crate) bucket_ts: BucketTimestamp,
-    pub(crate) last_timestamp: Timestamp,
-    pub(crate) aligned_timestamp: Timestamp,
-    pub(crate) count: usize,
-    pub(crate) empty: bool,
+    aggregator: Aggregator,
+    time_delta: i64,
+    bucket_ts: BucketTimestamp,
+    last_timestamp: Timestamp,
+    aligned_timestamp: Timestamp,
+    count: usize,
+    empty: bool,
     bucket_right_ts: Timestamp,
-}
-
-impl Default for AggrIterator {
-    fn default() -> AggrIterator {
-        AggrIterator {
-            aggregator: Aggregator::new("avg").unwrap(),
-            time_delta: 0,
-            bucket_ts: Default::default(),
-            last_timestamp: 0,
-            bucket_right_ts: 0,
-            aligned_timestamp: 0,
-            count: AggrIterator::DEFAULT_COUNT,
-            empty: false,
-        }
-    }
 }
 
 impl AggrIterator {
@@ -40,7 +25,8 @@ impl AggrIterator {
             time_delta: options.time_delta,
             bucket_ts: options.timestamp_output,
             count: count.unwrap_or(AggrIterator::DEFAULT_COUNT),
-            ..Default::default()
+            last_timestamp: 0,
+            bucket_right_ts: 0,
         }
 
     }
@@ -63,8 +49,7 @@ impl AggrIterator {
     }
 
     fn calculate_empty_bucket_count(&self, first_bucket_ts: Timestamp, end_bucket_ts: Timestamp, max_count: usize) -> usize {
-        let time_delta = self.time_delta;
-        let total_empty_buckets = (((end_bucket_ts - first_bucket_ts) / time_delta) + 1) as usize;
+        let total_empty_buckets = (((end_bucket_ts - first_bucket_ts) / self.time_delta) + 1) as usize;
         let remaining_capacity = max_count - total_empty_buckets;
         total_empty_buckets.min(remaining_capacity)
     }

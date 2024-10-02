@@ -29,6 +29,7 @@ pub fn delete_series(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
             // get series from redis
             match redis_key.get_value::<TimeSeries>(&VKM_SERIES_TYPE) {
                 Ok(Some(_)) => {
+                    // todo: remove from index
                     redis_key.delete()?;
                 }
                 Ok(None) => {

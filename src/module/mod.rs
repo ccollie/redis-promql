@@ -3,7 +3,6 @@ pub(crate) use ts_db::*;
 pub(crate) use utils::*;
 use valkey_module::{Context, ValkeyError, ValkeyResult, ValkeyString};
 
-mod timeseries_api;
 mod result;
 mod utils;
 mod ts_db;

@@ -2,6 +2,7 @@ use crate::aggregators::Aggregator;
 use crate::common::current_time_millis;
 use crate::common::types::{Label, Timestamp};
 use crate::error::{TsdbError, TsdbResult};
+use crate::module::transform_op::TransformOperator;
 use crate::module::types::*;
 use crate::storage::{DuplicatePolicy, MAX_CHUNK_SIZE, MIN_CHUNK_SIZE};
 use chrono::DateTime;
@@ -12,9 +13,7 @@ use std::collections::BTreeSet;
 use std::iter::{Peekable, Skip};
 use std::time::Duration;
 use std::vec::IntoIter;
-use metricsql_parser::ast::Operator;
 use valkey_module::{NextArg, ValkeyError, ValkeyResult, ValkeyString};
-use crate::module::transform_op::TransformOperator;
 
 const MAX_TS_VALUES_FILTER: usize = 16;
 const CMD_ARG_COUNT: &str = "COUNT";
@@ -23,6 +22,15 @@ const CMD_PARAM_ALIGN: &str = "ALIGN";
 pub const CMD_ARG_FILTER_BY_VALUE: &str = "FILTER_BY_VALUE";
 pub const CMD_ARG_FILTER_BY_TS: &str = "FILTER_BY_TS";
 pub const CMD_ARG_AGGREGATION: &str = "AGGREGATION";
+pub const CMD_ARG_MATCH: &str = "MATCH";
+pub const CMD_ARG_FILTER: &str = "FILTER";
+pub const CMD_ARG_EMPTY: &str = "EMPTY";
+pub const CMD_ARG_BUCKET_TIMESTAMP: &str = "BUCKETTIMESTAMP";
+pub const CMD_ARG_RETENTION: &str = "RETENTION";
+pub const CMD_ARG_DUPLICATE_POLICY: &str = "DUPLICATE_POLICY";
+pub const CMD_ARG_CHUNK_SIZE: &str = "CHUNK_SIZE";
+pub const CMD_ARG_DEDUPE_INTERVAL: &str = "DEDUPE_INTERVAL";
+
 
 pub type CommandArgIterator = Peekable<Skip<IntoIter<ValkeyString>>>;
 
@@ -346,8 +354,23 @@ pub fn parse_dedupe_interval(args: &mut CommandArgIterator) -> ValkeyResult<Dura
     }
 }
 
-const CMD_ARG_EMPTY: &str = "EMPTY";
-const CMD_ARG_BUCKET_TIMESTAMP: &str = "BUCKETTIMESTAMP";
+pub fn parse_match_list(args: &mut CommandArgIterator, is_cmd_token: fn(&str) -> bool) -> ValkeyResult<Vec<Matchers>> {
+    let mut matchers = vec![];
+
+    while let Some(next) = args.peek() {
+        let arg = next.try_as_str()?;
+        if is_cmd_token(arg) {
+            break;
+        }
+        if let Ok(selector) = parse_series_selector(arg) {
+            matchers.push(selector);
+        } else {
+            return Err(ValkeyError::Str("ERR invalid MATCH series selector"));
+        }
+    }
+
+    Ok(matchers)
+}
 
 pub fn parse_aggregation_options(args: &mut CommandArgIterator) -> ValkeyResult<AggregationOptions> {
     // AGGREGATION token already seen

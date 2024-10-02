@@ -362,16 +362,28 @@ impl Chunk for GorillaChunk {
         let count = self.num_samples();
         let mut xor_encoder = XOREncoder::new();
 
-        for item in self.xor_encoder.iter() {
-            let sample = item?;
-            if sample.timestamp == ts {
-                duplicate_found = true;
-                let value = dp_policy.value_on_duplicate(ts, sample.value, sample.value)?;
-                let sample = Sample::new(ts, value);
-                push_sample(&mut xor_encoder, &sample)?;
-            } else {
-                push_sample(&mut xor_encoder, &sample)?;
+        let mut iter = self.xor_encoder.iter();
+
+        let mut current = Sample::default();
+
+        // skip previous samples
+        while let Some(item) = iter.next() {
+            current = item?;
+            if current.timestamp >= ts {
+                break;
             }
+            push_sample(&mut xor_encoder, &current)?;
+        }
+
+        if current.timestamp == ts {
+            duplicate_found = true;
+            current.value = dp_policy.value_on_duplicate(ts, current.value, sample.value)?;
+            iter.next();
+        }
+
+        for item in iter {
+            current = item?;
+            push_sample(&mut xor_encoder, &current)?;
         }
 
         // todo: do a self.encoder.buf.take()

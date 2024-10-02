@@ -4,7 +4,7 @@ use crate::module::arg_parse::*;
 use crate::module::commands::aggregator::AggrIterator;
 use crate::module::commands::join_iter::JoinIterator;
 use crate::module::get_timeseries;
-use crate::module::types::{AggregationOptions, JoinAsOfDirection, JoinOptions, JoinType, JoinValue};
+use crate::module::types::{JoinAsOfDirection, JoinOptions, JoinType, JoinValue};
 use crate::storage::time_series::TimeSeries;
 use joinkit::EitherOrBoth;
 use metricsql_parser::binaryop::BinopFunc;
@@ -182,36 +182,42 @@ fn process_join(left_series: &TimeSeries, right_series: &TimeSeries, options: &J
 }
 
 fn join_internal(left: &[Sample], right: &[Sample], options: &JoinOptions) -> ValkeyValue {
-    let is_transform = options.transform_op.is_some();
 
-    let join_iter = JoinIterator::new_from_options(left, right, options);
+    let join_iter = JoinIterator::new(left, right, options.join_type);
 
-    if let Some(aggr_options) = &options.aggregation {
-        if is_transform {
+    if let Some(op) = options.transform_op {
+        let transform = op.get_handler();
+
+        let iter = join_iter.map(|x| {
+            transform_join_value_to_sample(&x, transform)
+        });
+
+        return if let Some(aggr_options) = &options.aggregation {
             // Aggregation is valid only for transforms (all other options return multiple values per row)
             let (l_min, l_max) = get_sample_ts_range(left);
             let (r_min, r_max) = get_sample_ts_range(right);
             let start_timestamp = l_min.min(r_min);
             let end_timestamp = l_max.max(r_max);
 
-            let samples = aggregate(
-                                        start_timestamp,
-                                        end_timestamp,
-                                        aggr_options,
-                                        options,
-                                        join_iter
-                                    );
+            let aligned_timestamp = aggr_options.alignment
+                .get_aligned_timestamp(start_timestamp, end_timestamp);
 
-            let result = samples.iter().map(sample_to_value).collect::<Vec<_>>();
-            return ValkeyValue::Array(result);
+            let mut aggr_iter = AggrIterator::new(aggr_options, aligned_timestamp, options.count);
 
+            let result = aggr_iter.calculate(iter)
+                .into_iter()
+                .map(sample_to_value)
+                .collect::<Vec<_>>();
+
+            ValkeyValue::Array(result)
         } else {
-            panic!("Invalid state. Aggregation supported only with transform functions");
+            let result = iter.map(sample_to_value).collect::<Vec<_>>();
+            ValkeyValue::Array(result)
         }
     }
 
     let result = join_iter
-        .map(|jv| join_value_to_value(jv, is_transform))
+        .map(|jv| join_value_to_value(jv, false))
         .collect();
 
     ValkeyValue::Array(result)
@@ -226,34 +232,9 @@ fn get_sample_ts_range(samples: &[Sample]) -> (Timestamp, Timestamp) {
     (first.timestamp, last.timestamp)
 }
 
-fn aggregate<'a>(
-    start_timestamp: Timestamp,
-    end_timestamp: Timestamp,
-    aggr_options: &AggregationOptions,
-    options: &'a JoinOptions,
-    join_iterator: JoinIterator<'a>
-) -> Vec<Sample> {
-    let aligned_timestamp= aggr_options.alignment
-        .get_aligned_timestamp(start_timestamp, end_timestamp);
-
-    let iter = join_iterator.map(|ref jv| {
-        let timestamp = jv.timestamp;
-        let value = match jv.value  {
-            EitherOrBoth::Both(l, r) => r,
-            EitherOrBoth::Left(l) => l,
-            EitherOrBoth::Right(r) => r
-        };
-        Sample::new(timestamp, value)
-    });
-
-    let mut aggr_iter = AggrIterator::new(aggr_options, aligned_timestamp, options.count);
-
-    aggr_iter.calculate(iter)
-}
-
 fn join_value_to_value(row: JoinValue, is_transform: bool) -> ValkeyValue {
     let timestamp = ValkeyValue::from(row.timestamp);
-    // todo: for asof, we also need the second timestamp
+
     match row.value {
         EitherOrBoth::Both(left, right) => {
             let r_value = ValkeyValue::from(right);
@@ -266,10 +247,11 @@ fn join_value_to_value(row: JoinValue, is_transform: bool) -> ValkeyValue {
             ValkeyValue::Array(res)
         }
         EitherOrBoth::Left(left) => {
+            let value = ValkeyValue::from(left);
             if is_transform {
-                ValkeyValue::Array(vec![timestamp, ValkeyValue::Float(left)])
+                ValkeyValue::Array(vec![timestamp, value])
             } else {
-                ValkeyValue::Array(vec![timestamp, ValkeyValue::Float(left), ValkeyValue::Null ])
+                ValkeyValue::Array(vec![timestamp, value, ValkeyValue::Null ])
             }
         }
         EitherOrBoth::Right(right) => {
@@ -288,21 +270,19 @@ pub(super) fn convert_join_item(item: EitherOrBoth<&Sample, &Sample>) -> JoinVal
 
 pub(super) fn transform_join_value(item: &JoinValue, f: BinopFunc) -> JoinValue {
     match item.value {
-        EitherOrBoth::Both(l, r) => {
-            let value = transform_value(f, l, r).unwrap_or(f64::NAN);
-            JoinValue::left(item.timestamp, value)
-        },
-        EitherOrBoth::Left(l) => {
-            let value = transform_value(f, l, f64::NAN).unwrap_or(f64::NAN);
-            JoinValue::left(item.timestamp, value)
-        },
-        EitherOrBoth::Right(r) => {
-            let value = transform_value(f, f64::NAN, r).unwrap_or(f64::NAN);
-            JoinValue::left(item.timestamp, value)
-        },
+        EitherOrBoth::Both(l, r) => JoinValue::left(item.timestamp, f(l, r)),
+        EitherOrBoth::Left(l) => JoinValue::left(item.timestamp, f(l, f64::NAN)),
+        EitherOrBoth::Right(r) => JoinValue::left(item.timestamp, f(f64::NAN, r)),
     }
 }
 
+pub(super) fn transform_join_value_to_sample(item: &JoinValue, f: BinopFunc) -> Sample {
+    match item.value {
+        EitherOrBoth::Both(l, r) => Sample::new(item.timestamp, f(l, r)),
+        EitherOrBoth::Left(l) => Sample::new(item.timestamp, f(l, f64::NAN)),
+        EitherOrBoth::Right(r) => Sample::new(item.timestamp, f(f64::NAN, r)),
+    }
+}
 
 fn fetch_samples(ts: &TimeSeries, options: &JoinOptions) -> Vec<Sample> {
     let (start, end) = options.date_range.get_series_range(ts, true);
@@ -313,16 +293,6 @@ fn fetch_samples(ts: &TimeSeries, options: &JoinOptions) -> Vec<Sample> {
     samples
 }
 
-#[inline]
-pub fn transform_value(f: BinopFunc, left: f64, right: f64) -> Option<f64> {
-    let value = f(left, right);
-
-    if value.is_nan() {
-        None
-    } else {
-        Some(value)
-    }
-}
 
 #[cfg(test)]
 mod tests {

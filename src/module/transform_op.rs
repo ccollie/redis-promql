@@ -4,10 +4,9 @@ use phf::phf_map;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
-use strum_macros::EnumIter;
 use valkey_module::ValkeyError;
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, EnumIter, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub enum TransformOperator {
     Add,
     And,
@@ -240,7 +239,7 @@ fn max(x: f64, y: f64) -> f64 {
 }
 
 fn avg(x: f64, y: f64) -> f64 {
-    x.max(y) / 2.0
+    (x + y) / 2.0
 }
 
 #[cfg(test)]
