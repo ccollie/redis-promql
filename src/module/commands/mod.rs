@@ -25,6 +25,7 @@ mod join_left_iter;
 mod join_right_iter;
 mod join_asof_iter;
 mod join_iter;
+mod aggregator;
 
 pub use alter::*;
 pub use delete_range::*;

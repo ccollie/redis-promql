@@ -7,10 +7,9 @@ use crate::module::commands::join_left_exclusive_iter::JoinLeftExclusiveIter;
 use crate::module::commands::join_left_iter::JoinLeftIter;
 use crate::module::commands::join_right_exclusive_iter::JoinRightExclusiveIter;
 use crate::module::commands::join_right_iter::JoinRightIter;
-use metricsql_parser::ast::Operator;
-use metricsql_parser::binaryop::get_scalar_binop_handler;
-use metricsql_parser::prelude::BinopFunc;
+use crate::module::transform_op::TransformOperator;
 use crate::module::types::{JoinOptions, JoinType, JoinValue};
+use metricsql_parser::prelude::BinopFunc;
 
 pub struct JoinTransformIter<'a> {
     inner: Box<JoinIterator<'a>>,
@@ -18,10 +17,10 @@ pub struct JoinTransformIter<'a> {
 }
 
 impl<'a> JoinTransformIter<'a> {
-    pub fn new(base: JoinIterator<'a>, op: Operator) -> Self {
+    pub fn new(base: JoinIterator<'a>, op: TransformOperator) -> Self {
         Self {
             inner: Box::new(base),
-            func: get_scalar_binop_handler(op, true)
+            func: op.get_handler()
         }
     }
 }

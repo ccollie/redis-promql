@@ -5,6 +5,9 @@ extern crate smallvec;
 extern crate async_trait;
 extern crate croaring;
 extern crate joinkit;
+extern crate phf;
+extern crate strum;
+extern crate strum_macros;
 
 use valkey_module::{valkey_module, Context as ValkeyContext, NotifyEvent, ValkeyString};
 use valkey_module::server_events::{FlushSubevent, LoadingSubevent};

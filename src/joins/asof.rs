@@ -12,7 +12,7 @@ use std::time::Duration;
 pub enum MergeAsOfMode{ RollPrior, RollFollowing }
 
 pub fn merge_apply_asof<'a, TSample: SampleLike + Clone + Eq + Ord>(
-    left_samples: &'a [TSample],
+    left_samples: &'a [TSample], // todo: take impl Iterator<Item=Sample>
     other_samples: &'a [TSample],
     tolerance: &Duration,
     merge_mode: MergeAsOfMode) -> Vec<EitherOrBoth<&'a TSample, &'a TSample>>

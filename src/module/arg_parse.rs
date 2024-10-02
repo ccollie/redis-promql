@@ -14,12 +14,15 @@ use std::time::Duration;
 use std::vec::IntoIter;
 use metricsql_parser::ast::Operator;
 use valkey_module::{NextArg, ValkeyError, ValkeyResult, ValkeyString};
+use crate::module::transform_op::TransformOperator;
 
 const MAX_TS_VALUES_FILTER: usize = 16;
 const CMD_ARG_COUNT: &str = "COUNT";
 const CMD_PARAM_REDUCER: &str = "REDUCE";
 const CMD_PARAM_ALIGN: &str = "ALIGN";
-
+pub const CMD_ARG_FILTER_BY_VALUE: &str = "FILTER_BY_VALUE";
+pub const CMD_ARG_FILTER_BY_TS: &str = "FILTER_BY_TS";
+pub const CMD_ARG_AGGREGATION: &str = "AGGREGATION";
 
 pub type CommandArgIterator = Peekable<Skip<IntoIter<ValkeyString>>>;
 
@@ -114,11 +117,18 @@ pub fn parse_duration_arg(arg: &ValkeyString) -> ValkeyResult<Duration> {
 }
 
 pub fn parse_duration(arg: &str) -> ValkeyResult<Duration> {
-    match parse_duration_value(arg, 1) {
+    match parse_duration_ms(arg) {
         Ok(d) => Ok(Duration::from_millis(d as u64)),
+        Err(e) => Err(e)
+    }
+}
+
+pub fn parse_duration_ms(arg: &str) -> ValkeyResult<i64> {
+    match parse_duration_value(arg, 1) {
+        Ok(d) => Ok(d),
         Err(_e) => {
             match arg.parse::<i64>() {
-                Ok(v) => Ok(Duration::from_millis(v as u64)),
+                Ok(v) => Ok(v),
                 Err(_e) => {
                     let str = format!("ERR: failed to parse duration: {}", arg);
                     Err(ValkeyError::String(str))
@@ -146,29 +156,8 @@ pub fn parse_metric_name(arg: &str) -> TsdbResult<Vec<Label>> {
     })
 }
 
-pub fn parse_operator(arg: &str) -> ValkeyResult<Operator> {
-    if let Ok(value) = Operator::try_from(arg) {
-        return Ok(value);
-    }
-    let lower = arg.to_ascii_lowercase();
-    match lower.as_str() {
-        "add" => Ok(Operator::Add),
-        "sub" => Ok(Operator::Sub),
-        "mul" => Ok(Operator::Mul),
-        "div" => Ok(Operator::Div),
-        "mod" => Ok(Operator::Mod),
-        "pow" => Ok(Operator::Pow),
-        "eq" => Ok(Operator::Eql),
-        "ne" | "neq" => Ok(Operator::NotEq),
-        "gt" => Ok(Operator::Gt),
-        "gte" => Ok(Operator::Gte),
-        "lt" => Ok(Operator::Lt),
-        "lte" => Ok(Operator::Lte),
-        _ => {
-            let msg = format!("Unknown operator: {}", arg);
-            Err(ValkeyError::String(msg))
-        }
-    }
+pub fn parse_operator(arg: &str) -> ValkeyResult<TransformOperator> {
+    TransformOperator::try_from(arg)
 }
 
 pub fn parse_chunk_size(args: &mut CommandArgIterator) -> ValkeyResult<usize> {

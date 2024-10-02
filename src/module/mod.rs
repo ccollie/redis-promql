@@ -10,6 +10,7 @@ mod ts_db;
 pub mod arg_parse;
 pub(crate) mod commands;
 pub mod types;
+mod transform_op;
 
 pub(crate) fn with_timeseries(ctx: &Context, key: &ValkeyString, f: impl FnOnce(&TimeSeries) -> ValkeyResult) -> ValkeyResult {
     let ts = get_timeseries(ctx, key)?;
