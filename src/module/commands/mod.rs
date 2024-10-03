@@ -17,16 +17,9 @@ mod reset_rollup_cache;
 mod range_arg_parse;
 mod mrange;
 mod join;
-mod join_inner_iter;
-mod join_full_iter;
-mod join_right_exclusive_iter;
-mod join_left_exclusive_iter;
-mod join_left_iter;
-mod join_right_iter;
-mod join_asof_iter;
-mod join_iter;
-mod aggregator;
+mod union;
 
+pub use crate::iter::aggregator::*;
 pub use alter::*;
 pub use delete_range::*;
 pub use create::*;

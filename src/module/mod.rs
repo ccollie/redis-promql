@@ -11,6 +11,8 @@ pub(crate) mod commands;
 pub mod types;
 mod transform_op;
 
+pub use transform_op::*;
+
 pub(crate) fn with_timeseries(ctx: &Context, key: &ValkeyString, f: impl FnOnce(&TimeSeries) -> ValkeyResult) -> ValkeyResult {
     let ts = get_timeseries(ctx, key)?;
     f(ts)

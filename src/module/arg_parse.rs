@@ -327,7 +327,7 @@ fn is_token_or_end(args: &mut CommandArgIterator, is_cmd_token: fn(&str) -> bool
     }
 }
 
-pub fn parse_label_list(args: &mut CommandArgIterator, is_cmd_token: fn(&str) -> bool) -> ValkeyResult<BTreeSet<String>> {
+pub fn parse_label_list(args: &mut CommandArgIterator, is_cmd_token: fn(&str) -> bool) -> ValkeyResult<Vec<String>> {
     let mut labels: BTreeSet<String> = BTreeSet::new();
 
     loop {
@@ -342,7 +342,8 @@ pub fn parse_label_list(args: &mut CommandArgIterator, is_cmd_token: fn(&str) ->
         labels.insert(label.to_string());
     }
 
-    Ok(labels)
+    let temp = labels.into_iter().collect();
+    Ok(temp)
 }
 
 pub fn parse_dedupe_interval(args: &mut CommandArgIterator) -> ValkeyResult<Duration> {

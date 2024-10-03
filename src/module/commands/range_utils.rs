@@ -1,35 +1,23 @@
-use super::aggregator::AggrIterator;
+use crate::aggregators::AggOp;
 use crate::common::types::{Sample, Timestamp};
-use crate::module::types::{AggregationOptions, RangeOptions, ValueFilter};
+use crate::iter::aggregator::AggrIterator;
+use crate::module::types::{AggregationOptions, RangeGroupingOptions, RangeOptions, ValueFilter};
 use crate::storage::time_series::TimeSeries;
-use ahash::AHashMap;
 use valkey_module::ValkeyValue;
 
-pub struct GroupMeta<'a> {
-    pub groups: AHashMap<String, Vec<&'a TimeSeries>>,
+pub(super) struct RangeMeta {
+    pub id: u64,
+    pub(crate) source_key: String,
+    pub(crate) start_ts: Timestamp,
+    pub(crate) end_ts: Timestamp,
+    pub(crate) labels: Vec<ValkeyValue>,
+    pub(crate) sample_iter: Box<dyn Iterator::<Item=Sample>>
 }
 
-impl<'a> GroupMeta<'a> {
-    pub fn new() -> Self {
-        Self {
-            groups: Default::default(),
-        }
-    }
-
-    pub fn add_series(&mut self, series: &'a TimeSeries, label_name: &str) {
-        if let Some(value) = series.label_value(label_name) {
-            match self.groups.get_mut(value) {
-                Some(group) => {
-                    group.push(series)
-                }
-                None => {
-                    let mut group = Vec::with_capacity(8);
-                    group.push(series);
-                    self.groups.insert(value.to_string(), group);
-                }
-            }
-        }
-    }
+pub struct GroupedSeries {
+    pub label_value: String,
+    pub series: Vec<RangeMeta>,
+    pub labels: Vec<ValkeyValue>,
 }
 
 // todo: move elsewhere, better name
@@ -58,6 +46,53 @@ pub(super) fn get_range_internal(
     };
 
     samples
+}
+
+pub(super) fn get_sample_iterator<'a>(
+    series: &'a TimeSeries,
+    start_timestamp: Timestamp,
+    end_timestamp: Timestamp,
+    timestamp_filter: &Option<Vec<Timestamp>>,
+    value_filter: &Option<ValueFilter>
+) -> Box<dyn Iterator<Item=Sample> + 'a> {
+
+    let (min, max, has_value_filter) = if let Some(filter) = value_filter {
+        let ValueFilter { min, max } = *filter;
+        (min, max, true)
+    } else {
+        (f64::MIN, f64::MAX, false)
+    };
+
+    if let Some(timestamps) = timestamp_filter {
+        let iter = series.samples_by_timestamps(timestamps)
+            .unwrap_or_else(|e| {
+                // todo: properly handle error and log
+                vec![]
+            })
+            .into_iter()
+            .filter(move |sample| sample.timestamp >= start_timestamp && sample.timestamp <= end_timestamp);
+
+        if has_value_filter {
+            let iter = iter.filter(move |sample| {
+                sample.value >= min && sample.value <= max
+            });
+            Box::new(iter)
+        } else {
+            Box::new(iter)
+        }
+
+    } else {
+        let iter = series.range_iter(start_timestamp, end_timestamp);
+
+        if has_value_filter {
+            let iter = iter.filter(move |sample| sample.value >= min && sample.value <= max);
+            Box::new(iter)
+        } else {
+            Box::new(iter)
+        }
+
+    }
+
 }
 
 pub(crate) fn get_range(series: &TimeSeries, args: &RangeOptions, check_retention: bool) -> Vec<Sample> {
@@ -93,23 +128,74 @@ fn get_series_aggregator(
     AggrIterator::new(aggr_options, aligned_timestamp, args.count)
 }
 
-pub fn group_series_by_label_value<'a>(series: &'a [&TimeSeries], label: &str) -> AHashMap<String, Vec<&'a TimeSeries>> {
-    let mut grouped: AHashMap<String, Vec<&TimeSeries>> = AHashMap::new();
+pub(crate) fn aggregate_samples(
+    iter: impl Iterator<Item=Sample>,
+    start_ts: Timestamp,
+    end_ts: Timestamp,
+    aggr_options: &AggregationOptions,
+    count: Option<usize>
+) -> Vec<Sample> {
+    let aligned_timestamp= aggr_options.alignment.get_aligned_timestamp(start_ts, end_ts);
+    let mut aggr = AggrIterator::new(aggr_options, aligned_timestamp, count);
+    aggr.calculate(iter)
+}
 
-    for ts in series.iter() {
-        if let Some(label_value) = ts.label_value(label) {
-            if let Some(list) = grouped.get_mut(label_value) {
-                list.push(ts);
-            } else {
-                grouped.insert(label_value.to_string(), vec![ts]);
+pub fn get_range_series_labels(options: &RangeOptions, series: &TimeSeries) -> Vec<ValkeyValue>  {
+
+    if !options.with_labels && options.selected_labels.is_empty() {
+        return vec![]
+    }
+
+    let mut dest = Vec::new();
+
+    fn create_label(name: &str, value: &str) -> ValkeyValue {
+        ValkeyValue::Array(vec![
+            ValkeyValue::SimpleString(name.to_string()),
+            ValkeyValue::SimpleString(value.to_string())
+        ])
+    }
+
+    if !options.selected_labels.is_empty() {
+        for name in options.selected_labels.iter() {
+            if let Some(value) = series.label_value(&name) {
+                dest.push(create_label(&name, &value));
             }
+        }
+    } else {
+        for label in series.labels.iter().by_ref() {
+            dest.push(create_label(&label.name, &label.value));
         }
     }
 
-    grouped
+    dest
 }
 
-pub(crate) fn sample_to_value(sample: Sample) -> ValkeyValue {
-    let row = vec![ValkeyValue::from(sample.timestamp), ValkeyValue::from(sample.value)];
-    ValkeyValue::from(row)
+pub(super) fn group_samples_internal(samples: impl Iterator<Item=Sample>, option: &RangeGroupingOptions) -> Vec<Sample> {
+    let mut iter = samples;
+    let mut aggregator = option.aggregator.clone();
+    let mut current = if let Some(current) = iter.next() {
+        aggregator.update(current.value);
+        current
+    } else {
+        return vec![];
+    };
+
+    let mut result = vec![];
+
+    while let Some(next) = iter.next() {
+        if next.timestamp == current.timestamp {
+            aggregator.update(next.value);
+        } else {
+            let value = aggregator.finalize();
+            result.push(Sample { timestamp: current.timestamp, value });
+            aggregator.update(next.value);
+            current = next;
+        }
+    }
+
+    // Finalize last
+    let value = aggregator.finalize();
+    result.push(Sample { timestamp: current.timestamp, value });
+
+    result
 }

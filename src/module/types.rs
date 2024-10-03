@@ -10,7 +10,6 @@ use metricsql_common::humanize::{humanize_duration, humanize_duration_ms};
 use metricsql_parser::prelude::Matchers;
 use metricsql_runtime::types::TimestampTrait;
 use std::cmp::Ordering;
-use std::collections::BTreeSet;
 use std::fmt::Display;
 use std::str::FromStr;
 use std::time::Duration;
@@ -383,7 +382,7 @@ pub struct RangeOptions {
     pub value_filter: Option<ValueFilter>,
     pub series_selector: Matchers,
     pub with_labels: bool,
-    pub selected_labels: BTreeSet<String>,
+    pub selected_labels: Vec<String>,
     pub grouping: Option<RangeGroupingOptions>,
 }
 

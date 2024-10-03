@@ -1,4 +1,4 @@
-use crate::common::types::{Label, Timestamp};
+use crate::common::types::{Label, Sample, Timestamp};
 use crate::storage::time_series::TimeSeries;
 use metricsql_runtime::types::{MetricName, METRIC_NAME_LABEL};
 use std::collections::HashMap;
@@ -249,4 +249,9 @@ pub(super) fn get_ts_metric_selector(ts: &TimeSeries, key: Option<&ValkeyString>
         map.insert(ValkeyValueKey::String(name.into()), ValkeyValue::from(value));
     }
     ValkeyValue::Map(map)
+}
+
+pub(crate) fn sample_to_value(sample: Sample) -> ValkeyValue {
+    let row = vec![ValkeyValue::from(sample.timestamp), ValkeyValue::from(sample.value)];
+    ValkeyValue::from(row)
 }
