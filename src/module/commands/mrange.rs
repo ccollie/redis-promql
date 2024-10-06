@@ -9,11 +9,9 @@ use crate::module::types::{AggregationOptions, RangeGroupingOptions, RangeOption
 use crate::module::VKM_SERIES_TYPE;
 use crate::storage::time_series::{SeriesSampleIterator, TimeSeries};
 use ahash::AHashMap;
-use rayon::iter::IntoParallelRefIterator;
 use valkey_module::{Context, NextArg, ValkeyResult, ValkeyString, ValkeyValue};
 
 struct SeriesMeta<'a> {
-    index: usize,
     series: &'a TimeSeries,
     source_key: ValkeyString,
     start_ts: Timestamp,
@@ -40,12 +38,15 @@ pub fn mrange(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
 
         let mut metas = Vec::with_capacity(keys.len());
 
-        let mut idx: usize = 0;
-        for (db_key, key) in db_keys.iter().zip(keys.into_iter()) {
-            if let Some(ts) = db_key.get_value::<TimeSeries>(&VKM_SERIES_TYPE)? {
-                let meta = create_range_meta(key, idx, &options, ts);
-                idx += 1;
-                metas.push(meta);
+        for (db_key, source_key) in db_keys.iter().zip(keys.into_iter()) {
+            if let Some(series) = db_key.get_value::<TimeSeries>(&VKM_SERIES_TYPE)? {
+                let (start_ts, end_ts) = options.date_range.get_series_range(series, false);
+                metas.push(SeriesMeta {
+                    series,
+                    source_key,
+                    start_ts,
+                    end_ts,
+                });
             } else {
                 // todo error
             }
@@ -198,44 +199,49 @@ fn aggregate_grouped_samples(group: &GroupedSeries, options: &RangeOptions, aggr
         }
     }
 
+    fn flush(aggregator: &mut Aggregator, timestamp: Timestamp, is_nan: bool, res: &mut Vec<Sample>) {
+        res.push(Sample {
+            timestamp,
+            value: if is_nan { f64::NAN } else { aggregator.finalize() },
+        });
+        aggregator.reset()
+    }
+
     let mut count = options.count.unwrap_or(usize::MAX);
     let iterators = get_sample_iterators(&group.series, options);
     let mut iter = MultiSeriesSampleIter::new(iterators);
 
     let mut res: Vec<Sample> = Vec::with_capacity(iter.size_hint().0);
 
-    let mut sample: Sample = Sample::default();
-    let mut is_nan = false;
-
-    if let Some(first) = iter.next() {
-        sample = first;
-        if !update(&mut aggregator, &sample) {
-            is_nan = true
-        }
+    let (mut sample, mut is_nan) = if let Some(sample) = iter.next() {
+        (sample, !update(&mut aggregator, &sample))
     } else {
         return res;
-    }
+    };
+
+    let mut unsaved: usize = 0;
 
     for next_sample in iter {
         if sample.timestamp == next_sample.timestamp {
             if !update(&mut aggregator, &next_sample) {
                 is_nan = true;
             }
+            unsaved += 1;
         } else {
-            is_nan = false;
-            res.push(Sample {
-                timestamp: sample.timestamp,
-                value: if is_nan { f64::NAN } else { aggregator.finalize() },
-            });
+            flush(&mut aggregator, sample.timestamp, is_nan, &mut res);
+            is_nan = !update(&mut aggregator, &next_sample);
+            sample = next_sample;
 
+            unsaved = 0;
             count -= 1;
             if count == 0 {
                 break;
             }
-
-            aggregator.reset();
-            sample = next_sample;
         }
+    }
+
+    if unsaved > 0 {
+        flush(&mut aggregator, sample.timestamp, is_nan, &mut res);
     }
 
     res
@@ -247,17 +253,6 @@ fn get_series_iterator<'a>(meta: &SeriesMeta<'a>, options: &'a RangeOptions) -> 
                         meta.end_ts,
                         &options.timestamp_filter,
                         &options.value_filter)
-}
-
-fn create_range_meta<'a>(source_key: ValkeyString, index: usize, options: &'a RangeOptions, series: &'a TimeSeries) -> SeriesMeta<'a> {
-    let (start_ts, end_ts) = options.date_range.get_series_range(series, false);
-    SeriesMeta {
-        index,
-        series,
-        source_key,
-        start_ts,
-        end_ts,
-    }
 }
 
 fn get_sample_iterators<'a>(series: &Vec<SeriesMeta<'a>>, range_options: &'a RangeOptions) -> Vec<SeriesSampleIterator<'a>> {
@@ -287,10 +282,10 @@ fn get_series_sample_aggregates<'a>(series: &SeriesMeta<'a>,
 const REDUCER_KEY: &str = "__reducer__";
 const SOURCE_KEY: &str = "__source__";
 
-pub struct GroupedSeries<'a> {
-    pub label_value: String,
-    pub series: Vec<SeriesMeta<'a>>,
-    pub labels: Vec<ValkeyValue>,
+struct GroupedSeries<'a> {
+    label_value: String,
+    series: Vec<SeriesMeta<'a>>,
+    labels: Vec<ValkeyValue>,
 }
 
 fn group_series_by_label<'a>(

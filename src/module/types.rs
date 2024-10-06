@@ -445,8 +445,8 @@ impl Display for JoinType {
             JoinType::AsOf(dir, tolerance) => {
                 write!(f, "ASOF JOIN")?;
                 match dir {
-                    JoinAsOfDirection::Next => write!(f, " FORWARD")?,
-                    JoinAsOfDirection::Prior => write!(f, " BACKWARD")?,
+                    JoinAsOfDirection::Next => write!(f, " NEXT")?,
+                    JoinAsOfDirection::Prior => write!(f, " PRIOR")?,
                 }
                 if !tolerance.is_zero() {
                     write!(f, " TOLERANCE {}", humanize_duration(tolerance))?;
@@ -477,6 +477,8 @@ impl FromStr for JoinAsOfDirection {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             s if s.eq_ignore_ascii_case("forward") => Ok(JoinAsOfDirection::Next),
+            s if s.eq_ignore_ascii_case("next") => Ok(JoinAsOfDirection::Next),
+            s if s.eq_ignore_ascii_case("prior") => Ok(JoinAsOfDirection::Prior),
             s if s.eq_ignore_ascii_case("backward") => Ok(JoinAsOfDirection::Prior),
             _ => Err(ValkeyError::Str("invalid join direction")),
         }

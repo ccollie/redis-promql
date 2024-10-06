@@ -689,8 +689,6 @@ fn get_chunk_index(chunks: &[TimeSeriesChunk], timestamp: Timestamp) -> (usize, 
     }
 }
 
-pub type BoxedSampleIterator<'a> = Box<dyn Iterator<Item = Sample> + 'a>;
-
 pub(crate) struct SeriesSampleIterator<'a> {
     series: &'a TimeSeries,
     curr_iter: Option<ChunkSampleIterator<'a>>,

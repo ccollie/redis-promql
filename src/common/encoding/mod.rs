@@ -3,7 +3,6 @@ mod varbit_ts;
 mod varbit;
 mod varint;
 mod uvarint;
-mod temp;
 
 pub type NomBitInput<'a> = (&'a [u8], usize);
 
