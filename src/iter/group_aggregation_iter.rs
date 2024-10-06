@@ -1,16 +1,17 @@
 use crate::aggregators::{AggOp, Aggregator};
 use crate::common::types::{Sample, Timestamp};
 use crate::iter::MultiSeriesSampleIter;
+use crate::storage::time_series::SeriesSampleIterator;
 
-pub struct GroupAggregationIter {
+pub struct GroupAggregationIter<'a> {
     last_sample: Sample,
     bucket_count: usize,
     aggregator: Aggregator,
-    inner_iter: MultiSeriesSampleIter,
+    inner_iter: MultiSeriesSampleIter<'a>,
 }
 
-impl GroupAggregationIter {
-    pub fn new(series: Vec<Box<dyn Iterator<Item=Sample>>>, aggregator: Aggregator) -> Self {
+impl<'a> GroupAggregationIter<'a> {
+    pub fn new(series: Vec<SeriesSampleIterator<'a>>, aggregator: Aggregator) -> Self {
         Self {
             aggregator,
             bucket_count: 0,
@@ -27,7 +28,7 @@ impl GroupAggregationIter {
     }
 }
 
-impl Iterator for GroupAggregationIter {
+impl<'a> Iterator for GroupAggregationIter<'a> {
     type Item = Sample;
 
     fn next(&mut self) -> Option<Self::Item> {

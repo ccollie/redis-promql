@@ -2,23 +2,8 @@ use crate::aggregators::AggOp;
 use crate::common::types::{Sample, Timestamp};
 use crate::iter::aggregator::AggrIterator;
 use crate::module::types::{AggregationOptions, RangeGroupingOptions, RangeOptions, ValueFilter};
-use crate::storage::time_series::TimeSeries;
+use crate::storage::time_series::{SeriesSampleIterator, TimeSeries};
 use valkey_module::ValkeyValue;
-
-pub(super) struct RangeMeta {
-    pub id: u64,
-    pub(crate) source_key: String,
-    pub(crate) start_ts: Timestamp,
-    pub(crate) end_ts: Timestamp,
-    pub(crate) labels: Vec<ValkeyValue>,
-    pub(crate) sample_iter: Box<dyn Iterator::<Item=Sample>>
-}
-
-pub struct GroupedSeries {
-    pub label_value: String,
-    pub series: Vec<RangeMeta>,
-    pub labels: Vec<ValkeyValue>,
-}
 
 // todo: move elsewhere, better name
 pub(super) fn get_range_internal(
@@ -28,71 +13,18 @@ pub(super) fn get_range_internal(
     timestamp_filter: &Option<Vec<Timestamp>>,
     value_filter: &Option<ValueFilter>
 ) -> Vec<Sample> {
-    let mut samples = if let Some(timestamps) = timestamp_filter {
-        series.samples_by_timestamps(timestamps)
-            .unwrap_or_else(|e| {
-                // todo: properly handle error and log
-                vec![]
-            })
-            .into_iter()
-            .filter(|sample| sample.timestamp >= start_timestamp && sample.timestamp <= end_timestamp)
-            .collect()
-    } else {
-        series.range_iter(start_timestamp, end_timestamp).collect::<Vec<_>>()
-    };
-
-    if let Some(filter) = value_filter {
-        samples.retain(|s| s.value >= filter.min && s.value <= filter.max);
-    };
-
-    samples
+    let iter = SeriesSampleIterator::new(series, start_timestamp, end_timestamp, value_filter, timestamp_filter);
+    iter.collect()
 }
 
 pub(super) fn get_sample_iterator<'a>(
     series: &'a TimeSeries,
     start_timestamp: Timestamp,
     end_timestamp: Timestamp,
-    timestamp_filter: &Option<Vec<Timestamp>>,
-    value_filter: &Option<ValueFilter>
-) -> Box<dyn Iterator<Item=Sample> + 'a> {
-
-    let (min, max, has_value_filter) = if let Some(filter) = value_filter {
-        let ValueFilter { min, max } = *filter;
-        (min, max, true)
-    } else {
-        (f64::MIN, f64::MAX, false)
-    };
-
-    if let Some(timestamps) = timestamp_filter {
-        let iter = series.samples_by_timestamps(timestamps)
-            .unwrap_or_else(|e| {
-                // todo: properly handle error and log
-                vec![]
-            })
-            .into_iter()
-            .filter(move |sample| sample.timestamp >= start_timestamp && sample.timestamp <= end_timestamp);
-
-        if has_value_filter {
-            let iter = iter.filter(move |sample| {
-                sample.value >= min && sample.value <= max
-            });
-            Box::new(iter)
-        } else {
-            Box::new(iter)
-        }
-
-    } else {
-        let iter = series.range_iter(start_timestamp, end_timestamp);
-
-        if has_value_filter {
-            let iter = iter.filter(move |sample| sample.value >= min && sample.value <= max);
-            Box::new(iter)
-        } else {
-            Box::new(iter)
-        }
-
-    }
-
+    timestamp_filter: &'a Option<Vec<Timestamp>>,
+    value_filter: &'a Option<ValueFilter>
+) -> SeriesSampleIterator<'a> {
+    SeriesSampleIterator::new(series, start_timestamp, end_timestamp, value_filter, timestamp_filter)
 }
 
 pub(crate) fn get_range(series: &TimeSeries, args: &RangeOptions, check_retention: bool) -> Vec<Sample> {
@@ -140,9 +72,9 @@ pub(crate) fn aggregate_samples(
     aggr.calculate(iter)
 }
 
-pub fn get_range_series_labels(options: &RangeOptions, series: &TimeSeries) -> Vec<ValkeyValue>  {
+pub fn get_series_labels(series: &TimeSeries, with_labels: bool, selected_labels: &Vec<String>) -> Vec<ValkeyValue>  {
 
-    if !options.with_labels && options.selected_labels.is_empty() {
+    if !with_labels && selected_labels.is_empty() {
         return vec![]
     }
 
@@ -155,16 +87,17 @@ pub fn get_range_series_labels(options: &RangeOptions, series: &TimeSeries) -> V
         ])
     }
 
-    if !options.selected_labels.is_empty() {
-        for name in options.selected_labels.iter() {
+    if !selected_labels.is_empty() {
+        for name in selected_labels.iter() {
             if let Some(value) = series.label_value(&name) {
                 dest.push(create_label(&name, &value));
             }
         }
-    } else {
-        for label in series.labels.iter().by_ref() {
-            dest.push(create_label(&label.name, &label.value));
-        }
+        return dest;
+    }
+
+    for label in series.labels.iter().by_ref() {
+        dest.push(create_label(&label.name, &label.value));
     }
 
     dest

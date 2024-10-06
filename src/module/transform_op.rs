@@ -8,6 +8,7 @@ use valkey_module::ValkeyError;
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub enum TransformOperator {
+    AbsDiff,
     Add,
     And,
     Avg,
@@ -48,6 +49,7 @@ pub static BINARY_OPS_MAP: phf::Map<&'static str, TransformOperator> = phf_map! 
     "<=" => TransformOperator::Lte,
     ">=" => TransformOperator::Gte,
 
+    "absdiff" => TransformOperator::AbsDiff,
     "add" => TransformOperator::Add,
     "eq" => TransformOperator::Eql,
     "gt" => TransformOperator::Gt,
@@ -91,7 +93,7 @@ impl TransformOperator {
         use TransformOperator::*;
 
         match self {
-            Add | Sub | Mul | Div | Mod | Pow | Max | Min | Avg => Arithmetic,
+            AbsDiff | Add | Sub | Mul | Div | Mod | Pow | Max | Min | Avg => Arithmetic,
             Eql | Gte | Gt | Lt | Lte | NotEq => Comparison,
             And | Unless | Or | If | IfNot | Default => Logical,
         }
@@ -99,7 +101,7 @@ impl TransformOperator {
 
     pub const fn is_arithmetic_op(&self) -> bool {
         use TransformOperator::*;
-        matches!(self, Add | Sub | Mul | Div | Mod | Pow | Max | Min | Avg)
+        matches!(self, AbsDiff | Add | Sub | Mul | Div | Mod | Pow | Max | Min | Avg)
     }
 
     pub const fn is_logical_op(&self) -> bool {
@@ -121,6 +123,7 @@ impl TransformOperator {
     pub const fn as_str(&self) -> &'static str {
         use TransformOperator::*;
         match self {
+            AbsDiff => "absDiff",
             Add => "+",
             And => "and",
             Default => "default",
@@ -157,6 +160,7 @@ impl TransformOperator {
             Max => max,
             Min => min,
             Avg => avg,
+            AbsDiff => abs_diff,
             Add => h(BaseOp::Add),
             And => h(BaseOp::And),
             Default => h(BaseOp::Default),
@@ -240,6 +244,10 @@ fn max(x: f64, y: f64) -> f64 {
 
 fn avg(x: f64, y: f64) -> f64 {
     (x + y) / 2.0
+}
+
+fn abs_diff(x: f64, y: f64) -> f64 {
+    (x - y).abs()
 }
 
 #[cfg(test)]

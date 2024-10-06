@@ -2,11 +2,7 @@ use crate::module::arg_parse::*;
 use crate::module::types::RangeOptions;
 use valkey_module::{NextArg, ValkeyError, ValkeyResult};
 
-const CMD_ARG_COUNT: &str = "COUNT";
-const CMD_ARG_WITH_LABELS: &str = "WITH_LABELS";
-const CMD_ARG_SELECTED_LABELS: &str = "SELECTED_LABELS";
 const CMD_ARG_GROUP_BY: &str = "GROUPBY";
-const CMD_PARAM_REDUCER: &str = "REDUCE";
 
 pub fn parse_range_options(args: &mut CommandArgIterator) -> ValkeyResult<RangeOptions> {
 

@@ -1,16 +1,9 @@
-use super::{
-    merge_by_capacity,
-    validate_chunk_size,
-    Chunk,
-    ChunkCompression,
-    Sample,
-    TimeSeriesChunk,
-    TimeSeriesOptions
-};
+use super::{merge_by_capacity, validate_chunk_size, Chunk, ChunkCompression, ChunkSampleIterator, Sample, TimeSeriesChunk, TimeSeriesOptions};
 use crate::common::decimal::{round_to_significant_digits, RoundDirection};
 use crate::common::types::{Label, Timestamp};
 use crate::common::METRIC_NAME_LABEL;
 use crate::error::{TsdbError, TsdbResult};
+use crate::module::types::ValueFilter;
 use crate::storage::constants::{DEFAULT_CHUNK_SIZE_BYTES, SPLIT_FACTOR};
 use crate::storage::uncompressed_chunk::UncompressedChunk;
 use crate::storage::utils::format_prometheus_metric_name;
@@ -411,7 +404,7 @@ impl TimeSeries {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = Sample> + '_ {
-        SampleIterator::new(self, self.first_timestamp, self.last_timestamp)
+        SeriesSampleIterator::new(self, self.first_timestamp, self.last_timestamp, &None, &None)
     }
 
     pub fn range_iter(
@@ -419,7 +412,7 @@ impl TimeSeries {
         start: Timestamp,
         end: Timestamp,
     ) -> impl Iterator<Item = Sample> + '_ {
-        SampleIterator::new(self, start, end)
+        SeriesSampleIterator::new(self, start, end, &None, &None)
     }
 
     pub fn overlaps(&self, start_ts: Timestamp, end_ts: Timestamp) -> bool {
@@ -698,77 +691,75 @@ fn get_chunk_index(chunks: &[TimeSeriesChunk], timestamp: Timestamp) -> (usize, 
 
 pub type BoxedSampleIterator<'a> = Box<dyn Iterator<Item = Sample> + 'a>;
 
-pub struct SampleIterator<'a> {
-    curr_iter: BoxedSampleIterator<'a>,
+pub(crate) struct SeriesSampleIterator<'a> {
     series: &'a TimeSeries,
+    curr_iter: Option<ChunkSampleIterator<'a>>,
     chunk_index: usize,
-    start: Timestamp,
-    end: Timestamp,
-    done: bool,
+    value_filter: &'a Option<ValueFilter>,
+    ts_filter: &'a Option<Vec<Timestamp>>, // box instead
+    pub(crate) start: Timestamp,
+    pub(crate) end: Timestamp,
 }
 
-impl<'a> SampleIterator<'a> {
-    fn new(series: &'a TimeSeries, start: Timestamp, end: Timestamp) -> Self {
+impl<'a> SeriesSampleIterator<'a> {
+    pub(crate) fn new(series: &'a TimeSeries,
+                      start: Timestamp,
+                      end: Timestamp,
+                      value_filter: &'a Option<ValueFilter>,
+                      ts_filter: &'a Option<Vec<Timestamp>>, // box instead
+    ) -> Self {
         let (chunk_index, _) = get_chunk_index(&series.chunks, start);
-        let (curr_iter, new_start, done) = Self::get_iter(
-            &series.chunks,
+
+        let mut result = Self {
+            series,
+            curr_iter: None,
             chunk_index,
             start,
-            end
-        );
-
-        Self {
-            curr_iter,
-            series,
-            chunk_index: chunk_index + 1,
-            start: new_start,
             end,
-            done
-        }
+            value_filter,
+            ts_filter,
+        };
+
+        result.curr_iter= result.get_iter(start, end);
+        result
     }
 
-    fn get_iter(
-        chunks: &'a [TimeSeriesChunk],
-        chunk_index: usize,
-        start: Timestamp,
-        end: Timestamp,
-    ) -> (BoxedSampleIterator<'a>, Timestamp, bool) {
-        if let Some(chunk) = chunks.get(chunk_index) {
+    fn get_iter(&mut self, start: Timestamp, end: Timestamp) -> Option<ChunkSampleIterator<'a>> {
+        if let Some(chunk) = self.series.chunks.get(self.chunk_index) {
+            self.chunk_index += 1;
             if chunk.first_timestamp() <= end {
-                let new_iter = chunks[chunk_index].range_iter(start, end);
-                let start = chunk.last_timestamp();
+                let new_iter = ChunkSampleIterator::new(chunk, start, end, &self.value_filter, self.ts_filter);
+                self.start = chunk.last_timestamp();
 
-                return (Box::new(new_iter), start, false)
+                return Some(new_iter)
             }
         }
-        (Box::new(std::iter::empty::<Sample>()), end, true)
+        None
     }
+
 }
 
 // todo: implement next_chunk
-impl<'a> Iterator for SampleIterator<'a> {
+impl<'a> Iterator for SeriesSampleIterator<'a> {
     type Item = Sample;
     fn next(&mut self) -> Option<Self::Item> {
-        match self.curr_iter.next() {
-            Some(sample) => {
-                Some(sample)
-            }
-            None => {
-                if self.done {
-                    return None
+        if let Some(ref mut curr_iter) = self.curr_iter {
+            match curr_iter.next() {
+                Some(sample) => {
+                    Some(sample)
                 }
-                let (curr_iter, new_start, done) = Self::get_iter(
-                    &self.series.chunks,
-                    self.chunk_index,
-                    self.start,
-                    self.end
-                );
-                self.curr_iter = curr_iter;
-                self.start = new_start;
-                self.chunk_index += 1;
-                self.done = done;
-                self.curr_iter.next()
+                None => {
+                    if let Some(mut iter)= self.get_iter(self.start, self.end){
+                        let result = iter.next();
+                        self.curr_iter = Some(iter);
+                        result
+                    } else {
+                        None
+                    }
+                }
             }
+        } else {
+            None
         }
     }
 }

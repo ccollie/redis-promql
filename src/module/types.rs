@@ -17,11 +17,16 @@ use valkey_module::{ValkeyError, ValkeyResult, ValkeyString};
 
 #[derive(Clone, Default, Debug, PartialEq, Copy)]
 pub enum TimestampRangeValue {
+    /// The timestamp of the earliest sample in the series
     Earliest,
+    /// The timestamp of the latest sample in the series
     Latest,
     #[default]
+    /// The current time
     Now,
+    /// A specific timestamp
     Value(Timestamp),
+    /// A timestamp with a given delta from the current timestamp
     Relative(i64)
 }
 
@@ -108,9 +113,7 @@ impl TryFrom<&ValkeyString> for TimestampRangeValue {
             Ok(Value(int_val))
         } else {
             let date_str = value.to_string_lossy();
-            let ts =
-                parse_timestamp(&date_str).map_err(|_| ValkeyError::Str("invalid timestamp"))?;
-            Ok(Value(ts))
+            date_str.as_str().try_into()
         }
     }
 }

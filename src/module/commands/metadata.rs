@@ -1,6 +1,6 @@
 use crate::common::METRIC_NAME_LABEL;
 use crate::globals::with_timeseries_index;
-use crate::module::arg_parse::parse_match_list;
+use crate::module::arg_parse::parse_series_selector_list;
 use crate::module::result::{format_array_result, get_ts_metric_selector};
 use crate::module::types::{MetadataFunctionArgs, TimestampRangeValue};
 use crate::module::{normalize_range_args, parse_timestamp_arg, VKM_SERIES_TYPE};
@@ -81,7 +81,7 @@ pub(crate) fn label_values(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResu
     Ok(format_array_result(label_values))
 }
 
-pub(crate) fn with_matched_series<F, R>(ctx: &Context, mut acc: R, args: MetadataFunctionArgs, mut f: F) -> ValkeyResult<R>
+fn with_matched_series<F, R>(ctx: &Context, mut acc: R, args: MetadataFunctionArgs, mut f: F) -> ValkeyResult<R>
 where
     F: FnMut(R, &TimeSeries, &ValkeyString) -> R,
 {
@@ -147,7 +147,7 @@ fn parse_metadata_command_args(
                 end_value = Some(parse_timestamp_arg(next, "END")?);
             }
             arg if arg.eq_ignore_ascii_case(CMD_ARG_MATCH) => {
-                let m = parse_match_list(&mut args, is_cmd_token)?;
+                let m = parse_series_selector_list(&mut args, is_cmd_token)?;
                 matchers.extend(m);
             }
             arg if arg.eq_ignore_ascii_case(CMD_ARG_LIMIT) => {

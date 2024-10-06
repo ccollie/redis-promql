@@ -16,8 +16,8 @@ use std::vec::IntoIter;
 use valkey_module::{NextArg, ValkeyError, ValkeyResult, ValkeyString};
 
 const MAX_TS_VALUES_FILTER: usize = 16;
-const CMD_ARG_COUNT: &str = "COUNT";
-const CMD_PARAM_REDUCER: &str = "REDUCE";
+pub const CMD_ARG_COUNT: &str = "COUNT";
+pub const CMD_PARAM_REDUCER: &str = "REDUCE";
 const CMD_PARAM_ALIGN: &str = "ALIGN";
 pub const CMD_ARG_FILTER_BY_VALUE: &str = "FILTER_BY_VALUE";
 pub const CMD_ARG_FILTER_BY_TS: &str = "FILTER_BY_TS";
@@ -30,6 +30,8 @@ pub const CMD_ARG_RETENTION: &str = "RETENTION";
 pub const CMD_ARG_DUPLICATE_POLICY: &str = "DUPLICATE_POLICY";
 pub const CMD_ARG_CHUNK_SIZE: &str = "CHUNK_SIZE";
 pub const CMD_ARG_DEDUPE_INTERVAL: &str = "DEDUPE_INTERVAL";
+pub const CMD_ARG_WITH_LABELS: &str = "WITHLABELS";
+pub const CMD_ARG_SELECTED_LABELS: &str = "SELECTED_LABELS";
 
 
 pub type CommandArgIterator = Peekable<Skip<IntoIter<ValkeyString>>>;
@@ -355,7 +357,7 @@ pub fn parse_dedupe_interval(args: &mut CommandArgIterator) -> ValkeyResult<Dura
     }
 }
 
-pub fn parse_match_list(args: &mut CommandArgIterator, is_cmd_token: fn(&str) -> bool) -> ValkeyResult<Vec<Matchers>> {
+pub fn parse_series_selector_list(args: &mut CommandArgIterator, is_cmd_token: fn(&str) -> bool) -> ValkeyResult<Vec<Matchers>> {
     let mut matchers = vec![];
 
     while let Some(next) = args.peek() {
@@ -366,7 +368,7 @@ pub fn parse_match_list(args: &mut CommandArgIterator, is_cmd_token: fn(&str) ->
         if let Ok(selector) = parse_series_selector(arg) {
             matchers.push(selector);
         } else {
-            return Err(ValkeyError::Str("ERR invalid MATCH series selector"));
+            return Err(ValkeyError::Str("ERR invalid FILTER series selector"));
         }
     }
 

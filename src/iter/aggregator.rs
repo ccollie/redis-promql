@@ -84,7 +84,7 @@ impl AggrIterator {
             self.aggregator.update(sample.value);
         }
 
-        // todo: handle last bucker
+        // todo: handle last bucket
         buckets.truncate(self.count);
         buckets
     }

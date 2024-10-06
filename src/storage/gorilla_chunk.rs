@@ -137,14 +137,7 @@ impl GorillaChunk {
     where
         F: FnMut(&mut State, &Sample) -> ControlFlow<()>,
     {
-        for value in self.xor_encoder.iter() {
-            let sample = value?;
-            if sample.timestamp < start_ts {
-                continue;
-            }
-            if sample.timestamp >= end_ts {
-                break;
-            }
+        for sample in self.range_iter(start_ts, end_ts) {
             match f(state, &sample) {
                 ControlFlow::Break(_) => break,
                 ControlFlow::Continue(_) => continue,
@@ -223,18 +216,20 @@ impl GorillaChunk {
         ChunkIter::new(self)
     }
 
+    pub fn range_iter(&self, start_ts: Timestamp, end_ts: Timestamp) -> impl Iterator<Item = Sample> + '_ {
+        RangeChunkIter::new(self, start_ts, end_ts)
+    }
+
     pub fn samples_by_timestamps(&self, timestamps: &[Timestamp]) -> TsdbResult<Vec<Sample>>  {
         if self.num_samples() == 0 || timestamps.is_empty() {
             return Ok(vec![]);
         }
         let mut samples = Vec::with_capacity(timestamps.len());
         let mut timestamps = timestamps;
-        let last_timestamp = timestamps[timestamps.len() - 1];
-        for item in self.xor_encoder.iter() {
-            let sample = item?;
-            if timestamps.is_empty() || sample.timestamp > last_timestamp {
-                break;
-            }
+        let first_timestamp = timestamps[0].max(self.first_timestamp);
+        let last_timestamp = timestamps[timestamps.len() - 1].min(self.last_timestamp());
+
+        for sample in self.range_iter(first_timestamp, last_timestamp) {
             let first_ts = timestamps[0];
             match sample.timestamp.cmp(&first_ts) {
                 Ordering::Less => continue,
@@ -250,6 +245,7 @@ impl GorillaChunk {
                 }
             }
         }
+
         Ok(samples)
     }
 
@@ -469,6 +465,55 @@ impl<'a> Iterator for ChunkIter<'a> {
             },
             None => None,
         }
+    }
+}
+
+
+pub(crate) struct RangeChunkIter<'a> {
+    inner: XORIterator<'a>,
+    start: Timestamp,
+    end: Timestamp,
+    init: bool
+}
+
+impl<'a> RangeChunkIter<'a> {
+    pub fn new(chunk: &'a GorillaChunk, start: Timestamp, end: Timestamp) -> Self {
+        let inner = XORIterator::new(&chunk.xor_encoder);
+        Self { inner, start, end, init: false }
+    }
+
+    fn next_internal(&mut self) -> Option<Sample> {
+        match self.inner.next() {
+            Some(Ok(sample)) => Some(sample),
+            Some(Err(err)) => {
+                #[cfg(debug_assertions)]
+                eprintln!("Error decoding sample: {:?}", err);
+                None
+            },
+            None => None,
+        }
+    }
+}
+
+impl<'a> Iterator for RangeChunkIter<'a> {
+    type Item = Sample;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.init {
+            self.init = true;
+
+            while let Some(sample) = self.next_internal() {
+                if sample.timestamp > self.end {
+                    return None;
+                }
+                if sample.timestamp < self.start {
+                    continue;
+                }
+                return Some(sample);
+            }
+
+        }
+        self.next_internal()
     }
 }
 

@@ -18,6 +18,7 @@ pub fn delete_series(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
         matchers.push(parsed_matcher);
     }
 
+    // todo: with_matched_series
     let res = with_timeseries_index(ctx, move |index| {
         let keys = index.series_keys_by_matchers(ctx, &matchers);
         if keys.is_empty() {

@@ -4,7 +4,7 @@ VM.JOIN leftKey rightKey fromTimestamp toTimestamp
     [FILTER_BY_TS ts...]
     [FILTER_BY_VALUE min max]
     [COUNT count]
-    [TRANSFORM op]
+    [REDUCE op]
 ```
 
 Join 2 time series on sample timestamps. Performs an INNER join by default.
@@ -135,10 +135,11 @@ For example, if `bucketDuration` is 24 hours (`24 * 3600 * 1000`), setting `alig
 
 performs an operation on the value in each returned row.
 
-- `operator` takes one of the following types:
+ `operator` takes one of the following types:
 
   | `operator`    | Description                                                            |
-  |---------------|------------------------------------------------------------------------|
+  |---------------|------------------------------------------------------------------------| 
+  | `absdiff`     | abs(`left` - `right`)                                                  |
   | `add` or `+`  | `left` + `right`                                                       |
   | `and`         | Returns `left` if either value is NAN/NULL, `right` otherwise          |
   | `avg`         | Arithmetic mean of both values                                         |
