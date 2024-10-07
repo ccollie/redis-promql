@@ -130,6 +130,7 @@ valkey_module! {
         ["VM.ADD", commands::add, "write deny-oom", 1, 1, 1],
         ["VM.GET", commands::get, "write deny-oom", 1, 1, 1],
         ["VM.MGET", commands::mget, "write deny-oom", 1, 1, 1],
+        ["VM.COLLATE", commands::collate, "write deny-oom", 1, 1, 1],
         ["VM.MADD", commands::madd, "write deny-oom", 1, 1, 1],
         ["VM.DELETE-KEY_RANGE", commands::delete_key_range, "write deny-oom", 1, 1, 1],
         ["VM.DELETE-RANGE", commands::delete_range, "write deny-oom", 1, 1, 1],

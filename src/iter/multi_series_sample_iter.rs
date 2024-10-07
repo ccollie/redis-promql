@@ -1,42 +1,71 @@
 use crate::common::types::Sample;
+use crate::iter::sample_iter::SampleIter;
 use min_max_heap::MinMaxHeap;
 use smallvec::SmallVec;
-use crate::storage::time_series::SeriesSampleIterator;
 
 /// Iterate over multiple Sample iter, returning the samples in timestamp order
 pub struct MultiSeriesSampleIter<'a> {
     heap: MinMaxHeap<Sample>,
-    iter_list: Vec<SeriesSampleIterator<'a>>,
+    inner: Vec<SampleIter<'a>>,
 }
 
 impl<'a> MultiSeriesSampleIter<'a> {
-    pub fn new(list: Vec<SeriesSampleIterator<'a>>) -> Self {
+    pub fn new(list: Vec<SampleIter<'a>>) -> Self {
         let len = list.len();
         Self {
-            iter_list: list,
+            inner: list,
             heap: MinMaxHeap::with_capacity(len),
         }
     }
 
     fn push_samples_to_heap(&mut self) -> bool {
-        if !self.iter_list.is_empty() {
-            let mut to_remove: SmallVec<usize, 4> = SmallVec::new();
+        if !self.inner.is_empty() {
             let mut sample_added = false;
-
-            for (i, iter) in self.iter_list.iter_mut().enumerate() {
+            for iter in self.inner.iter_mut() {
                 if let Some(sample) = iter.next() {
-                    self.heap.push(sample);
                     sample_added = true;
-                } else {
+                    self.heap.push(sample);
+                }
+            }
+
+            return sample_added;
+        }
+        false
+    }
+
+    /// Load samples to heap, and try to ensure that the iterators are roughly at the same timestamp
+    fn load_heap(&mut self) -> bool {
+        if !self.push_samples_to_heap() {
+            return false;
+        }
+
+        if let Some(max) = self.heap.peek_max() {
+            let mut to_remove: SmallVec<usize, 4> = SmallVec::new();
+
+            for (i, sample_iter) in self.inner.iter_mut().enumerate() {
+                let mut sample_added = false;
+
+                while let Some(sample) = sample_iter.next() {
+                    sample_added = true;
+                    let stop = sample.timestamp >= max.timestamp;
+                    self.heap.push(sample);
+                    if stop {
+                        break;
+                    }
+                }
+
+                if !sample_added {
                     to_remove.push(i);
                 }
             }
+
             if !to_remove.is_empty() {
                 for i in to_remove.iter().rev() {
-                    let _ = self.iter_list.swap_remove(*i);
+                    let _ = self.inner.swap_remove(*i);
                 }
             }
-            return sample_added;
+
+            return true
         }
         false
     }
@@ -47,7 +76,7 @@ impl<'a> Iterator for MultiSeriesSampleIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.heap.is_empty() {
-            if !self.push_samples_to_heap() {
+            if !self.load_heap() {
                 return None;
             }
         }

@@ -104,11 +104,6 @@ impl TransformOperator {
         matches!(self, AbsDiff | Add | Sub | Mul | Div | Mod | Pow | Max | Min | Avg)
     }
 
-    pub const fn is_logical_op(&self) -> bool {
-        use TransformOperator::*;
-        matches!(self, And | Or | Unless | If | IfNot | Default)
-    }
-
     pub const fn is_comparison(&self) -> bool {
         use TransformOperator::*;
         matches!(self, Eql | Gte | Gt | Lt | Lte | NotEq)

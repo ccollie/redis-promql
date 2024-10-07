@@ -1,7 +1,7 @@
 use crate::aggregators::{AggOp, Aggregator};
 use crate::common::types::{Sample, Timestamp};
 use crate::globals::with_timeseries_index;
-use crate::iter::MultiSeriesSampleIter;
+use crate::iter::{MultiSeriesSampleIter, SampleIter};
 use crate::module::commands::range_arg_parse::parse_range_options;
 use crate::module::commands::range_utils::{aggregate_samples, get_sample_iterator, get_series_labels, group_samples_internal};
 use crate::module::result::sample_to_value;
@@ -112,7 +112,7 @@ fn handle_aggregation_and_grouping<'a>(metas: Vec<SeriesMeta<'a>>,
             ResultRow {
                 key,
                 labels: group.labels,
-                samples
+                samples,
             }
         }).collect::<Vec<_>>()
 }
@@ -130,7 +130,7 @@ fn handle_grouping<'a>(metas: Vec<SeriesMeta<'a>>, options: &RangeOptions, group
             ResultRow {
                 key,
                 labels: group.labels,
-                samples
+                samples,
             }
         }).collect::<Vec<_>>()
 }
@@ -139,16 +139,16 @@ fn handle_aggregation<'a>(metas: Vec<SeriesMeta<'a>>, options: &RangeOptions, ag
     let (start_ts, end_ts) = calculate_timestamp_range(&metas);
     let data = get_raw_sample_aggregates(&metas, start_ts, end_ts, &options, aggregation);
     data.into_iter().zip(metas.into_iter())
-        .map(|(samples, meta) | {
+        .map(|(samples, meta)| {
             let labels = get_series_labels(
                 meta.series,
                 options.with_labels,
-                &options.selected_labels
+                &options.selected_labels,
             );
             ResultRow {
                 key: ValkeyValue::from(meta.source_key),
                 labels,
-                samples
+                samples,
             }
         }).collect::<Vec<_>>()
 }
@@ -161,13 +161,13 @@ fn handle_raw(metas: Vec<SeriesMeta>, options: &RangeOptions) -> Vec<ResultRow> 
             let labels = get_series_labels(
                 meta.series,
                 options.with_labels,
-                &options.selected_labels
+                &options.selected_labels,
             );
             let samples = iter.collect::<Vec<Sample>>();
             ResultRow {
                 key: ValkeyValue::from(meta.source_key),
                 labels,
-                samples
+                samples,
             }
         })
         .collect::<Vec<_>>()
@@ -190,11 +190,12 @@ fn get_grouped_raw_samples<'a>(series: &Vec<SeriesMeta<'a>>,
 fn aggregate_grouped_samples(group: &GroupedSeries, options: &RangeOptions, aggr: Aggregator) -> Vec<Sample> {
     let mut aggregator = aggr;
 
-    fn update(aggr: &mut Aggregator, sample: &Sample) -> bool {
-        if sample.value.is_nan() {
+    #[inline]
+    fn update(aggr: &mut Aggregator, value: f64) -> bool {
+        if value.is_nan() {
             false
         } else {
-            aggr.update(sample.value);
+            aggr.update(value);
             true
         }
     }
@@ -214,7 +215,7 @@ fn aggregate_grouped_samples(group: &GroupedSeries, options: &RangeOptions, aggr
     let mut res: Vec<Sample> = Vec::with_capacity(iter.size_hint().0);
 
     let (mut sample, mut is_nan) = if let Some(sample) = iter.next() {
-        (sample, !update(&mut aggregator, &sample))
+        (sample, !update(&mut aggregator, sample.value))
     } else {
         return res;
     };
@@ -223,18 +224,20 @@ fn aggregate_grouped_samples(group: &GroupedSeries, options: &RangeOptions, aggr
 
     for next_sample in iter {
         if sample.timestamp == next_sample.timestamp {
-            if !update(&mut aggregator, &next_sample) {
+            if !update(&mut aggregator, sample.value) {
                 is_nan = true;
             }
             unsaved += 1;
         } else {
             flush(&mut aggregator, sample.timestamp, is_nan, &mut res);
-            is_nan = !update(&mut aggregator, &next_sample);
+            is_nan = !update(&mut aggregator, sample.value);
             sample = next_sample;
 
-            unsaved = 0;
+            unsaved = 1;
             count -= 1;
             if count == 0 {
+                // we have all the buckets we need. Don't add the last one
+                unsaved = 0;
                 break;
             }
         }
@@ -255,8 +258,10 @@ fn get_series_iterator<'a>(meta: &SeriesMeta<'a>, options: &'a RangeOptions) -> 
                         &options.value_filter)
 }
 
-fn get_sample_iterators<'a>(series: &Vec<SeriesMeta<'a>>, range_options: &'a RangeOptions) -> Vec<SeriesSampleIterator<'a>> {
-    series.iter().map(|meta| get_series_iterator(meta, range_options)).collect::<Vec<_>>()
+fn get_sample_iterators<'a>(series: &Vec<SeriesMeta<'a>>, range_options: &'a RangeOptions) -> Vec<SampleIter<'a>> {
+    series.iter()
+        .map(|meta| get_series_iterator(meta, range_options).into())
+        .collect::<Vec<SampleIter<'a>>>()
 }
 
 fn get_raw_sample_aggregates<'a>(series: &Vec<SeriesMeta<'a>>,
@@ -265,16 +270,16 @@ fn get_raw_sample_aggregates<'a>(series: &Vec<SeriesMeta<'a>>,
                                  range_options: &RangeOptions,
                                  aggregation_options: &AggregationOptions) -> Vec<Vec<Sample>> {
     // todo: rayon
-    series.iter().map(|meta| {
-        get_series_sample_aggregates(meta, start_ts, end_ts, range_options, aggregation_options)
-    }).collect::<Vec<_>>()
+    series.iter()
+        .map(|meta| { get_series_sample_aggregates(meta, start_ts, end_ts, range_options, aggregation_options) })
+        .collect::<Vec<_>>()
 }
 
 fn get_series_sample_aggregates<'a>(series: &SeriesMeta<'a>,
-                                 start_ts: Timestamp,
-                                 end_ts: Timestamp,
-                                 range_options: &RangeOptions,
-                                 aggregation_options: &AggregationOptions) -> Vec<Sample> {
+                                    start_ts: Timestamp,
+                                    end_ts: Timestamp,
+                                    range_options: &RangeOptions,
+                                    aggregation_options: &AggregationOptions) -> Vec<Sample> {
     let iter = get_series_iterator(series, range_options);
     aggregate_samples(iter, start_ts, end_ts, aggregation_options, range_options.count)
 }

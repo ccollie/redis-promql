@@ -17,13 +17,14 @@ mod reset_rollup_cache;
 mod range_arg_parse;
 mod mrange;
 mod join;
-mod union;
+mod collate;
 mod mget;
 
 pub use crate::iter::aggregator::*;
 pub use alter::*;
 pub use delete_range::*;
 pub use create::*;
+pub use collate::*;
 pub use join::*;
 pub use metadata::*;
 pub use madd::*;

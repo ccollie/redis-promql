@@ -26,6 +26,7 @@ metricsql_parser = { git = "https://github.com/ccollie/metricsql", branch = "dev
 joinkit = "0.2.0"
 nom = "7.1"
 papaya = "0.1"
+futures = "0.3.29"
 pco = "0.3"
 phf = "0.11"
 scopeguard = "1.2.0"

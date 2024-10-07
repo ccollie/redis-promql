@@ -21,7 +21,7 @@ pub unsafe extern "C" fn string_from_module_string(
     CStr::from_ptr(c_str).to_string_lossy()
 }
 
-pub(crate) fn call_valkey_command<'a>(ctx: &valkey_module::Context, cmd: &'a str, args: &'a [String]) -> ValkeyResult {
+pub(crate) fn call_valkey_command<'a>(ctx: &Context, cmd: &'a str, args: &'a [String]) -> ValkeyResult {
     let call_options: CallOptions = CallOptionsBuilder::default()
         .resp(CallOptionResp::Resp3)
         .build();
@@ -80,27 +80,45 @@ pub fn get_series_iterator<'a>(series: &'a TimeSeries,
 
 
 pub(crate) fn with_timeseries(ctx: &Context, key: &ValkeyString, f: impl FnOnce(&TimeSeries) -> ValkeyResult) -> ValkeyResult {
-    let ts = get_timeseries(ctx, key)?;
+    // unwrap is ok, since must_exist will cause an error if the key is non-existent, and `?` will ensure it propagates
+    let ts = get_timeseries(ctx, key, true)?.unwrap();
     f(ts)
 }
 
 pub(crate) fn with_timeseries_mut(ctx: &Context, key: &ValkeyString, f: impl FnOnce(&mut TimeSeries) -> ValkeyResult) -> ValkeyResult {
-    f(get_timeseries_mut(ctx, key)?)
+    // unwrap is ok, since must_exist will cause an error if the key is non-existent, and `?` will ensure it propagates
+    f(get_timeseries_mut(ctx, key, true)?.unwrap())
 }
 
-pub(crate) fn get_timeseries<'a>(ctx: &'a Context, key: &ValkeyString) -> ValkeyResult<&'a TimeSeries>  {
-    let series = get_timeseries_mut(ctx, key)?;
-    Ok(series)
+pub(crate) fn get_timeseries<'a>(ctx: &'a Context, key: &ValkeyString, must_exist: bool) -> ValkeyResult<Option<&'a TimeSeries>>  {
+    let redis_key = ctx.open_key(key);
+    let series = redis_key.get_value::<TimeSeries>(&VKM_SERIES_TYPE)?;
+    match series {
+        Some(series) => Ok(Some(series)),
+        None => {
+            let msg = format!("VM: the key \"{}\" is missing or not a timeseries", key);
+            if must_exist {
+                Err(ValkeyError::String(msg))
+            } else {
+                ctx.log_debug(&msg);
+                Ok(None)
+            }
+        },
+    }
 }
 
-pub(crate) fn get_timeseries_mut<'a>(ctx: &'a Context, key: &ValkeyString) -> ValkeyResult<&'a mut TimeSeries>  {
+pub(crate) fn get_timeseries_mut<'a>(ctx: &'a Context, key: &ValkeyString, must_exist: bool) -> ValkeyResult<Option<&'a mut TimeSeries>>  {
     let redis_key = ctx.open_key_writable(key);
     let series = redis_key.get_value::<TimeSeries>(&VKM_SERIES_TYPE)?;
     match series {
-        Some(series) => Ok(series),
+        Some(series) => Ok(Some(series)),
         None => {
-            let msg = format!("ERR TSDB: the key \"{}\" is not a timeseries", key);
-            Err(ValkeyError::String(msg))
+            let msg = format!("VM: the key \"{}\" is not a timeseries", key);
+            if must_exist {
+                Err(ValkeyError::String(msg))
+            } else {
+                Ok(None)
+            }
         },
     }
 }
@@ -112,19 +130,11 @@ where
     with_timeseries_index(ctx, move |index| {
         let keys = index.series_keys_by_matchers(ctx, matchers);
         if keys.is_empty() {
-            return Err(ValkeyError::Str("ERR no series found"));
+            return Err(ValkeyError::Str("VM: ERR no series found"));
         }
         for key in keys {
-            let redis_key = ctx.open_key(&key);
-            // get series from redis
-            match redis_key.get_value::<TimeSeries>(&VKM_SERIES_TYPE) {
-                Ok(Some(series)) => {
-                    f(acc, series, key)?
-                }
-                Err(e) => {
-                    return Err(e);
-                }
-                _ => {}
+            if let Some(series) = get_timeseries(ctx, &key, false)? {
+                f(acc, series, key)?
             }
         }
         Ok(())

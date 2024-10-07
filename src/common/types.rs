@@ -24,8 +24,8 @@ impl SampleLike for Sample {
 
 #[derive(Debug)]
 pub struct TaggedSample<T: Copy + Clone + SampleLike> {
-    tag: T,
-    sample: Sample,
+    pub(crate) tag: T,
+    pub(crate) sample: Sample,
 }
 
 impl<T: Copy + Clone + SampleLike> TaggedSample<T> {

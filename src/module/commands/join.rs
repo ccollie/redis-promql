@@ -24,18 +24,6 @@ const CMD_ARG_EXCLUSIVE: &str = "EXCLUSIVE";
 const CMD_ARG_TRANSFORM: &str = "TRANSFORM";
 
 
-const VALID_ARGS: [&str; 9] = [
-    CMD_ARG_FILTER_BY_VALUE,
-    CMD_ARG_FILTER_BY_TS,
-    CMD_ARG_COUNT,
-    CMD_ARG_LEFT,
-    CMD_ARG_RIGHT,
-    CMD_ARG_INNER,
-    CMD_ARG_FULL,
-    CMD_ARG_ASOF,
-    CMD_ARG_TRANSFORM
-];
-
 /// VM.JOIN key1 key2 fromTimestamp toTimestamp
 /// [[INNER] | [FULL] | [LEFT [EXCLUSIVE]] | [RIGHT [EXCLUSIVE]] | [ASOF [PRIOR | NEXT] tolerance]]
 /// [FILTER_BY_TS ts...]
@@ -62,8 +50,8 @@ pub fn join(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
 
     parse_join_args(&mut args, &mut options)?;
 
-    let left_series = get_timeseries(ctx, &left_key)?;
-    let right_series = get_timeseries(ctx, &right_key)?;
+    let left_series = get_timeseries(ctx, &left_key, true)?.unwrap();
+    let right_series = get_timeseries(ctx, &right_key, true)?.unwrap();
 
     Ok(process_join(left_series, right_series, &options))
 }
@@ -117,6 +105,21 @@ fn parse_join_args(args: &mut CommandArgIterator, options: &mut JoinOptions) -> 
         }
     }
 
+    fn is_arg_valid(arg: &str) -> bool {
+        const VALID_ARGS: [&str; 9] = [
+            CMD_ARG_FILTER_BY_VALUE,
+            CMD_ARG_FILTER_BY_TS,
+            CMD_ARG_COUNT,
+            CMD_ARG_LEFT,
+            CMD_ARG_RIGHT,
+            CMD_ARG_INNER,
+            CMD_ARG_FULL,
+            CMD_ARG_ASOF,
+            CMD_ARG_TRANSFORM
+        ];
+        VALID_ARGS.iter().any(|x| x.eq_ignore_ascii_case(arg))
+    }
+
     while let Ok(arg) = args.next_str() {
         let upper = arg.to_ascii_uppercase();
         match upper.as_str() {
@@ -158,7 +161,7 @@ fn parse_join_args(args: &mut CommandArgIterator, options: &mut JoinOptions) -> 
             CMD_ARG_AGGREGATION => {
                 options.aggregation = Some(parse_aggregation_options(args)?)
             }
-            _ => return Err(ValkeyError::Str("invalid JOIN command argument")),
+            _ => return Err(ValkeyError::Str("TSDB: invalid JOIN command argument")),
         }
     }
 
@@ -168,10 +171,6 @@ fn parse_join_args(args: &mut CommandArgIterator, options: &mut JoinOptions) -> 
     }
 
     Ok(())
-}
-
-fn is_arg_valid(arg: &str) -> bool {
-    VALID_ARGS.iter().any(|x| x.eq_ignore_ascii_case(arg))
 }
 
 fn process_join(left_series: &TimeSeries, right_series: &TimeSeries, options: &JoinOptions) -> ValkeyValue {
