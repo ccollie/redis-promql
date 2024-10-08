@@ -1,16 +1,16 @@
-use super::range_utils::{get_range_internal};
-use crate::common::types::{Timestamp, Sample};
+use super::range_utils::get_range_internal;
+use crate::common::types::{Sample, Timestamp};
+use crate::iter::aggregator::aggregate;
+use crate::iter::join::JoinIterator;
 use crate::module::arg_parse::*;
-use crate::iter::aggregator::{aggregate};
-use crate::module::get_timeseries;
+use crate::module::result::sample_to_value;
 use crate::module::types::{JoinAsOfDirection, JoinOptions, JoinType, JoinValue};
+use crate::module::{invalid_series_key_error, VKM_SERIES_TYPE};
 use crate::storage::time_series::TimeSeries;
 use joinkit::EitherOrBoth;
 use metricsql_parser::binaryop::BinopFunc;
 use std::time::Duration;
 use valkey_module::{Context, NextArg, ValkeyError, ValkeyResult, ValkeyString, ValkeyValue};
-use crate::iter::join::JoinIterator;
-use crate::module::result::sample_to_value;
 
 const CMD_ARG_COUNT: &str = "COUNT";
 const CMD_ARG_LEFT: &str = "LEFT";
@@ -50,10 +50,26 @@ pub fn join(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
 
     parse_join_args(&mut args, &mut options)?;
 
-    let left_series = get_timeseries(ctx, &left_key, true)?.unwrap();
-    let right_series = get_timeseries(ctx, &right_key, true)?.unwrap();
+    let left_db_key = ctx.open_key(&left_key);
+    let right_db_key = ctx.open_key(&right_key);
 
-    Ok(process_join(left_series, right_series, &options))
+    let left_series = left_db_key.get_value::<TimeSeries>(&VKM_SERIES_TYPE)?;
+    let right_series = right_db_key.get_value::<TimeSeries>(&VKM_SERIES_TYPE)?;
+
+    match (left_series, right_series) {
+        (Some(left_series), Some(right_series)) => {
+            Ok(process_join(left_series, right_series, &options))
+        }
+        (Some(_), None) => {
+            Err(invalid_series_key_error(&right_key))
+        }
+        (None, Some(_)) => {
+            Err(invalid_series_key_error(&left_key))
+        }
+        _ => {
+            Err(ValkeyError::Str("VM: Invalid JOIN key"))
+        }
+    }
 }
 
 fn parse_asof(args: &mut CommandArgIterator) -> ValkeyResult<JoinType> {

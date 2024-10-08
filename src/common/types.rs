@@ -53,3 +53,4 @@ impl<T: Copy + Clone + SampleLike> Ord for TaggedSample<T> {
         self.partial_cmp(other).unwrap()
     }
 }
+

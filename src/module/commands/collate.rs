@@ -1,11 +1,11 @@
 use crate::aggregators::{AggOp, Aggregator};
-use crate::common::types::{Matchers, Sample, TaggedSample, Timestamp};
+use crate::common::types::{Matchers, Sample, Timestamp};
 use crate::globals::with_timeseries_index;
 use crate::module::arg_parse::*;
 use crate::module::commands::range_utils::get_series_labels;
 use crate::module::result::sample_to_value;
 use crate::module::types::TimestampRange;
-use crate::module::{get_series_iterator, get_timeseries};
+use crate::module::{get_series_iterator, VKM_SERIES_TYPE};
 use crate::storage::time_series::TimeSeries;
 use ahash::HashMapExt;
 use metricsql_common::hash::IntMap;
@@ -31,7 +31,7 @@ struct CollateOptions {
 /// [WITHLABELS]
 /// [SELECTED_LABELS label...]
 /// [AGGREGATION aggregator]
-pub(crate) fn collate(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
+pub fn collate(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
     let mut args = args.into_iter().skip(1).peekable();
 
     let options = parse_collate_options(&mut args)?;
@@ -45,7 +45,22 @@ struct SeriesMeta {
 }
 
 type PerTimestampData = BTreeMap<Timestamp, IntMap<u64, f64>>;
-type SampleWithId = TaggedSample<u64>;
+
+struct SeriesSample {
+    id: u64,
+    timestamp: Timestamp,
+    value: f64
+}
+
+impl SeriesSample {
+    fn new(id: u64, timestamp: Timestamp, value: f64) -> SeriesSample {
+        SeriesSample {
+            id,
+            timestamp,
+            value
+        }
+    }
+}
 
 fn handle_collate(ctx: &Context, options: CollateOptions) -> ValkeyResult {
 
@@ -56,12 +71,15 @@ fn handle_collate(ctx: &Context, options: CollateOptions) -> ValkeyResult {
         }
 
         let mut metas: Vec<SeriesMeta> = Vec::with_capacity(keys.len());
-        let mut all_samples: Vec<SampleWithId> = Vec::with_capacity(keys.len() * 10);
+        let mut all_samples: Vec<SeriesSample> = Vec::with_capacity(keys.len() * 10);
 
         for key in keys {
-            if let Some(series) = get_timeseries(ctx, &key, false)? {
+            let db_key = ctx.open_key(&key);
+            if let Some(series) = db_key.get_value::<TimeSeries>(&VKM_SERIES_TYPE)? {
                 let iter = get_series_iterator(series, options.date_range, &None, &None);
-                let samples = iter.collect::<Vec<_>>();
+                let samples = iter.map(|s| SeriesSample::new(series.id, s.timestamp, s.value) )
+                    .collect::<Vec<_>>();
+
                 let meta = get_series_meta(key, series, &options);
                 metas.push(meta);
                 all_samples.extend(samples);
@@ -71,9 +89,9 @@ fn handle_collate(ctx: &Context, options: CollateOptions) -> ValkeyResult {
         metas.sort_by(|x, y| x.key.cmp(&y.key));
 
         all_samples.sort_by(|x, y| {
-            let cmp = x.sample.timestamp.cmp(&y.sample.timestamp);
+            let cmp = x.timestamp.cmp(&y.timestamp);
             if cmp == Ordering::Equal {
-                x.tag.cmp(&y.tag)
+                x.id.cmp(&y.id)
             } else {
                 cmp
             }
@@ -135,11 +153,10 @@ fn get_aggregation_output(metas: Vec<SeriesMeta>,
                           data: PerTimestampData,
                           aggregator: &mut Aggregator,
                           count: usize) -> ValkeyValue {
-    let mut metas = metas;
 
     let capacity = metas.iter()
         .map(|meta| meta.key.len())
-        .sum() + metas.len() - 1;
+        .sum::<usize>() + metas.len() - 1;
 
     let mut sources = String::with_capacity(capacity);
 
@@ -157,7 +174,10 @@ fn get_aggregation_output(metas: Vec<SeriesMeta>,
 
     let samples = calculate_aggregates(data, aggregator, count);
 
-    let values = samples.iter().map(sample_to_value);
+    let values = samples.into_iter()
+        .map(sample_to_value)
+        .collect::<Vec<_>>();
+
     ValkeyValue::Array(vec![ValkeyValue::from(labels), ValkeyValue::from(values)])
 }
 
@@ -235,14 +255,14 @@ fn get_series_meta(key: ValkeyString, series: &TimeSeries, options: &CollateOpti
     }
 }
 
-fn collate_data(samples: Vec<SampleWithId>) -> PerTimestampData {
+fn collate_data(samples: Vec<SeriesSample>) -> PerTimestampData {
 
     let mut result: PerTimestampData = BTreeMap::new();
 
     for tagged in samples.iter() {
-        let entry = result.entry(tagged.sample.timestamp).or_insert_with(IntMap::new);
+        let entry = result.entry(tagged.timestamp).or_insert_with(IntMap::new);
 
-        *entry.entry(tagged.tag).or_insert(tagged.sample.value);
+        let _ = *entry.entry(tagged.id).or_insert(tagged.value);
     }
 
     result
@@ -257,7 +277,7 @@ fn calculate_aggregates(data: PerTimestampData, aggregator: &mut Aggregator, cou
         }
         let value = aggregator.finalize();
         aggregator.reset();
-        result.push(Sample { timestamp: *timestamp, value: *value });
+        result.push(Sample { timestamp: *timestamp, value });
         if result.len() == count {
             break;
         }

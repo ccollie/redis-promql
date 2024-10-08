@@ -588,7 +588,7 @@ impl<'a> ChunkSampleIterator<'a> {
         match (ts_filter, value_filter) {
             (Some(timestamps), Some(value_filter)) => {
                 Box::new(chunk.samples_by_timestamps(timestamps)
-                    .unwrap_or_else(|e| {
+                    .unwrap_or_else(|_e| {
                         // todo: properly handle error and log
                         vec![]
                     })
@@ -598,7 +598,7 @@ impl<'a> ChunkSampleIterator<'a> {
             }
             (Some(timestamps), None) => {
                 Box::new(chunk.samples_by_timestamps(timestamps)
-                    .unwrap_or_else(|e| {
+                    .unwrap_or_else(|_e| {
                         // todo: properly handle error and log
                         vec![]
                     }).into_iter()

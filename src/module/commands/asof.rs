@@ -6,6 +6,9 @@ use joinkit::EitherOrBoth;
 use std::cmp;
 use std::time::Duration;
 
+// The code in this module is largely copied from
+// https://github.com/beignetbytes/tsxlib-rs
+// License: Apache-2.0/MIT
 
 /// MergeAsOfMode describes the roll behavior of the asof merge
 #[derive(Clone, Copy)]

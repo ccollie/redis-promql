@@ -194,7 +194,7 @@ impl UncompressedChunk {
             (None, None) => {
                 Box::new(self.timestamps.iter()
                     .zip(self.values.iter())
-                    .filter(move |(timestamp, values)| -> bool {
+                    .filter(move |(timestamp, _)| -> bool {
                         **timestamp >= start_ts && **timestamp <= end_ts
                     })
                     .map(|(timestamp, value )| Sample { timestamp: *timestamp, value: *value })

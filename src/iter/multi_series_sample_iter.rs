@@ -39,35 +39,37 @@ impl<'a> MultiSeriesSampleIter<'a> {
             return false;
         }
 
-        if let Some(max) = self.heap.peek_max() {
-            let mut to_remove: SmallVec<usize, 4> = SmallVec::new();
+        let max_timestamp = match self.heap.peek_max() {
+            Some(max) => max.timestamp,
+            None => return false,
+        };
 
-            for (i, sample_iter) in self.inner.iter_mut().enumerate() {
-                let mut sample_added = false;
+        let mut to_remove: SmallVec<usize, 4> = SmallVec::new();
+        for (i, sample_iter) in self.inner.iter_mut().enumerate() {
+            let mut sample_added = false;
 
-                while let Some(sample) = sample_iter.next() {
-                    sample_added = true;
-                    let stop = sample.timestamp >= max.timestamp;
-                    self.heap.push(sample);
-                    if stop {
-                        break;
-                    }
-                }
-
-                if !sample_added {
-                    to_remove.push(i);
+            while let Some(sample) = sample_iter.next() {
+                sample_added = true;
+                let stop = sample.timestamp >= max_timestamp;
+                self.heap.push(sample);
+                if stop {
+                    break;
                 }
             }
 
-            if !to_remove.is_empty() {
-                for i in to_remove.iter().rev() {
-                    let _ = self.inner.swap_remove(*i);
-                }
+            if !sample_added {
+                to_remove.push(i);
             }
-
-            return true
         }
-        false
+
+        if !to_remove.is_empty() {
+            for i in to_remove.iter().rev() {
+                let _ = self.inner.swap_remove(*i);
+            }
+        }
+        
+        true
+
     }
 }
 

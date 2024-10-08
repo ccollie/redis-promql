@@ -24,7 +24,6 @@ mod storage;
 #[cfg(test)]
 mod tests;
 mod gorilla;
-mod joins;
 mod iter;
 
 use crate::globals::{clear_timeseries_index, with_timeseries_index};

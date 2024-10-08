@@ -1,7 +1,6 @@
 use metricsql_parser::binaryop::get_scalar_binop_handler;
 use metricsql_parser::prelude::{BinopFunc, Operator as BaseOp};
 use phf::phf_map;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 use valkey_module::ValkeyError;

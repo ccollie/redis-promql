@@ -77,50 +77,11 @@ metrics are generally grouped by environment, you could use a key like
 
 https://tech.loveholidays.com/redis-cluster-multi-key-command-optimisation-with-hash-tags-8a2bd7ce12de
 
-**VKM.CREATE** create a timeseries.
 
-#### Syntax
-```
-VKM.CREATE key metric 
-  [RETENTION retentionPeriod]
-  [ENCODING <COMPRESSED|UNCOMPRESSED>]
-  [CHUNK_SIZE size]
-  [DUPLICATE_POLICY policy]
-  [DEDUPE_INTERVAL duplicateTimediff]
-```
-#### Options
-- **key**: The key for the timeseries.
-- **metric**: The metric name in Prometheus format, e.g. `node_memory_used_bytes{hostname="host1.domain.com"}`
-- **RETENTION**: The retention period for the timeseries in milliseconds.
-- **ENCODING**: The encoding to use for the timeseries. Default is `COMPRESSED`.
-- **CHUNK_SIZE**: The chunk size for the timeseries. Default is `4096`.
-- **DUPLICATE_POLICY**: The policy to use for duplicate samples. Default is `BLOCK`.
-- **DEDUPE_INTERVAL**: The interval to use for deduplication. Default is `0`.
-
-
-```sh
-127.0.0.1:6379> VKM.CREATE req_total:post:handler:{us-east-1} api_http_requests_total{method="POST",handler="/messages"} CHUNK_SIZE 8192 DUPLICATE_POLICY SUM DEDUPE_INTERVAL 2s
-```
-**VKM.ADD** Add a sample to a timeseries.
+**VM.QUERY** evaluates an instant query at a single point in time.
 
 ```
-VKM.ADD key timestamp value
-```
-
-#### Options
-
-- **key**: Prometheus expression query string.
-- **timestamp**: the sample timestamp.
-- **value**: double value of the sample.
-
-#### Return
-The timestamp of the added sample.
-
-
-**VKM.QUERY** evaluates an instant query at a single point in time.
-
-```
-VKM.QUERY query [TIME timestamp|rfc3339|+|*] [ROUNDING number]
+VM.QUERY query [TIME timestamp|rfc3339|+|*] [ROUNDING number]
 ```
 
 #### Options
@@ -144,18 +105,18 @@ Return an error reply in the following cases:
 #### Examples
 
 ```
-VKM.QUERY "sum(rate(process_io_storage_written_bytes_total)) by (job)" TIME 1587396550
+VM.QUERY "sum(rate(process_io_storage_written_bytes_total)) by (job)" TIME 1587396550
 ```
 
-### VKM.QUERY-RANGE
+### VM.QUERY-RANGE
 
 #### Syntax
 
 ```
-VKM.QUERY-RANGE query [START timestamp|rfc3339|+|*] [END timestamp|rfc3339|+|*] [STEP duration|number] [ROUNDING number]
+VM.QUERY-RANGE query [START timestamp|rfc3339|+|*] [END timestamp|rfc3339|+|*] [STEP duration|number] [ROUNDING number]
 ```
 
-**VKM.QUERY-RANGE** evaluates an expression query over a range of time.
+**VM.QUERY-RANGE** evaluates an expression query over a range of time.
 
 #### Options
 
@@ -178,18 +139,18 @@ TODO
 #### Examples
 
 ```
-VKM.QUERY-RANGE "sum(rate(rows_inserted_total[5m])) by (type,accountID) > 0" START 1587396550 END 1587396550 STEP 1m
+VM.QUERY-RANGE "sum(rate(rows_inserted_total[5m])) by (type,accountID) > 0" START 1587396550 END 1587396550 STEP 1m
 ```
 
-### VKM.DELETE-RANGE
+### VM.DELETE-RANGE
 
 #### Syntax
 
 ```
-VKM.DELETE-RANGE selector.. [START timestamp|rfc3339|+|*] [END timestamp|rfc3339|+|*]
+VM.DELETE-RANGE selector.. [START timestamp|rfc3339|+|*] [END timestamp|rfc3339|+|*]
 ```
 
-**VKM.DELETE-RANGE** deletes data for a selection of series in a time range. The timeseries itself is not deleted even if all samples are removed.
+**VM.DELETE-RANGE** deletes data for a selection of series in a time range. The timeseries itself is not deleted even if all samples are removed.
 
 #### Options
 
@@ -210,19 +171,19 @@ TODO
 #### Examples
 
 ```
-VKM.DELETE-RANGE "http_requests{env='staging', status='200'}" START 1587396550 END 1587396550
+VM.DELETE-RANGE "http_requests{env='staging', status='200'}" START 1587396550 END 1587396550
 ```
 
 
-### VKM.SERIES
+### VM.SERIES
 
 #### Syntax
 
 ```
-VKM.SERIES MATCH filterExpr... [START timestamp|rfc3339|+|*] [END timestamp|rfc3339|+|*]
+VM.SERIES FILTER filterExpr... [START timestamp|rfc3339|+|*] [END timestamp|rfc3339|+|*]
 ```
 
-**VKM.SERIES** returns the list of time series that match a certain label set.
+**VM.SERIES** returns the list of time series that match a certain label set.
 
 #### Options
 
@@ -247,7 +208,7 @@ TODO
 The following example returns all series that match either of the selectors `up` or `process_start_time_seconds{job="prometheus"}`:
 
 ```
-VKM.SERIES MATCH up process_start_time_seconds{job="prometheus"}
+VM.SERIES FILTER up process_start_time_seconds{job="prometheus"}
 ``` 
 ```json
 {
@@ -272,12 +233,12 @@ VKM.SERIES MATCH up process_start_time_seconds{job="prometheus"}
 }
 ```
 
-### VKM.CARDINALITY
+### VM.CARDINALITY
 
 #### Syntax
 
 ```
-VKM.CARDINALITY MATCH selector... [START timestamp|rfc3339|+|*] [END timestamp|rfc3339|+|*]
+VKM.CARDINALITY FILTER selector... [START timestamp|rfc3339|+|*] [END timestamp|rfc3339|+|*]
 ```
 
 **VKM.SERIES** returns the number of unique time series that match a certain label set.
@@ -305,12 +266,12 @@ TODO
 TODO
 
 
-### VKM.LABELS
+### VM.LABELS
 
 #### Syntax
 
 ```
-VKM.LABELS MATCH selector... [START timestamp|rfc3339|+|*] [END timestamp|rfc3339|+|*]
+VM.LABELS FILTER selector... [START timestamp|rfc3339|+|*] [END timestamp|rfc3339|+|*]
 ```
 
 **VKM.LABELS** returns a list of label names.
@@ -348,59 +309,15 @@ VKM.LABELS MATCH up process_start_time_seconds{job="prometheus"}
 }
 ```
 
-### VKM.LABEL_VALUES
-
-#### Syntax
-
-```
-VKM.LABEL-VALUES label [START timestamp|rfc3339|+|*] [END timestamp|rfc3339|+|*]
-```
-
-**VKM.LABEL-VALUES** returns a list of label values for a provided label name.
-
-#### Options
-
-- **label**: The label name for which to retrieve values.
-- **START**: Start timestamp, inclusive. Optional.
-- **END**: End timestamp, inclusive. Optional.
-
-#### Return
-
-The data section of the JSON response is a list of string label values.
-
-#### Error
-
-Return an error reply in the following cases:
-
-- Invalid options.
-- TODO.
-
-#### Examples
-
-This example queries for all label values for the job label:
-```
-// Create a chat application with LLM model and vector store.
-VKM.LABEL-VALUES job
-```
-```json
-{
-   "status" : "success",
-   "data" : [
-      "node",
-      "prometheus"
-   ]
-}
-```
-
 ### VKM.TOP-QUERIES
 
 #### Syntax
 
 ```
-VKM.TOP-QUERIES [TOP_K number] [MAX_LIFETIME duration]
+VM.TOP-QUERIES [TOP_K number] [MAX_LIFETIME duration]
 ```
 
-**VKM.TOP-QUERIES** provides information on the following query types:
+**VM.TOP-QUERIES** provides information on the following query types:
 
 * the most frequently executed queries - `topByCount`
 * queries with the biggest average execution duration - `topByAvgDuration`
@@ -541,12 +458,12 @@ This example queries for all label values for the job label:
 }
 ```
 
-### VKM.ACTIVE-QUERIES
+### VM.ACTIVE-QUERIES
 
 #### Syntax
 
 ```
-VKM.ACTIVE-QUERIES
+VM.ACTIVE-QUERIES
 ```
 
 **VKM.ACTIVE-QUERIES** provides information on currently executing queries. It provides the following information per each query:

@@ -112,7 +112,7 @@ pub(crate) fn create_series_ex(ctx: &Context, key: &ValkeyString, options: TimeS
     _key.set_value(&VKM_SERIES_TYPE, ts)?;
 
     ctx.replicate_verbatim();
-    ctx.notify_keyspace_event(NotifyEvent::MODULE, "PROM.CREATE-SERIES", key);
+    ctx.notify_keyspace_event(NotifyEvent::MODULE, "VM.CREATE-SERIES", key);
     ctx.log_verbose("series created");
 
     Ok(())
