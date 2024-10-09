@@ -260,7 +260,7 @@ fn collate_data(samples: Vec<SeriesSample>) -> PerTimestampData {
     let mut result: PerTimestampData = BTreeMap::new();
 
     for tagged in samples.iter() {
-        let entry = result.entry(tagged.timestamp).or_insert_with(IntMap::new);
+        let entry = result.entry(tagged.timestamp).or_default();
 
         let _ = *entry.entry(tagged.id).or_insert(tagged.value);
     }

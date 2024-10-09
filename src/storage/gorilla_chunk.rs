@@ -363,7 +363,7 @@ impl Chunk for GorillaChunk {
         let mut current = Sample::default();
 
         // skip previous samples
-        while let Some(item) = iter.next() {
+        for item in iter.by_ref() {
             current = item?;
             if current.timestamp >= ts {
                 break;
@@ -375,6 +375,8 @@ impl Chunk for GorillaChunk {
             duplicate_found = true;
             current.value = dp_policy.value_on_duplicate(ts, current.value, sample.value)?;
             iter.next();
+        } else {
+            push_sample(&mut xor_encoder, sample)?;
         }
 
         for item in iter {

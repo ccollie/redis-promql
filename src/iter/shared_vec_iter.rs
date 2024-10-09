@@ -23,6 +23,6 @@ impl<'a, T: Copy> Iterator for SharedVecIter<'a, T> {
         }
         let item = self.inner.get(self.index);
         self.index += 1;
-        item.map(|item| *item)
+        item.copied()
     }
 }

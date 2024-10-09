@@ -166,8 +166,8 @@ impl UncompressedChunk {
 
         match (ts_filter, values_filter) {
             (Some(timestamps), Some(values_filter)) => {
-                Box::new(self.samples_by_timestamps(&timestamps)
-                    .unwrap_or(vec![]) // todo: raise error
+                Box::new(self.samples_by_timestamps(timestamps)
+                    .unwrap_or_default() // todo: raise error
                     .into_iter()
                     .filter(move |sample: &Sample| -> bool {
                         sample.timestamp <= end_ts && sample.timestamp >= start_ts &&
@@ -175,8 +175,8 @@ impl UncompressedChunk {
                     }))
             }
             (Some(timestamps), None) => {
-                Box::new(self.samples_by_timestamps(&timestamps)
-                    .unwrap_or(vec![]) // todo: raise error
+                Box::new(self.samples_by_timestamps(timestamps)
+                    .unwrap_or_default() // todo: raise error
                     .into_iter()
                     .filter(move |sample: &Sample| -> bool {
                         sample.timestamp <= end_ts && sample.timestamp >= start_ts

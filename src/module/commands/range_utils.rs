@@ -72,7 +72,7 @@ pub(crate) fn aggregate_samples(
     aggr.calculate(iter)
 }
 
-pub fn get_series_labels(series: &TimeSeries, with_labels: bool, selected_labels: &Vec<String>) -> Vec<ValkeyValue>  {
+pub fn get_series_labels(series: &TimeSeries, with_labels: bool, selected_labels: &[String]) -> Vec<ValkeyValue>  {
 
     if !with_labels && selected_labels.is_empty() {
         return vec![]
@@ -89,8 +89,8 @@ pub fn get_series_labels(series: &TimeSeries, with_labels: bool, selected_labels
 
     if !selected_labels.is_empty() {
         for name in selected_labels.iter() {
-            if let Some(value) = series.label_value(&name) {
-                dest.push(create_label(&name, &value));
+            if let Some(value) = series.label_value(name) {
+                dest.push(create_label(name, value));
             }
         }
         return dest;
@@ -115,7 +115,7 @@ pub(super) fn group_samples_internal(samples: impl Iterator<Item=Sample>, option
 
     let mut result = vec![];
 
-    while let Some(next) = iter.next() {
+    for next in iter {
         if next.timestamp == current.timestamp {
             aggregator.update(next.value);
         } else {

@@ -87,7 +87,7 @@ pub(crate) fn with_timeseries(ctx: &Context, key: &ValkeyString, f: impl FnOnce(
     // unwrap is ok, since must_exist will cause an error if the key is non-existent, and `?` will ensure it propagates
     let redis_key = ctx.open_key(key);
     if let Some(series) = redis_key.get_value::<TimeSeries>(&VKM_SERIES_TYPE)? {
-        f(&series)
+        f(series)
     } else {
         Err(invalid_series_key_error(key))
     }

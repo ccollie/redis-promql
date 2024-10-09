@@ -43,9 +43,7 @@ impl<T: Copy + Clone + SampleLike> PartialEq for TaggedSample<T> {
 impl<T: Copy + Clone + SampleLike> Eq for TaggedSample<T> {}
 
 impl<T: Copy + Clone + SampleLike> PartialOrd for TaggedSample<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.sample.partial_cmp(&other.sample)
-    }
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { Some(self.cmp(other)) }
 }
 
 impl<T: Copy + Clone + SampleLike> Ord for TaggedSample<T> {

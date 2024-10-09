@@ -48,7 +48,7 @@ impl<'a> MultiSeriesSampleIter<'a> {
         for (i, sample_iter) in self.inner.iter_mut().enumerate() {
             let mut sample_added = false;
 
-            while let Some(sample) = sample_iter.next() {
+            for sample in sample_iter.by_ref() {
                 sample_added = true;
                 let stop = sample.timestamp >= max_timestamp;
                 self.heap.push(sample);
@@ -77,10 +77,8 @@ impl<'a> Iterator for MultiSeriesSampleIter<'a> {
     type Item = Sample;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.heap.is_empty() {
-            if !self.load_heap() {
-                return None;
-            }
+        if self.heap.is_empty() && !self.load_heap() {
+            return None;
         }
         self.heap.pop_min()
     }

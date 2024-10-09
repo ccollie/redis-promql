@@ -76,44 +76,7 @@ pub static BINARY_OPS_MAP: phf::Map<&'static str, TransformOperator> = phf_map! 
     "min" => TransformOperator::Min,
 };
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
-pub enum BinaryOpKind {
-    Arithmetic,
-    Comparison,
-    Logical,
-}
-
-
 impl TransformOperator {
-
-    #[inline]
-    pub const fn kind(&self) -> BinaryOpKind {
-        use BinaryOpKind::*;
-        use TransformOperator::*;
-
-        match self {
-            AbsDiff | Add | Sub | Mul | Div | Mod | Pow | Max | Min | Avg => Arithmetic,
-            Eql | Gte | Gt | Lt | Lte | NotEq => Comparison,
-            And | Unless | Or | If | IfNot | Default => Logical,
-        }
-    }
-
-    pub const fn is_arithmetic_op(&self) -> bool {
-        use TransformOperator::*;
-        matches!(self, AbsDiff | Add | Sub | Mul | Div | Mod | Pow | Max | Min | Avg)
-    }
-
-    pub const fn is_comparison(&self) -> bool {
-        use TransformOperator::*;
-        matches!(self, Eql | Gte | Gt | Lt | Lte | NotEq)
-    }
-
-    #[inline]
-    pub const fn is_set_operator(&self) -> bool {
-        use TransformOperator::*;
-        matches!(self, And | Or | Unless)
-    }
-
     pub const fn as_str(&self) -> &'static str {
         use TransformOperator::*;
         match self {

@@ -91,8 +91,8 @@ fn parse_asof(args: &mut CommandArgIterator) -> ValkeyResult<JoinType> {
             // see if we have a duration expression
             // durations in all cases start with an ascii digit, e.g 1000 or 10ms
             let ch = arg_str.chars().next().unwrap();
-            if ch.is_digit(10) {
-                let tolerance_ms = parse_duration_ms(&arg_str)?;
+            if ch.is_ascii_digit() {
+                let tolerance_ms = parse_duration_ms(arg_str)?;
                 if tolerance_ms < 0 {
                     return Err(ValkeyError::Str("TSDB: negative tolerance not valid"));
                 }
@@ -182,7 +182,7 @@ fn parse_join_args(args: &mut CommandArgIterator, options: &mut JoinOptions) -> 
     }
 
     // aggregations are only valid when there is a transform
-    if options.aggregation.is_some() && !options.transform_op.is_some() {
+    if options.aggregation.is_some() && options.transform_op.is_none() {
         return Err(ValkeyError::Str("TSDB: join aggregation requires a transform"));
     }
 

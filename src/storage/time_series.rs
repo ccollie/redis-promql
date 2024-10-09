@@ -742,7 +742,7 @@ impl<'a> SeriesSampleIterator<'a> {
         if let Some(chunk) = self.series.chunks.get(self.chunk_index) {
             self.chunk_index += 1;
             if chunk.first_timestamp() <= end {
-                let new_iter = ChunkSampleIterator::new(chunk, start, end, &self.value_filter, self.ts_filter);
+                let new_iter = ChunkSampleIterator::new(chunk, start, end, self.value_filter, self.ts_filter);
                 self.start = chunk.last_timestamp();
 
                 return Some(new_iter)

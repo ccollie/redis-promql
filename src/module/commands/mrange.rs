@@ -96,7 +96,7 @@ fn process_command(metas: Vec<SeriesMeta>, options: &RangeOptions) -> Vec<Result
     }
 }
 
-fn handle_aggregation_and_grouping<'a>(metas: Vec<SeriesMeta<'a>>,
+fn handle_aggregation_and_grouping(metas: Vec<SeriesMeta<'_>>,
                                        options: &RangeOptions,
                                        groupings: &RangeGroupingOptions,
                                        aggregations: &AggregationOptions) -> Vec<ResultRow> {
@@ -107,7 +107,7 @@ fn handle_aggregation_and_grouping<'a>(metas: Vec<SeriesMeta<'a>>,
             let group_key = format!("{}={}", groupings.group_label, group.label_value);
             let key = ValkeyValue::from(group_key);
             let aggregator = aggregations.aggregator.clone();
-            let aggregates = aggregate_grouped_samples(&group, &options, aggregator);
+            let aggregates = aggregate_grouped_samples(&group, options, aggregator);
             let samples = group_samples_internal(aggregates.into_iter(), groupings);
             ResultRow {
                 key,
@@ -117,7 +117,7 @@ fn handle_aggregation_and_grouping<'a>(metas: Vec<SeriesMeta<'a>>,
         }).collect::<Vec<_>>()
 }
 
-fn handle_grouping<'a>(metas: Vec<SeriesMeta<'a>>, options: &RangeOptions, grouping: &RangeGroupingOptions) -> Vec<ResultRow> {
+fn handle_grouping(metas: Vec<SeriesMeta<'_>>, options: &RangeOptions, grouping: &RangeGroupingOptions) -> Vec<ResultRow> {
     // group raw samples
     let grouped_series = group_series_by_label(metas, grouping);
     grouped_series.into_iter()
@@ -126,7 +126,7 @@ fn handle_grouping<'a>(metas: Vec<SeriesMeta<'a>>, options: &RangeOptions, group
             // we should probably restrict labels to utf-8 on construction
             let group_key = format!("{}={}", grouping.group_label, group.label_value);
             let key = ValkeyValue::from(group_key);
-            let samples = get_grouped_raw_samples(&group.series, &options, &grouping);
+            let samples = get_grouped_raw_samples(&group.series, options, grouping);
             ResultRow {
                 key,
                 labels: group.labels,
@@ -135,10 +135,10 @@ fn handle_grouping<'a>(metas: Vec<SeriesMeta<'a>>, options: &RangeOptions, group
         }).collect::<Vec<_>>()
 }
 
-fn handle_aggregation<'a>(metas: Vec<SeriesMeta<'a>>, options: &RangeOptions, aggregation: &AggregationOptions) -> Vec<ResultRow> {
+fn handle_aggregation(metas: Vec<SeriesMeta<'_>>, options: &RangeOptions, aggregation: &AggregationOptions) -> Vec<ResultRow> {
     let (start_ts, end_ts) = calculate_timestamp_range(&metas);
-    let data = get_raw_sample_aggregates(&metas, start_ts, end_ts, &options, aggregation);
-    data.into_iter().zip(metas.into_iter())
+    let data = get_raw_sample_aggregates(&metas, start_ts, end_ts, options, aggregation);
+    data.into_iter().zip(metas)
         .map(|(samples, meta)| {
             let labels = get_series_labels(
                 meta.series,
@@ -154,9 +154,9 @@ fn handle_aggregation<'a>(metas: Vec<SeriesMeta<'a>>, options: &RangeOptions, ag
 }
 
 fn handle_raw(metas: Vec<SeriesMeta>, options: &RangeOptions) -> Vec<ResultRow> {
-    let mut iterators = get_sample_iterators(&metas, &options);
+    let mut iterators = get_sample_iterators(&metas, options);
     // todo: maybe rayon
-    iterators.iter_mut().zip(metas.into_iter())
+    iterators.iter_mut().zip(metas)
         .map(|(iter, meta)| {
             let labels = get_series_labels(
                 meta.series,
@@ -178,7 +178,7 @@ fn result_row_to_value(row: ResultRow) -> ValkeyValue {
     ValkeyValue::Array(vec![row.key, ValkeyValue::from(row.labels), ValkeyValue::from(samples)])
 }
 
-fn get_grouped_raw_samples<'a>(series: &Vec<SeriesMeta<'a>>,
+fn get_grouped_raw_samples(series: &[SeriesMeta<'_>],
                                options: &RangeOptions,
                                grouping_options: &RangeGroupingOptions) -> Vec<Sample> {
     let iterators = get_sample_iterators(series, options);
@@ -258,13 +258,13 @@ fn get_series_iterator<'a>(meta: &SeriesMeta<'a>, options: &'a RangeOptions) -> 
                         &options.value_filter)
 }
 
-fn get_sample_iterators<'a>(series: &Vec<SeriesMeta<'a>>, range_options: &'a RangeOptions) -> Vec<SampleIter<'a>> {
+fn get_sample_iterators<'a>(series: &[SeriesMeta<'a>], range_options: &'a RangeOptions) -> Vec<SampleIter<'a>> {
     series.iter()
         .map(|meta| get_series_iterator(meta, range_options).into())
         .collect::<Vec<SampleIter<'a>>>()
 }
 
-fn get_raw_sample_aggregates<'a>(series: &Vec<SeriesMeta<'a>>,
+fn get_raw_sample_aggregates(series: &[SeriesMeta],
                                  start_ts: Timestamp,
                                  end_ts: Timestamp,
                                  range_options: &RangeOptions,
@@ -275,7 +275,7 @@ fn get_raw_sample_aggregates<'a>(series: &Vec<SeriesMeta<'a>>,
         .collect::<Vec<_>>()
 }
 
-fn get_series_sample_aggregates<'a>(series: &SeriesMeta<'a>,
+fn get_series_sample_aggregates(series: &SeriesMeta<'_>,
                                     start_ts: Timestamp,
                                     end_ts: Timestamp,
                                     range_options: &RangeOptions,
