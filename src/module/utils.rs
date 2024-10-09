@@ -121,7 +121,7 @@ where
     with_timeseries_index(ctx, move |index| {
         let keys = index.series_keys_by_matchers(ctx, matchers);
         if keys.is_empty() {
-            return Err(ValkeyError::Str("VM: ERR no series found"));
+            return Err(ValkeyError::Str("ERR no series found"));
         }
         for key in keys {
             let db_key = ctx.open_key(&key);

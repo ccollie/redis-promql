@@ -152,7 +152,7 @@ fn handle_query_result(result: RuntimeResult<Vec<QueryResult>>) -> ValkeyResult 
     match result {
         Ok(result) => Ok(to_matrix_result(result)),
         Err(e) => {
-            let err_msg = format!("PROM: Error: {:?}", e);
+            let err_msg = format!("ERR: {:?}", e);
             Err(ValkeyError::String(err_msg.to_string()))
         }
     }

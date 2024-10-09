@@ -1,10 +1,10 @@
 ```
 VM.JOIN leftKey rightKey fromTimestamp toTimestamp
-    [[INNER] | [FULL] | [LEFT [EXCLUSIVE]] | [RIGHT [EXCLUSIVE]] | [ASOF [PRIOR | NEXT] [TOLERANCE tolerance]]]
+    [[INNER] | [FULL] | [LEFT [EXCLUSIVE]] | [RIGHT [EXCLUSIVE]] | [ASOF [PRIOR | NEXT] tolerance]]
     [FILTER_BY_TS ts...]
     [FILTER_BY_VALUE min max]
     [COUNT count]
-    [REDUCE op]
+    [REDUCE operator]
 ```
 
 Join 2 time series on sample timestamps. Performs an INNER join by default.
@@ -73,7 +73,7 @@ there are no matching rows for the sample in the right series.
 
 </details>
 
-<details open><summary><code>ASOF [PRIOR | NEXT] [tolerance]</code></summary>
+<details open><summary><code>ASOF [PRIOR | NEXT] tolerance</code></summary>
 
 `ASOF` joins match each sample in the left series with the closest preceding or following sample in the right series based on 
 timestamps. They are particularly useful for analyzing time-series data where records from different sources may not have 
@@ -124,14 +124,7 @@ TODO: if used with aggregation, this specifies the number of returned buckets as
 
 </details>
 
-<details open><summary><code>alignTimestamp</code> (since RedisTimeSeries v1.8)</summary>
-
-ensures that there is a bucket that starts exactly at `alignTimestamp` and aligns all other buckets accordingly. It is expressed in milliseconds. The default value is 0: aligned with the Unix epoch.
-
-For example, if `bucketDuration` is 24 hours (`24 * 3600 * 1000`), setting `alignTimestamp` to 6 hours after the Unix epoch (`6 * 3600 * 1000`) ensures that each bucket’s timeframe is `[06:00 .. 06:00)`.
-</details>
-
-<details open><summary><code>TRANSFORM operator</code></summary> 
+<details open><summary><code>operator</code></summary> 
 
 performs an operation on the value in each returned row.
 

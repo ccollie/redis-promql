@@ -1,3 +1,4 @@
+use std::hash::Hash;
 use super::{merge_by_capacity, validate_chunk_size, Chunk, ChunkCompression, ChunkSampleIterator, Sample, TimeSeriesChunk, TimeSeriesOptions};
 use crate::common::decimal::{round_to_significant_digits, RoundDirection};
 use crate::common::types::{Label, Timestamp};
@@ -46,6 +47,13 @@ pub struct TimeSeries {
     pub last_value: f64,
 }
 
+/// Hash based on metric name, which should be unique in the db
+impl Hash for TimeSeries {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.metric_name.hash(state);
+        self.labels.hash(state);
+    }
+}
 
 impl TimeSeries {
     /// Create a new empty time series.
@@ -403,7 +411,7 @@ impl TimeSeries {
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = Sample> + '_ {
+    pub fn iter(&self) -> SeriesSampleIterator {
         SeriesSampleIterator::new(self, self.first_timestamp, self.last_timestamp, &None, &None)
     }
 
@@ -411,7 +419,7 @@ impl TimeSeries {
         &self,
         start: Timestamp,
         end: Timestamp,
-    ) -> impl Iterator<Item = Sample> + '_ {
+    ) -> SeriesSampleIterator {
         SeriesSampleIterator::new(self, start, end, &None, &None)
     }
 
@@ -463,8 +471,16 @@ impl TimeSeries {
 
     pub fn remove_range(&mut self, start_ts: Timestamp, end_ts: Timestamp) -> TsdbResult<usize> {
         let mut deleted_samples = 0;
-        // todo: tinyvec
-        let mut indexes_to_delete = Vec::new();
+
+        if start_ts > self.last_timestamp {
+            return Ok(0);
+        }
+
+        if end_ts < self.first_timestamp {
+            return Ok(0);
+        }
+
+        let mut indexes_to_delete: SmallVec<usize, 4> = SmallVec::new();
 
         let (index, _) = get_chunk_index(&self.chunks, start_ts);
         let chunks = &mut self.chunks[index..];
@@ -487,7 +503,7 @@ impl TimeSeries {
 
             // Should we delete the entire chunk?
             // We assume at least one allocated chunk in the series
-            if chunk.is_contained_by_range(start_ts, end_ts) && (!is_only_chunk) {
+            if chunk.is_contained_by_range(start_ts, end_ts) && !is_only_chunk {
                 deleted_samples += chunk.num_samples();
                 indexes_to_delete.push(index + idx);
             } else {
@@ -589,10 +605,10 @@ impl TimeSeries {
         } else {
             None
         };
-        let duplicate_policy = DuplicatePolicy::try_from(raw::load_unsigned(rdb)? as u8
-        ).map_err(|_| valkey_module::error::Error::Generic(
-            GenericError::new("Invalid duplicate policy")
-        ))?;
+        let duplicate_policy = DuplicatePolicy::try_from(raw::load_unsigned(rdb)? as u8)
+            .map_err(|_| valkey_module::error::Error::Generic(
+                GenericError::new("Invalid duplicate policy")
+            ))?;
 
         let chunk_compression = ChunkCompression::try_from(
             raw::load_unsigned(rdb)? as u8

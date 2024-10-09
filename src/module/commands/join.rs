@@ -21,7 +21,7 @@ const CMD_ARG_ASOF: &str = "ASOF";
 const CMD_ARG_PRIOR: &str = "PRIOR";
 const CMD_ARG_NEXT: &str = "NEXT";
 const CMD_ARG_EXCLUSIVE: &str = "EXCLUSIVE";
-const CMD_ARG_TRANSFORM: &str = "TRANSFORM";
+const CMD_ARG_REDUCE: &str = "REDUCE";
 
 
 /// VM.JOIN key1 key2 fromTimestamp toTimestamp
@@ -29,7 +29,7 @@ const CMD_ARG_TRANSFORM: &str = "TRANSFORM";
 /// [FILTER_BY_TS ts...]
 /// [FILTER_BY_VALUE min max]
 /// [COUNT count]
-/// [TRANSFORM op]
+/// [REDUCE op]
 /// [AGGREGATION aggregator bucketDuration [ALIGN align] [BUCKETTIMESTAMP timestamp] [EMPTY]]
 pub fn join(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
     let mut args = args.into_iter().skip(1).peekable();
@@ -114,7 +114,7 @@ fn parse_join_args(args: &mut CommandArgIterator, options: &mut JoinOptions) -> 
 
     fn check_join_type_set(is_set: &mut bool) -> ValkeyResult<()> {
         if *is_set {
-            Err(ValkeyError::Str("TSDB: join type already set"))
+            Err(ValkeyError::Str("ERR join type already set"))
         } else {
             *is_set = true;
             Ok(())
@@ -122,7 +122,7 @@ fn parse_join_args(args: &mut CommandArgIterator, options: &mut JoinOptions) -> 
     }
 
     fn is_arg_valid(arg: &str) -> bool {
-        const VALID_ARGS: [&str; 9] = [
+        const VALID_ARGS: &[&str] = &[
             CMD_ARG_FILTER_BY_VALUE,
             CMD_ARG_FILTER_BY_TS,
             CMD_ARG_COUNT,
@@ -131,9 +131,9 @@ fn parse_join_args(args: &mut CommandArgIterator, options: &mut JoinOptions) -> 
             CMD_ARG_INNER,
             CMD_ARG_FULL,
             CMD_ARG_ASOF,
-            CMD_ARG_TRANSFORM
+            CMD_ARG_REDUCE
         ];
-        VALID_ARGS.iter().any(|x| x.eq_ignore_ascii_case(arg))
+        VALID_ARGS.contains(&arg)
     }
 
     while let Ok(arg) = args.next_str() {
@@ -170,7 +170,7 @@ fn parse_join_args(args: &mut CommandArgIterator, options: &mut JoinOptions) -> 
                 check_join_type_set(&mut join_type_set)?;
                 options.join_type = parse_asof(args)?;
             }
-            CMD_ARG_TRANSFORM => {
+            CMD_ARG_REDUCE => {
                 let arg = args.next_str()?;
                 options.transform_op = Some(parse_operator(arg)?);
             }

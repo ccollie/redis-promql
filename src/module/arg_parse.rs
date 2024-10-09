@@ -25,6 +25,7 @@ pub const CMD_ARG_AGGREGATION: &str = "AGGREGATION";
 pub const CMD_ARG_MATCH: &str = "MATCH";
 pub const CMD_ARG_FILTER: &str = "FILTER";
 pub const CMD_ARG_EMPTY: &str = "EMPTY";
+pub const CMD_ARG_GROUP_BY: &str = "GROUPBY";
 pub const CMD_ARG_BUCKET_TIMESTAMP: &str = "BUCKETTIMESTAMP";
 pub const CMD_ARG_RETENTION: &str = "RETENTION";
 pub const CMD_ARG_DUPLICATE_POLICY: &str = "DUPLICATE_POLICY";

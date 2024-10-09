@@ -1,9 +1,9 @@
-pub(crate) use ts_db::*;
+pub(crate) use data_type::*;
 pub(crate) use utils::*;
 
 mod result;
 pub mod utils;
-mod ts_db;
+mod data_type;
 pub mod arg_parse;
 pub(crate) mod commands;
 pub mod types;

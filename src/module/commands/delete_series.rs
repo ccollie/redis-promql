@@ -5,7 +5,7 @@ use crate::storage::time_series::TimeSeries;
 use valkey_module::{Context, NextArg, ValkeyError, ValkeyResult, ValkeyString, ValkeyValue};
 
 ///
-/// VKM.DELETE-SERIES <series selector>,..
+/// VM.DELETE-SERIES selector..
 ///
 /// Deletes the valkey keys for the given series selectors.
 pub fn delete_series(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {

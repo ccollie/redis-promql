@@ -183,6 +183,13 @@ fn get_aggregation_output(metas: Vec<SeriesMeta>,
 
 
 fn parse_collate_options(args: &mut CommandArgIterator) -> ValkeyResult<CollateOptions> {
+    const COMMAND_TOKENS: &[&str] = &[
+        CMD_ARG_COUNT,
+        CMD_ARG_AGGREGATION,
+        CMD_ARG_FILTER,
+        CMD_ARG_WITH_LABELS,
+        CMD_ARG_SELECTED_LABELS
+    ];
 
     let date_range = parse_timestamp_range(args)?;
 
@@ -196,14 +203,7 @@ fn parse_collate_options(args: &mut CommandArgIterator) -> ValkeyResult<CollateO
     };
 
     fn is_command_keyword(arg: &str) -> bool {
-        match arg {
-            arg if arg.eq_ignore_ascii_case(CMD_ARG_COUNT) => true,
-            arg if arg.eq_ignore_ascii_case(CMD_ARG_AGGREGATION) => true,
-            arg if arg.eq_ignore_ascii_case(CMD_ARG_FILTER) => true,
-            arg if arg.eq_ignore_ascii_case(CMD_ARG_WITH_LABELS) => true,
-            arg if arg.eq_ignore_ascii_case(CMD_ARG_SELECTED_LABELS) => true,
-            _ => false,
-        }
+        COMMAND_TOKENS.contains(&arg)
     }
 
     while let Ok(arg) = args.next_str() {

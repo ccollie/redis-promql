@@ -2,9 +2,19 @@ use crate::module::arg_parse::*;
 use crate::module::types::RangeOptions;
 use valkey_module::{NextArg, ValkeyError, ValkeyResult};
 
-const CMD_ARG_GROUP_BY: &str = "GROUPBY";
-
 pub fn parse_range_options(args: &mut CommandArgIterator) -> ValkeyResult<RangeOptions> {
+    const RANGE_OPTION_TOKENS: [&str; 10] = [
+        CMD_ARG_COUNT,
+        CMD_ARG_AGGREGATION,
+        CMD_ARG_BUCKET_TIMESTAMP,
+        CMD_ARG_FILTER,
+        CMD_ARG_FILTER_BY_TS,
+        CMD_ARG_FILTER_BY_VALUE,
+        CMD_ARG_GROUP_BY,
+        CMD_ARG_WITH_LABELS,
+        CMD_ARG_SELECTED_LABELS,
+        CMD_PARAM_REDUCER
+    ];
 
     let date_range = parse_timestamp_range(args)?;
 
@@ -19,6 +29,10 @@ pub fn parse_range_options(args: &mut CommandArgIterator) -> ValkeyResult<RangeO
         selected_labels: Default::default(),
         grouping: None,
     };
+
+    fn is_range_command_keyword(arg: &str) -> bool {
+        RANGE_OPTION_TOKENS.iter().any(|x| x.eq_ignore_ascii_case(arg))
+    }
 
     while let Ok(arg) = args.next_str() {
         let token = arg.to_ascii_uppercase();
@@ -57,20 +71,4 @@ pub fn parse_range_options(args: &mut CommandArgIterator) -> ValkeyResult<RangeO
     }
 
     Ok(options)
-}
-
-fn is_range_command_keyword(arg: &str) -> bool {
-    match arg {
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_COUNT) => true,
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_AGGREGATION) => true,
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_BUCKET_TIMESTAMP) => true,
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_FILTER_BY_TS) => true,
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_FILTER) => true,
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_FILTER_BY_VALUE) => true,
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_GROUP_BY) => true,
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_WITH_LABELS) => true,
-        arg if arg.eq_ignore_ascii_case(CMD_ARG_SELECTED_LABELS) => true,
-        arg if arg.eq_ignore_ascii_case(CMD_PARAM_REDUCER) => true,
-        _ => false,
-    }
 }

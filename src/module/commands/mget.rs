@@ -62,13 +62,14 @@ pub fn mget(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
 
 fn parse_mget_options(args: &mut CommandArgIterator) -> ValkeyResult<MGetOptions> {
 
+    const CMD_TOKENS: &[&str] = &[
+        CMD_ARG_FILTER,
+        CMD_ARG_WITH_LABELS,
+        CMD_ARG_SELECTED_LABELS
+    ];
+
     fn is_mget_command_keyword(arg: &str) -> bool {
-        match arg {
-            arg if arg.eq_ignore_ascii_case(CMD_ARG_FILTER) => true,
-            arg if arg.eq_ignore_ascii_case(CMD_ARG_WITH_LABELS) => true,
-            arg if arg.eq_ignore_ascii_case(CMD_ARG_SELECTED_LABELS) => true,
-            _ => false,
-        }
+        CMD_TOKENS.contains(&arg)
     }
 
     let mut options = MGetOptions {

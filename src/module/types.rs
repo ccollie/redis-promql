@@ -186,7 +186,7 @@ pub struct TimestampRange {
 impl TimestampRange {
     pub fn new(start: TimestampRangeValue, end: TimestampRangeValue) -> ValkeyResult<Self> {
         if start > end {
-            return Err(ValkeyError::Str("invalid timestamp range: start > end"));
+            return Err(ValkeyError::Str("ERR invalid timestamp range: start > end"));
         }
         Ok(TimestampRange { start, end })
     }
@@ -208,6 +208,7 @@ impl TimestampRange {
             let earliest = series.last_timestamp - retention_ms;
             start_timestamp = start_timestamp.max(earliest);
         }
+
         (start_timestamp, end_timestamp)
     }
 }
