@@ -239,6 +239,7 @@ impl IndexInner {
                 }
                 let ex: u64 = rng.gen_range(1..64);
                 counter += ex;
+                continue;
             }
             return Ok(id)
         }

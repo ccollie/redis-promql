@@ -171,24 +171,11 @@ impl TryFrom<&str> for TransformOperator {
     }
 }
 
-
-
 impl fmt::Display for TransformOperator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.as_str())?;
         Ok(())
     }
-}
-
-pub fn is_binary_op(op: &str) -> bool {
-    if let Some(ch) = op.chars().next() {
-        return if !ch.is_alphabetic() {
-            BINARY_OPS_MAP.contains_key(op)
-        } else {
-            BINARY_OPS_MAP.contains_key(op.to_lowercase().as_str())
-        };
-    }
-    false
 }
 
 fn min(x: f64, y: f64) -> f64 {
@@ -209,44 +196,4 @@ fn abs_diff(x: f64, y: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use crate::module::transform_op::is_binary_op;
-
-    #[test]
-    fn test_is_binary_op_success() {
-        let f = |s: &str| assert!(is_binary_op(s), "expecting valid binaryOp: {}", s);
-
-        f("and");
-        f("AND");
-        f("unless");
-        f("unleSS");
-        f("==");
-        f("!=");
-        f(">=");
-        f("<=");
-        f("or");
-        f("Or");
-        f("+");
-        f("-");
-        f("*");
-        f("/");
-        f("%");
-        f("atan2");
-        f("^");
-        f(">");
-        f("<");
-    }
-
-    #[test]
-    fn test_is_binary_op_error() {
-        let f = |s: &str| {
-            assert!(!is_binary_op(s), "unexpected valid binaryOp: {}", s);
-        };
-
-        f("foobar");
-        f("=~");
-        f("!~");
-        f("=");
-        f("<==");
-        f("234");
-    }
 }

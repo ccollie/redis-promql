@@ -216,7 +216,7 @@ impl GorillaChunk {
         ChunkIter::new(self)
     }
 
-    pub fn range_iter(&self, start_ts: Timestamp, end_ts: Timestamp) -> impl Iterator<Item = Sample> + '_ {
+    pub fn range_iter(&self, start_ts: Timestamp, end_ts: Timestamp) -> RangeChunkIter {
         RangeChunkIter::new(self, start_ts, end_ts)
     }
 

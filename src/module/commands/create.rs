@@ -1,6 +1,5 @@
 use crate::error::{TsdbError, TsdbResult};
 use crate::globals::with_timeseries_index;
-use crate::index::TimeSeriesIndex;
 use crate::module::arg_parse::*;
 use crate::module::VKM_SERIES_TYPE;
 use crate::storage::time_series::TimeSeries;
@@ -13,7 +12,7 @@ const MAX_SIGNIFICANT_DIGITS: u8 = 16;
 
 /// Create a new time series
 ///
-/// VM.CREATE key metric
+/// VM.CREATE-SERIES key metric
 ///   [RETENTION retentionPeriod]
 ///   [ENCODING <COMPRESSED|UNCOMPRESSED>]
 ///   [CHUNK_SIZE size]

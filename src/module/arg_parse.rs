@@ -22,7 +22,6 @@ const CMD_PARAM_ALIGN: &str = "ALIGN";
 pub const CMD_ARG_FILTER_BY_VALUE: &str = "FILTER_BY_VALUE";
 pub const CMD_ARG_FILTER_BY_TS: &str = "FILTER_BY_TS";
 pub const CMD_ARG_AGGREGATION: &str = "AGGREGATION";
-pub const CMD_ARG_MATCH: &str = "MATCH";
 pub const CMD_ARG_FILTER: &str = "FILTER";
 pub const CMD_ARG_EMPTY: &str = "EMPTY";
 pub const CMD_ARG_GROUP_BY: &str = "GROUPBY";
@@ -58,15 +57,15 @@ pub fn parse_integer_arg(arg: &ValkeyString, name: &str, allow_negative: bool) -
     } else {
         let num = parse_number_arg(arg, name)?;
         if num != num.floor() {
-            return Err(ValkeyError::Str("TSDB: value must be an integer"));
+            return Err(ValkeyError::Str("ERR: value must be an integer"));
         }
         if num > i64::MAX as f64 {
-            return Err(ValkeyError::Str("TSDB: value is too large"));
+            return Err(ValkeyError::Str("ERR: value is too large"));
         }
         num as i64
     };
     if !allow_negative && value < 0 {
-        let msg = format!("TSDB: {} must be a non-negative integer", name);
+        let msg = format!("ERR: {} must be a non-negative integer", name);
         return Err(ValkeyError::String(msg));
     }
     Ok(value)
@@ -296,7 +295,7 @@ pub(crate) fn advance_if_next_token(args: &mut CommandArgIterator, token: &str) 
 
 pub(crate) fn expect_token(args: &mut CommandArgIterator, token: &str) -> ValkeyResult<()> {
     if !advance_if_next_token(args, token) {
-        return Err(ValkeyError::Str("TSDB: unexpected token"));
+        return Err(ValkeyError::Str("ERR: unexpected token"));
     }
     Ok(())
 }
@@ -379,7 +378,7 @@ pub fn parse_series_selector_list(args: &mut CommandArgIterator, is_cmd_token: f
 pub fn parse_aggregation_options(args: &mut CommandArgIterator) -> ValkeyResult<AggregationOptions> {
     // AGGREGATION token already seen
     let agg_str = args.next_str()
-        .map_err(|_e| ValkeyError::Str("TSDB: Error parsing AGGREGATION"))?;
+        .map_err(|_e| ValkeyError::Str("ERR: Error parsing AGGREGATION"))?;
     let aggregator = Aggregator::try_from(agg_str)?;
     let bucket_duration = parse_duration_arg(&args.next_arg()?)
         .map_err(|_e| ValkeyError::Str("Error parsing bucketDuration"))?;
@@ -397,28 +396,24 @@ pub fn parse_aggregation_options(args: &mut CommandArgIterator) -> ValkeyResult<
 
     let valid_tokens = [CMD_PARAM_ALIGN, CMD_ARG_EMPTY, CMD_ARG_BUCKET_TIMESTAMP];
 
-    loop {
-        if let Some(token) = advance_if_next_token_one_of(args, &valid_tokens) {
-            match token {
-                CMD_ARG_EMPTY => {
-                    aggr.empty = true;
-                    arg_count += 1;
-                }
-                CMD_ARG_BUCKET_TIMESTAMP => {
-                    let next = args.next_str()?;
-                    arg_count += 1;
-                    aggr.timestamp_output = BucketTimestamp::try_from(next)?;
-                }
-                CMD_PARAM_ALIGN => {
-                    let next = args.next_str()?;
-                    aggr.alignment = parse_alignment(next)?;
-                }
-                _ => break
+    while let Some(token) = advance_if_next_token_one_of(args, &valid_tokens) {
+        match token {
+            CMD_ARG_EMPTY => {
+                aggr.empty = true;
+                arg_count += 1;
             }
-            if arg_count == 3 {
-                break;
+            CMD_ARG_BUCKET_TIMESTAMP => {
+                let next = args.next_str()?;
+                arg_count += 1;
+                aggr.timestamp_output = BucketTimestamp::try_from(next)?;
             }
-        } else {
+            CMD_PARAM_ALIGN => {
+                let next = args.next_str()?;
+                aggr.alignment = parse_alignment(next)?;
+            }
+            _ => break
+        }
+        if arg_count == 3 {
             break;
         }
     }
@@ -451,17 +446,17 @@ pub fn parse_grouping_params(args: &mut CommandArgIterator) -> ValkeyResult<Rang
     // GROUPBY token already seen
     let label = args.next_str()?;
     let token = args.next_str()
-        .map_err(|_| ValkeyError::Str("TSDB: missing REDUCE"))?;
+        .map_err(|_| ValkeyError::Str("ERR: missing REDUCE"))?;
     if !token.eq_ignore_ascii_case(CMD_PARAM_REDUCER) {
-        let msg = format!("TSDB: expected \"{CMD_PARAM_REDUCER}\", found \"{token}\"");
+        let msg = format!("ERR: expected \"{CMD_PARAM_REDUCER}\", found \"{token}\"");
         return Err(ValkeyError::String(msg));
     }
     let agg_str = args.next_str()
-        .map_err(|_e| ValkeyError::Str("TSDB: Error parsing grouping reducer"))?;
+        .map_err(|_e| ValkeyError::Str("ERR: Error parsing grouping reducer"))?;
 
     let aggregator = Aggregator::try_from(agg_str)
         .map_err(|_| {
-            let msg = format!("TSDB: invalid grouping aggregator \"{}\"", agg_str);
+            let msg = format!("ERR: invalid grouping aggregator \"{}\"", agg_str);
             ValkeyError::String(msg)
         })?;
 

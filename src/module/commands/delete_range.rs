@@ -2,7 +2,7 @@ use crate::globals::with_timeseries_index;
 use crate::module::arg_parse::{parse_series_selector, parse_timestamp_range};
 use crate::module::VKM_SERIES_TYPE;
 use crate::storage::time_series::TimeSeries;
-use valkey_module::{Context, NextArg, ValkeyError, ValkeyResult, ValkeyString, ValkeyValue};
+use valkey_module::{Context, ValkeyError, ValkeyResult, ValkeyString, ValkeyValue};
 
 // todo: change cmd name to delete_series_mrange. we want another function to delete the series
 // keys completely, not just the data points.
@@ -17,8 +17,9 @@ pub fn delete_range(ctx: &Context, args: Vec<ValkeyString>) -> ValkeyResult {
     let date_range = parse_timestamp_range(&mut args)?;
 
     let mut matchers = vec![];
-    while let arg = args.next_str()? {
-        let parsed_matcher = parse_series_selector(arg)?;
+    for arg in args.by_ref() {
+        let selector = arg.try_as_str()?;
+        let parsed_matcher = parse_series_selector(selector)?;
         matchers.push(parsed_matcher);
     }
 

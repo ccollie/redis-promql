@@ -30,15 +30,15 @@ Then you can query the data for a time range on some aggregation rule.
 ### With `redis-cli`
 ```sh
 $ redis-cli
-127.0.0.1:6379> VKM.CREATE temperature:3:east temperature{area_id="32",sensor_id="1",region="east"} RETENTION 2h
+127.0.0.1:6379> VM.CREATE temperature:3:east temperature{area_id="32",sensor_id="1",region="east"} RETENTION 2h
 OK
-127.0.0.1:6379> VKM.CREATE temperature:3:west temperature{area_id="32",sensor_id="1",region="west"} RETENTION 2h
+127.0.0.1:6379> VM.CREATE temperature:3:west temperature{area_id="32",sensor_id="1",region="west"} RETENTION 2h
 OK
-127.0.0.1:6379> VKM.ADD temperature:3:east 1548149181 30
+127.0.0.1:6379> VM.ADD temperature:3:east 1548149181 30
 OK
-127.0.0.1:6379> VKM.ADD temperature:3:west 1548149191 42
+127.0.0.1:6379> VM.ADD temperature:3:west 1548149191 42
 OK 
-127.0.0.1:6379>  VKM.QUERY-RANGE "avg(temperature) by(area_id)" START 1548149180 END 1548149210   
+127.0.0.1:6379>  VM.QUERY-RANGE "avg(temperature) by(area_id)" START 1548149180 END 1548149210   
 ```
 
 ## Tests
@@ -238,10 +238,10 @@ VM.SERIES FILTER up process_start_time_seconds{job="prometheus"}
 #### Syntax
 
 ```
-VKM.CARDINALITY FILTER selector... [START timestamp|rfc3339|+|*] [END timestamp|rfc3339|+|*]
+VM.CARDINALITY FILTER selector... [START timestamp|rfc3339|+|*] [END timestamp|rfc3339|+|*]
 ```
 
-**VKM.SERIES** returns the number of unique time series that match a certain label set.
+**VM.SERIES** returns the number of unique time series that match a certain label set.
 
 #### Options
 
@@ -274,7 +274,7 @@ TODO
 VM.LABELS FILTER selector... [START timestamp|rfc3339|+|*] [END timestamp|rfc3339|+|*]
 ```
 
-**VKM.LABELS** returns a list of label names.
+**VM.LABELS** returns a list of label names.
 
 #### Options
 
@@ -296,7 +296,7 @@ Return an error reply in the following cases:
 #### Examples
 
 ```
-VKM.LABELS MATCH up process_start_time_seconds{job="prometheus"}
+VM.LABELS MATCH up process_start_time_seconds{job="prometheus"}
 ```
 ```json
 {
@@ -309,7 +309,7 @@ VKM.LABELS MATCH up process_start_time_seconds{job="prometheus"}
 }
 ```
 
-### VKM.TOP-QUERIES
+### VM.TOP-QUERIES
 
 #### Syntax
 
@@ -328,7 +328,7 @@ For example,
 
 ```sh
 $ redis-cli
-127.0.0.1:6379> VKM.TOP-QUERIES TOP_K 5 MAX_LIFETIME 30s
+127.0.0.1:6379> VM.TOP-QUERIES TOP_K 5 MAX_LIFETIME 30s
 ```
 
 would return up to 5 queries per list, which were executed during the last 30 seconds.
@@ -356,7 +356,7 @@ Return an error reply in the following cases:
 
 This example queries for all label values for the job label:
 ```
-127.0.0.1:6379> VKM.TOP-QUERIES TOP_K 5 MAX_LIFETIME 30s
+127.0.0.1:6379> VM.TOP-QUERIES TOP_K 5 MAX_LIFETIME 30s
 ```
 ```json
 {
@@ -466,14 +466,14 @@ This example queries for all label values for the job label:
 VM.ACTIVE-QUERIES
 ```
 
-**VKM.ACTIVE-QUERIES** provides information on currently executing queries. It provides the following information per each query:
+**VM.ACTIVE-QUERIES** provides information on currently executing queries. It provides the following information per each query:
 
 * The query itself, together with the time range and step args passed to /api/v1/query_range.
 * The duration of the query execution.
 
 ```sh
 $ redis-cli
-127.0.0.1:6379> VKM.ACTIVE-QUERIES
+127.0.0.1:6379> VM.ACTIVE-QUERIES
 ```
 
 #### Return
@@ -491,7 +491,7 @@ Return an error reply in the following cases:
 
 This example queries for all label values for the job label:
 ```
-127.0.0.1:6379> VKM.ACTIVE-QUERIES
+127.0.0.1:6379> VM.ACTIVE-QUERIES
 ```
 ```json
 {
@@ -521,4 +521,4 @@ This example queries for all label values for the job label:
 This underlying library this project uses originated as a heavily modded `rust` port of [VictoriaMetrics](https://victoriametrics.com).
 
 ## License
-VKMetrics is licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+ValkeyMetrics is licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).

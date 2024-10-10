@@ -3,7 +3,6 @@ use valkey_module::REDISMODULE_AUX_BEFORE_RDB;
 use valkey_module::{native_types::ValkeyType, RedisModuleDefragCtx, RedisModuleString, ValkeyString};
 
 use crate::globals::with_timeseries_index;
-use crate::index::TimeSeriesIndex;
 use crate::storage::defrag_series;
 use crate::storage::time_series::TimeSeries;
 use std::os::raw::{c_int, c_void};
