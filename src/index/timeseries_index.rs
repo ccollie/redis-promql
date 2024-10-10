@@ -275,8 +275,10 @@ impl TimeSeriesIndex {
     pub(crate) fn index_time_series(&self, ts: &mut TimeSeries, key: &[u8]) -> TsdbResult<()> {
         let mut inner = self.inner.write().unwrap();
 
-        ts.id = inner.generate_unique_id(ts)
-            .map_err(|e| TsdbError::General(e.to_string()))?;
+        if ts.id == 0 {
+            ts.id = inner.generate_unique_id(ts)
+                .map_err(|e| TsdbError::General(e.to_string()))?;
+        }
 
         inner.index_time_series(ts, key);
         Ok(())
