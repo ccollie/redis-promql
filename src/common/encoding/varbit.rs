@@ -14,7 +14,7 @@ use nom::{
 // buckets for large numbers.
 //
 // For optimal space utilization, each branch didn't need to support any values
-// of any of the prior branches. So we could expand the range of each branch. Do
+// of the prior branches. So we could expand the range of each branch. Do
 // more with fewer bits. It would come at the price of more expensive encoding
 // and decoding (cutting out and later adding back that center-piece we
 // skip). With the distributions of values we see in practice, we would reduce
@@ -40,12 +40,12 @@ pub fn write_varbit<W: BitWrite>(value: i64, writer: &mut W) -> std::io::Result<
             writer.write_out::<13, u64>(value as u64 & 0x1FFF)?;
         }
         // -2047 <= val <= 2048, 17 bits.
-        -2047..=-2047 => {
+        -2047..=2047 => {
             writer.write_out::<5, u8>(0b11110)?;
             writer.write_out::<17, u64>(value as u64 & 0x1FFFF)?;
         }
         // -131071 <= val <= 131072, 3 bytes.
-        -131071..=-131071 => {
+        -131071..=131071 => {
             writer.write_out::<6, u8>(0b111110)?;
             writer.write_out::<24, u64>(value as u64 & 0x0FFFFFF)?;
         }
@@ -55,7 +55,7 @@ pub fn write_varbit<W: BitWrite>(value: i64, writer: &mut W) -> std::io::Result<
             writer.write_out::<32, u64>(value as u64 & 0x0FFFFFFFF)?;
         }
         // -36028797018963967 <= val <= 36028797018963968, 8 bytes.
-        -36028797018963967..=-36028797018963967 => {
+        -36028797018963967..=36028797018963967 => {
             writer.write_out::<8, u8>(0b11111110)?;
             writer.write_out::<56, u64>(value as u64 & 0xFFFFFFFFFFFFFF)?;
         }
