@@ -114,17 +114,17 @@ const CMD_ARG_END: &str = "END";
 const CMD_ARG_MATCH: &str = "MATCH";
 const CMD_ARG_LIMIT: &str = "LIMIT";
 
-const ARG_TOKENS: [&str; 3] = [
-    CMD_ARG_END,
-    CMD_ARG_START,
-    CMD_ARG_LIMIT
-];
-
 fn parse_metadata_command_args(
     _ctx: &RedisContext,
     args: Vec<ValkeyString>,
     require_matchers: bool,
 ) -> ValkeyResult<MetadataFunctionArgs> {
+    const ARG_TOKENS: [&str; 3] = [
+        CMD_ARG_END,
+        CMD_ARG_START,
+        CMD_ARG_LIMIT
+    ];
+
     let mut args = args.into_iter().skip(1).peekable();
     let label_name = None;
     let mut matchers = Vec::with_capacity(4);

@@ -95,8 +95,7 @@ pub(crate) fn create_series(
             return Err(TsdbError::DuplicateMetric(ts.prometheus_metric_name()));
         }
 
-        ts.id = TimeSeriesIndex::next_id();
-        index.index_time_series(&ts, key.iter().as_slice());
+        index.index_time_series(&mut ts, key.iter().as_slice())?;
         Ok(ts)
     })
 }

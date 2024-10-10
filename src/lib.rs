@@ -1,14 +1,14 @@
 #![feature(lazy_cell)]
-extern crate get_size;
-extern crate valkey_module_macros;
-extern crate smallvec;
 extern crate async_trait;
 extern crate croaring;
+extern crate get_size;
 extern crate joinkit;
 extern crate phf;
+extern crate smallvec;
+extern crate valkey_module_macros;
 
-use valkey_module::{valkey_module, Context as ValkeyContext, NotifyEvent, ValkeyString};
 use valkey_module::server_events::{FlushSubevent, LoadingSubevent};
+use valkey_module::{valkey_module, Context as ValkeyContext, NotifyEvent, ValkeyString};
 use valkey_module_macros::{config_changed_event_handler, flush_event_handler, loading_event_handler};
 
 mod aggregators;
@@ -27,9 +27,8 @@ mod gorilla;
 mod iter;
 
 use crate::globals::{clear_timeseries_index, with_timeseries_index};
-use module::*;
-use crate::index::reset_timeseries_id_after_load;
 use crate::storage::time_series::TimeSeries;
+use module::*;
 
 pub const VKMETRICS_VERSION: i32 = 1;
 pub const MODULE_NAME: &str = "VKMetrics";
@@ -56,7 +55,7 @@ fn loading_event_handler(_ctx: &ValkeyContext, values: LoadingSubevent) {
             clear_timeseries_index();
         }
         LoadingSubevent::Ended => {
-            reset_timeseries_id_after_load();
+            // reset_timeseries_id_after_load();
         }
         _ => {}
     }
@@ -80,7 +79,9 @@ fn index_timeseries_by_key(ctx: &ValkeyContext, key: &[u8]) {
                 ts_index.remove_series_by_key(ctx, &_key);
                 return;
             }
-            ts_index.index_time_series(series, key);
+            if let Err(e) = ts_index.index_time_series(series, key) {
+                ctx.log_debug(e.to_string().as_str());
+            }
         }
     });
 }
